@@ -92,6 +92,9 @@ export function setVisualCardImageOverride<T extends FilmBibleDocument>(
   const card = visual.cards[cardId];
   if (!card) throw new Error("视觉卡不存在");
   if (card.status === "deprecated") throw new Error("已弃用视觉卡不能修改生成策略");
+  const currentVersion = visual.versions[card.currentVersionId];
+  if (currentVersion && !['draft', 'pending_reference'].includes(currentVersion.status))
+    throw new Error("已锁定或已弃用视觉版本的生成策略不可修改");
   if (override.mode === "override" && !override.providerId)
     throw new Error("请选择图片模型服务");
   const generation = {
@@ -219,39 +222,11 @@ export function attachUploadedPrimaryReference<T extends FilmBibleDocument>(
   });
 }
 
-export function startVisualReferenceGeneration<T extends FilmBibleDocument>(
-  document: T,
-  plan: VisualReferencePlan,
-  jobId: string,
-  createdAt = Date.now(),
-): T {
-  const visual = visualBibleOf(document);
-  const { version } = requireVisual(visual, plan.versionId);
-  if (!['draft', 'pending_reference'].includes(version.status))
-    throw new Error("已锁定或已弃用的视觉版本不能生成参考图");
-  return replaceVersion(document, {
-    ...version,
-    status: "pending_reference",
-    provenance: {
-      ...(version.provenance || {}),
-      referenceGeneration: {
-        jobId,
-        createdAt,
-        providerId: plan.providerId,
-        modelId: plan.modelId,
-        targetSource: plan.targetSource,
-        prompt: plan.prompt,
-        parentVersionId: plan.parentVersionId,
-        parentReferenceAssetId: plan.parentReferenceAssetId,
-      },
-    },
-  });
-}
-
 export function acceptVisualReferenceResult<T extends FilmBibleDocument>(
   document: T,
   job: {
     id: string;
+    submission_id?: string;
     node_id: string;
     input?: Record<string, any>;
     result?: Record<string, any>;
@@ -265,8 +240,15 @@ export function acceptVisualReferenceResult<T extends FilmBibleDocument>(
   const generation = version.provenance?.referenceGeneration as
     | Record<string, any>
     | undefined;
-  if (generation?.jobId !== job.id) return document;
+  if (
+    !generation ||
+    (generation.jobId
+      ? generation.jobId !== job.id
+      : generation.submissionId !== job.submission_id)
+  )
+    return document;
   if (!['draft', 'pending_reference'].includes(version.status)) return document;
+  if (primaryReference(version)?.provenance.jobId === job.id) return document;
   const asset = job.result?.assets?.[0];
   if (!asset?.id) throw new Error("参考图任务完成但没有返回图片素材");
   const reference: VisualReference = {
@@ -276,6 +258,7 @@ export function acceptVisualReferenceResult<T extends FilmBibleDocument>(
     createdAt,
     provenance: {
       jobId: job.id,
+      submissionId: job.submission_id || generation.submissionId,
       providerId: generation.providerId,
       modelId: generation.modelId,
       targetSource: generation.targetSource,

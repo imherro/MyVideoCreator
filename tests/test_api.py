@@ -86,6 +86,80 @@ def test_film_bible_and_shot_bindings_round_trip_through_project_document(authen
     assert restored['shots']==doc['shots']
     assert all(card['source']=={'type':'script_extraction'} for card in restored['filmBible']['visual']['cards'].values())
 
+def test_visual_reference_queue_validates_server_capability_and_persists_ownership(authenticated,monkeypatch):
+    import io
+    from PIL import Image
+    import backend.visual_references as visual_references
+    from backend.film_bible import normalize_visual_bible
+
+    c=authenticated
+    old_providers=s.get_setting('providers',[])
+    provider={
+        'id':'phase3-image','name':'Phase 3 Image','type':'openai','kind':'image',
+        'url':'http://127.0.0.1:1/v1','local':True,'model':'image-model',
+    }
+    s.set_setting('providers',[*old_providers,provider])
+    try:
+        p=project(c);doc=p['document']
+        visual,keys=normalize_visual_bible({'cards':[
+            {'key':'hero','kind':'character','name':'林岚','parent_key':'','description':'灰色风衣','attributes':[],'invariants':['脸型不变']},
+            {'key':'wet','kind':'character_state','name':'雨中的林岚','parent_key':'hero','description':'衣服淋湿','attributes':[],'invariants':['仍是同一人']},
+        ]})
+        hero_version=keys['hero'][1];state_version=keys['wet'][1]
+        stream=io.BytesIO();Image.new('RGB',(24,24),'#334455').save(stream,format='PNG')
+        parent=c.post(
+            f'/api/projects/{p["id"]}/assets?category=character',
+            files={'file':('parent.png',stream.getvalue(),'image/png')},
+        ).json()
+        visual['versions'][hero_version]['status']='locked'
+        visual['versions'][hero_version]['references']=[{'role':'primary','assetId':parent['id']}]
+        doc['filmBible']['visual']=visual
+        doc['generationPolicy']['image']={'providerId':'phase3-image','modelId':'image-model'}
+        saved=c.put(f'/api/projects/{p["id"]}',json={'name':p['name'],'revision':p['revision'],'document':doc})
+        assert saved.status_code==200,saved.text
+        payload={
+            'node_id':f'visual-version:{state_version}','kind':'image','submission_id':'phase3-state-reference',
+            'input':{
+                'provider':'phase3-image','model':'image-model','prompt':'雨中状态','allow_cloud':False,
+                'model_capabilities':{'image_reference':True},
+                'asset_ids':[parent['id']],'asset_category':'character',
+                'visual_reference':{
+                    'versionId':state_version,'targetSource':'project',
+                    'parentVersionId':hero_version,'parentReferenceAssetId':parent['id'],
+                },
+            },
+        }
+        before=len(c.get(f'/api/projects/{p["id"]}/jobs').json())
+        rejected_capabilities=[
+            lambda provider,model_id:None,
+            lambda provider,model_id:{'image_reference':False},
+            lambda provider,model_id:(_ for _ in ()).throw(ValueError('图片模型目录中找不到所选模型')),
+        ]
+        for resolver in rejected_capabilities:
+            monkeypatch.setattr(visual_references,'resolve_image_model_capabilities',resolver)
+            rejected=c.post(f'/api/projects/{p["id"]}/jobs',json=payload)
+            assert rejected.status_code==400,rejected.text
+            assert len(c.get(f'/api/projects/{p["id"]}/jobs').json())==before
+
+        monkeypatch.setattr(visual_references,'resolve_image_model_capabilities',lambda provider,model_id:{'image_reference':True})
+        accepted=c.post(f'/api/projects/{p["id"]}/jobs',json=payload)
+        assert accepted.status_code==200,accepted.text
+        job=accepted.json();generation=(
+            job['project_document']['filmBible']['visual']['versions'][state_version]
+            ['provenance']['referenceGeneration']
+        )
+        assert job['project_revision']==saved.json()['revision']+1
+        assert generation['submissionId']==payload['submission_id']
+        assert generation['jobId']==job['id']
+        assert job['project_document']['filmBible']['visual']['versions'][state_version]['status']=='pending_reference'
+        restored=c.get(f'/api/projects/{p["id"]}').json()
+        assert restored['revision']==job['project_revision']
+        assert restored['document']['filmBible']['visual']['versions'][state_version]['provenance']['referenceGeneration']==generation
+        assert c.get('/api/jobs/'+job['id']).json()['input']['asset_ids']==[parent['id']]
+        c.post('/api/jobs/'+job['id']+'/cancel')
+    finally:
+        s.set_setting('providers',old_providers)
+
 def test_asset_library_semantic_categories(authenticated):
     import io
     from PIL import Image

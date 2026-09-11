@@ -1,6 +1,12 @@
 """Server-side contract for Visual Bible primary-reference jobs."""
 from __future__ import annotations
 
+import json
+import time
+
+import httpx
+
+from . import store as s
 from .generation_policy import resolve_generation_target
 
 STATE_KINDS = {'character_state', 'scene_state'}
@@ -11,7 +17,33 @@ def _primary_reference(version):
     return next((item for item in references if isinstance(item, dict) and item.get('role') == 'primary'), None)
 
 
-def validate_visual_reference_job(document, node_id, kind, input_value, providers):
+def resolve_image_model_capabilities(provider, model_id):
+    """Read server-owned capabilities for one concrete image model."""
+    provider_type = provider.get('type')
+    if provider_type == 'volcengine_ark':
+        from .providers.volcengine_ark import list_models
+        models = list_models(provider)
+    elif provider_type == 'maestro':
+        from .capabilities import maestro_model
+        headers = {'Authorization': 'Bearer ' + provider['api_key']} if provider.get('api_key') else {}
+        try:
+            with httpx.Client(timeout=20, trust_env=not provider.get('local'), headers=headers) as client:
+                response = client.get(provider['url'].rstrip('/') + '/api/v1/models')
+                response.raise_for_status()
+                models = [maestro_model(item) for item in response.json().get('models', [])]
+        except (httpx.HTTPError, ValueError, TypeError) as exc:
+            raise ValueError('无法在入队前核对所选图片模型的参考图能力') from exc
+    else:
+        models = []
+    model = next((item for item in models if item.get('id') == model_id), None)
+    if not model:
+        raise ValueError('图片模型目录中找不到所选模型，无法确认参考图能力')
+    return model.get('capabilities')
+
+
+def validate_visual_reference_job(
+    document, node_id, kind, input_value, providers, capability_resolver=None,
+):
     """Validate policy and identity constraints before a reference job queues."""
     marker = input_value.get('visual_reference')
     if marker is None:
@@ -64,3 +96,48 @@ def validate_visual_reference_job(document, node_id, kind, input_value, provider
         raise ValueError('状态资产的父参考图记录不一致')
     if references != [asset_id]:
         raise ValueError('状态资产必须且只能发送创建时冻结的父版本主参考图')
+    provider = next((item for item in providers if item.get('id') == target['providerId']), None)
+    if not provider:
+        raise ValueError('视觉参考任务所用模型服务已不存在')
+    capabilities = (capability_resolver or resolve_image_model_capabilities)(provider, target['modelId'])
+    if not isinstance(capabilities, dict) or capabilities.get('image_reference') is not True:
+        raise ValueError('所选图片模型未明确支持参考图，状态资产不能入队')
+
+
+def record_visual_reference_submission(c, pid, body, job):
+    """Persist pending ownership in the same transaction as the durable job."""
+    row = c.execute('SELECT * FROM projects WHERE id=?', (pid,)).fetchone()
+    if not row:
+        raise ValueError('项目不存在')
+    document = json.loads(row['document'])
+    marker = body.input['visual_reference']
+    version_id = marker['versionId']
+    version = document['filmBible']['visual']['versions'][version_id]
+    previous = (version.get('provenance') or {}).get('referenceGeneration') or {}
+    if previous.get('submissionId') == body.submission_id and previous.get('jobId') == job['id']:
+        return {'revision': row['revision'], 'document': document}
+    generation = {
+        'submissionId': body.submission_id,
+        'jobId': job['id'],
+        'createdAt': int(time.time() * 1000),
+        'providerId': body.input.get('provider'),
+        'modelId': body.input.get('model'),
+        'targetSource': marker.get('targetSource'),
+        'prompt': body.input.get('prompt'),
+    }
+    for key in ('parentVersionId', 'parentReferenceAssetId'):
+        if marker.get(key):
+            generation[key] = marker[key]
+    version['status'] = 'pending_reference'
+    version['provenance'] = {**(version.get('provenance') or {}), 'referenceGeneration': generation}
+    now = time.time()
+    revision = row['revision'] + 1
+    c.execute(
+        'INSERT INTO revisions VALUES(?,?,?,?,?)',
+        (s.uid(), pid, row['revision'], row['document'], now),
+    )
+    c.execute(
+        'UPDATE projects SET revision=?,document=?,updated=? WHERE id=?',
+        (revision, s.dumps(document), now, pid),
+    )
+    return {'revision': revision, 'document': document}

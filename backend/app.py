@@ -491,9 +491,20 @@ def create_job_record(c,pid,body):
 @app.post('/api/projects/{pid}/jobs')
 def submit(pid:str,body:JobCreate):
     project(pid)
+    tracking = None
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
         result=create_job_record(c,pid,body)
+        if body.input.get('visual_reference') is not None:
+            from .visual_references import record_visual_reference_submission
+            tracking=record_visual_reference_submission(c,pid,body,result)
+    if tracking:
+        result={
+            **result,
+            'project_revision':tracking['revision'],
+            'project_document':tracking['document'],
+        }
+        s.event(pid,{'type':'project','revision':tracking['revision']})
     s.event(pid,{'type':'job','id':result['id']})
     return result
 

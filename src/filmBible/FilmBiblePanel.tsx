@@ -347,7 +347,7 @@ export function FilmBiblePanel({
               <option value="override">此资产自定义</option>
             </select>
           </label>
-          {override?.mode === "override" && (
+          {override?.mode === "override" && editable && (
             <ModelSelector
               data={{
                 kind: "image",
@@ -365,6 +365,11 @@ export function FilmBiblePanel({
                 })
               }
             />
+          )}
+          {override?.mode === "override" && !editable && (
+            <p className="muted">
+              已锁定自定义：{targetProvider?.name || override.providerId} · {override.modelId || "服务默认模型"}
+            </p>
           )}
           {override?.mode !== "override" && resolvedTarget && (
             <p className="muted">

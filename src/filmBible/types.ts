@@ -24,6 +24,7 @@ export type VisualReference = {
   createdAt: number;
   provenance: {
     jobId?: string;
+    submissionId?: string;
     providerId?: string;
     modelId?: string;
     targetSource?: "override" | "project" | "system";

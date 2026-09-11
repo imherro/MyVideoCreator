@@ -99,7 +99,6 @@ import {
   planVisualReferenceGeneration,
   resolveVisualGenerationTarget,
   setVisualCardImageOverride,
-  startVisualReferenceGeneration,
   visualAssetCategory,
 } from "./filmBible/references";
 import {
@@ -143,6 +142,7 @@ type Asset = {
 };
 type Job = {
   id: string;
+  submission_id?: string;
   kind: string;
   node_id: string;
   status: string;
@@ -1391,12 +1391,13 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     );
     await save();
     if (dirty.current) throw new Error("项目尚未保存，请先解决保存冲突");
+    const submissionId = id();
     const job = await api(
       `/projects/${snapshot.project.id}/jobs`,
       send("POST", {
         node_id: `visual-version:${versionId}`,
         kind: "image",
-        submission_id: id(),
+        submission_id: submissionId,
         input: {
           provider: plan.providerId,
           model: plan.modelId,
@@ -1415,9 +1416,18 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         },
       }),
     );
-    update((document) =>
-      startVisualReferenceGeneration(document, plan, job.id),
+    if (!job.project_document || typeof job.project_revision !== "number")
+      throw new Error("服务端未返回已持久化的参考图任务归属");
+    const projectedDocument = deriveManagedGraph(job.project_document);
+    revision.current = job.project_revision;
+    dirty.current = projectedDocument !== job.project_document;
+    setProject((currentProject) =>
+      currentProject && currentProject.id === snapshot.project!.id
+        ? { ...currentProject, revision: job.project_revision }
+        : currentProject,
     );
+    setDoc(projectedDocument);
+    setSaved(dirty.current ? "未保存" : "已保存");
     await refresh(snapshot.project.id);
     setNotice("主参考图任务已进入队列；完成后请人工确认并锁定");
   }
