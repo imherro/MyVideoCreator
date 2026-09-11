@@ -25,10 +25,7 @@ def new_document(generation_policy=None):
         'brief': '', 'style': '电影写实', 'ratio': '16:9', 'duration': 15,
     }
 
-def migrate_document(document):
-    """Return a migrated copy. Calling twice produces the same value."""
-    value = copy.deepcopy(document if isinstance(document, dict) else {})
-    value['schemaVersion'] = CURRENT_SCHEMA_VERSION
+def _migrate_v0_to_v1(value):
     film = value.setdefault('filmBible', {})
     visual = film.setdefault('visual', {})
     visual.setdefault('cards', {})
@@ -42,5 +39,22 @@ def migrate_document(document):
     # Phase 0 only adds schema foundations; all legacy product fields survive.
     for key, default in (('nodes', []), ('edges', []), ('shots', []), ('timeline', []), ('characters', [])):
         value.setdefault(key, copy.deepcopy(default))
+    value['schemaVersion'] = 1
     return value
 
+def migrate_document(document):
+    """Return a migrated copy. Reject future schemas rather than downgrading."""
+    source = document if isinstance(document, dict) else {}
+    version = source.get('schemaVersion', 0)
+    if isinstance(version, bool) or not isinstance(version, int) or version < 0:
+        raise ValueError('项目 Schema 版本无效')
+    if version > CURRENT_SCHEMA_VERSION:
+        raise ValueError('此项目由更新版本的 MyVideoCreator 创建，请升级程序后再打开')
+    value = copy.deepcopy(source)
+    while version < CURRENT_SCHEMA_VERSION:
+        if version == 0:
+            value = _migrate_v0_to_v1(value)
+            version = 1
+        else:
+            raise ValueError(f'缺少项目 Schema v{version} 的迁移程序')
+    return value

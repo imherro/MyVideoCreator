@@ -18,6 +18,12 @@ def test_legacy_migration_is_lossless_and_idempotent():
     assert migrate_document(migrated)==migrated
     assert 'schemaVersion' not in old
 
+@pytest.mark.parametrize('version',[2,-1,1.5,True,'1'])
+def test_invalid_or_future_schema_is_rejected(version):
+    message='更新版本' if version==2 else '版本无效'
+    with pytest.raises(ValueError,match=message):
+        migrate_document({'schemaVersion':version,'nodes':[]})
+
 def test_generation_policy_precedence_fallback_and_deleted_provider():
     providers=[{'id':'ark','type':'volcengine_ark','models':{'text':'doubao','image':'seedream','video':'seedance'},'local':False},
                {'id':'local-image','kind':'image','model':'flux','local':True}]
