@@ -1,5 +1,5 @@
 import { planShotTimeline } from "./shotTimeline";
-import { ensureShotNodes } from "./shotNodes";
+import { ensureShotNodes, importStoryboardShots } from "./shotNodes";
 import { nodeDefaults } from "./nodeDefaults";
 import React, {
   lazy,
@@ -1179,17 +1179,18 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       const storyboardNode = d.nodes.find(
         (item) => item.id === job.node_id && item.data.kind === "storyboard",
       );
-      return {
-        ...d,
-        shots: job.result.shots.map((shot: Any) => ({
-          ...shot,
-          storyboardNode: storyboardNode?.id || shot.storyboardNode,
-        })),
-      };
+      return importStoryboardShots(
+        d,
+        job.result.shots,
+        config.providers,
+        system.models,
+        id,
+        storyboardNode?.id,
+      );
     });
     setView("shots");
     setPanel(null);
-    setNotice("分镜已导入，可逐镜修改并建立生成节点");
+    setNotice(`已导入 ${job.result.shots.length} 个分镜，画布节点和连线已同步建立；检查后可运行画布`);
   }
   function shotNodes(shot: Any, _index: number) {
     update((d) =>
@@ -1471,13 +1472,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               创作画布
             </button>
             <button
-              className={view === "editor" ? "active" : ""}
-              onClick={() => setView("editor")}
-            >
-              <Scissors size={15} />
-              剪辑
-            </button>
-            <button
               className={view === "shots" ? "active" : ""}
               onClick={() => setView("shots")}
             >
@@ -1506,7 +1500,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             {doc.duration} 秒
           </div>
           {view !== "editor" && (
-            <>
               <button
                 className="quiet"
                 disabled={busy || !doc.nodes.length}
@@ -1515,15 +1508,26 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 <Play size={15} />
                 运行画布
               </button>
-              <button
-                className="quiet"
-                onClick={() => setTimelineOpen(!timelineOpen)}
-              >
-                <Scissors size={15} />
-                {timelineOpen ? "收起时间线" : "时间线"}
-              </button>
-            </>
           )}
+          <button
+            className={view !== "editor" && timelineOpen ? "quiet active" : "quiet"}
+            onClick={() => {
+              if (view === "editor") {
+                setView("canvas");
+                setTimelineOpen(true);
+              } else setTimelineOpen(!timelineOpen);
+            }}
+          >
+            <Layers size={15} />
+            {view !== "editor" && timelineOpen ? "收起快速编排" : "快速编排"}
+          </button>
+          <button
+            className={view === "editor" ? "quiet active" : "quiet"}
+            onClick={() => setView("editor")}
+          >
+            <Scissors size={15} />
+            多轨剪辑
+          </button>
         </div>
         {view === "editor" ? (
           <Suspense fallback={<div className="loading">加载剪辑工作区…</div>}>

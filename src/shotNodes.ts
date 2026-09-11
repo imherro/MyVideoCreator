@@ -3,6 +3,36 @@ import { framesForDuration } from "./shotSync.ts";
 
 type Value = Record<string, any>;
 
+export function importStoryboardShots<
+  T extends { nodes: Value[]; edges: Value[]; shots: Value[] },
+>(
+  doc: T,
+  incomingShots: Value[],
+  providers: Value[],
+  models: Value[],
+  newId: () => string,
+  storyboardNodeId?: string,
+): T {
+  const existing = new Map(doc.shots.map((shot) => [shot.id, shot]));
+  const shots = incomingShots.map((shot) => {
+    const previous = existing.get(shot.id);
+    return {
+      ...shot,
+      storyboardNode: storyboardNodeId || previous?.storyboardNode || shot.storyboardNode,
+      imageNode: previous?.imageNode,
+      videoNode: previous?.videoNode,
+    };
+  });
+  return ensureShotNodes(
+    { ...doc, shots },
+    providers,
+    models,
+    newId,
+    undefined,
+    storyboardNodeId,
+  );
+}
+
 export function ensureShotNodes<
   T extends { nodes: Value[]; edges: Value[]; shots: Value[] },
 >(
