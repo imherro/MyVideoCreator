@@ -47,7 +47,7 @@ def add_image_asset(item, name, color, size=(32,24)):
     path=s.ASSETS/(aid+'.png')
     Image.new('RGB',size,color).save(path)
     with s.db() as db:
-        db.execute('INSERT INTO assets VALUES(?,?,?,?,?,?,?,?)',(
+        db.execute('INSERT INTO assets(id,project_id,name,kind,path,mime,metadata,created) VALUES(?,?,?,?,?,?,?,?)',(
             aid,item['project_id'],name,'image',path.name,'image/png',s.dumps({'width':size[0],'height':size[1]}),time.time()
         ))
     return aid,path.read_bytes()

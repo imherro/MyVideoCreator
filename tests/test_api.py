@@ -58,6 +58,25 @@ def test_project_schema_revision_migration_and_generation_policy_roundtrip(authe
     finally:
         s.set_setting('providers',old_providers)
 
+def test_asset_library_semantic_categories(authenticated):
+    import io
+    from PIL import Image
+    c=authenticated;p=project(c)
+    stream=io.BytesIO();Image.new('RGB',(24,24),'#334455').save(stream,format='PNG')
+    uploaded=c.post(f'/api/projects/{p["id"]}/assets?category=character',files={'file':('hero.png',stream.getvalue(),'image/png')})
+    assert uploaded.status_code==200,uploaded.text
+    asset=uploaded.json();assert asset['kind']=='image' and asset['category']=='character' and asset['source']=='uploaded'
+    assert [a['id'] for a in c.get(f'/api/projects/{p["id"]}/assets?category=character&kind=image').json()]==[asset['id']]
+    changed=c.patch(f'/api/projects/{p["id"]}/assets/{asset["id"]}',json={'category':'scene'})
+    assert changed.status_code==200 and changed.json()['category']=='scene'
+    assert c.get(f'/api/projects/{p["id"]}/assets?category=character').json()==[]
+    assert c.patch(f'/api/projects/{p["id"]}/assets/{asset["id"]}',json={'category':'bad'}).status_code==400
+    with s.db() as db:
+        columns={row['name'] for row in db.execute('PRAGMA table_info(assets)')}
+        indexes={row['name'] for row in db.execute('PRAGMA index_list(assets)')}
+    assert {'category','source'}<=columns
+    assert 'assets_project_category_created' in indexes
+
 def test_cross_origin_and_secret_masking(authenticated):
     c=authenticated
     assert c.post('/api/projects',json={'name':'bad'},headers={'Origin':'https://other.example'}).status_code==403

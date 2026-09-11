@@ -61,7 +61,7 @@ def test_export_original_audio_music_subtitle_and_mute():
     video=register(base,source);audio=register(base,music);source.unlink();music.unlink()
     sid=s.uid();subtitle=s.ASSETS/(sid+'.srt')
     subtitle.write_text('1\n00:00:00,000 --> 00:00:01,000\nTEST\n',encoding='utf-8')
-    with s.db() as c:c.execute('INSERT INTO assets VALUES(?,?,?,?,?,?,?,?)',(sid,pid,'test.srt','subtitle',subtitle.name,'application/x-subrip','{}',now))
+    with s.db() as c:c.execute('INSERT INTO assets(id,project_id,name,kind,path,mime,metadata,created) VALUES(?,?,?,?,?,?,?,?)',(sid,pid,'test.srt','subtitle',subtitle.name,'application/x-subrip','{}',now))
     amplitudes=[]
     for volume in (1,0):
         current=job();current['input']={'timeline':[{'asset_id':video['id'],'duration':1,'volume':volume}], 'resolution':'320x180','audio_id':audio['id'],'music_volume':.5,'subtitle_id':sid,'transition':'fade'}

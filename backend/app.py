@@ -219,15 +219,28 @@ def asset_row(aid):
 def asset_public(row):
     return {**{k:v for k,v in row.items() if k!='path'},'url':f'/api/assets/{row["id"]}/file'}
 
+ASSET_CATEGORIES={'character','scene','prop','shot','music','sfx','voice','reference','other'}
+ASSET_KINDS={'image','video','audio','subtitle'}
+
+def asset_category(value):
+    if value not in ASSET_CATEGORIES:raise ValueError('素材分类无效')
+    return value
+
 @app.get('/api/projects/{pid}/assets')
-def assets(pid:str):
+def assets(pid:str,category:str|None=None,kind:str|None=None):
     project(pid)
+    if category is not None:asset_category(category)
+    if kind is not None and kind not in ASSET_KINDS:raise ValueError('媒体类型无效')
+    clauses=['project_id=?'];params=[pid]
+    if category is not None:clauses.append('category=?');params.append(category)
+    if kind is not None:clauses.append('kind=?');params.append(kind)
     with s.db() as c:
-        return [asset_public(s.unpack(r)) for r in c.execute('SELECT * FROM assets WHERE project_id=? ORDER BY created DESC',(pid,))]
+        return [asset_public(s.unpack(r)) for r in c.execute('SELECT * FROM assets WHERE '+' AND '.join(clauses)+' ORDER BY created DESC',params)]
 
 @app.post('/api/projects/{pid}/assets')
-async def upload(pid:str,file:UploadFile=File(...)):
+async def upload(pid:str,file:UploadFile=File(...),category:str='other'):
     project(pid)
+    category=asset_category(category)
     name=Path(file.filename or 'asset').name
     ext=Path(name).suffix.lower()
     allowed={'.png':'image','.jpg':'image','.jpeg':'image','.webp':'image','.mp4':'video','.webm':'video','.mov':'video','.wav':'audio','.mp3':'audio','.m4a':'audio','.srt':'subtitle'}
@@ -250,11 +263,23 @@ async def upload(pid:str,file:UploadFile=File(...)):
             from .media import probe
             metadata.update(await asyncio.to_thread(probe,path))
         with s.db() as c:
-            c.execute('INSERT INTO assets VALUES(?,?,?,?,?,?,?,?)',(aid,pid,name,allowed[ext],path.name,mimetypes.guess_type(name)[0] or 'application/octet-stream',s.dumps(metadata),time.time()))
+            c.execute('INSERT INTO assets(id,project_id,name,kind,path,mime,metadata,created,category,source) VALUES(?,?,?,?,?,?,?,?,?,?)',(aid,pid,name,allowed[ext],path.name,mimetypes.guess_type(name)[0] or 'application/octet-stream',s.dumps(metadata),time.time(),category,'uploaded'))
         return asset_public(asset_row(aid))
     except Exception:
         path.unlink(missing_ok=True)
         raise
+
+class AssetUpdate(BaseModel):
+    category:str
+
+@app.patch('/api/projects/{pid}/assets/{aid}')
+def update_asset(pid:str,aid:str,body:AssetUpdate):
+    category=asset_category(body.category)
+    with s.db() as c:
+        row=c.execute('SELECT * FROM assets WHERE id=? AND project_id=?',(aid,pid)).fetchone()
+        if not row:raise HTTPException(404,'素材不存在')
+        c.execute('UPDATE assets SET category=? WHERE id=?',(category,aid))
+    return asset_public(asset_row(aid))
 
 @app.get('/api/assets/{aid}/file')
 def asset_file(aid:str):

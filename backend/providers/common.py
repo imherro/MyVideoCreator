@@ -40,7 +40,7 @@ def assets_for(job):
     return assets
 
 
-def register(job,path,name=None):
+def register(job,path,name=None,category=None,asset_source='generated'):
     with s.db() as c:
         row=c.execute('SELECT status FROM jobs WHERE id=?',(job['id'],)).fetchone()
     if not row or row['status']=='cancelled': raise InterruptedError()
@@ -62,11 +62,13 @@ def register(job,path,name=None):
             c.execute('BEGIN IMMEDIATE')
             state=c.execute('SELECT status FROM jobs WHERE id=?',(job['id'],)).fetchone()
             if not state or state['status']=='cancelled':raise InterruptedError('结果登记前任务已取消')
-            c.execute('INSERT INTO assets VALUES(?,?,?,?,?,?,?,?)',(aid,job['project_id'],name or source.name,kind,target.name,mime,s.dumps(metadata),time.time()))
+            semantic=category or job.get('input',{}).get('asset_category') or ('shot' if kind in ('image','video') else 'other')
+            if semantic not in {'character','scene','prop','shot','music','sfx','voice','reference','other'}:raise ValueError('生成素材分类无效')
+            c.execute('INSERT INTO assets(id,project_id,name,kind,path,mime,metadata,created,category,source) VALUES(?,?,?,?,?,?,?,?,?,?)',(aid,job['project_id'],name or source.name,kind,target.name,mime,s.dumps(metadata),time.time(),semantic,asset_source))
     except BaseException:
         target.unlink(missing_ok=True)
         raise
-    return {'id':aid,'url':f'/api/assets/{aid}/file','name':name or source.name,'kind':kind}
+    return {'id':aid,'url':f'/api/assets/{aid}/file','name':name or source.name,'kind':kind,'category':semantic,'source':asset_source}
 
 
 def download_result(job,url,ext,recoverable=False):

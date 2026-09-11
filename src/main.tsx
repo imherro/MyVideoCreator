@@ -107,6 +107,8 @@ type Asset = {
   kind: string;
   url: string;
   metadata: Any;
+  category: string;
+  source: string;
 };
 type Job = {
   id: string;
@@ -166,6 +168,18 @@ const states: Any = {
   cancelled: "已取消",
   interrupted: "待恢复",
 };
+const assetCategories: Any = {
+  character: "角色",
+  scene: "场景",
+  prop: "道具",
+  shot: "分镜",
+  music: "音乐",
+  sfx: "音效",
+  voice: "人声",
+  reference: "参考",
+  other: "其他",
+};
+const assetKinds: Any = { image: "图片", video: "视频", audio: "音频", subtitle: "字幕" };
 const debugUrl = (url: string) => {
   if (typeof window === "undefined") return url;
   try {
@@ -491,6 +505,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   const [panorama, setPanorama] = useState<Asset | null>(null);
   const [syncFailure, setSyncFailure] = useState<SyncFailure | null>(null);
   const [mediaRetryKey, setMediaRetryKey] = useState(0);
+  const [uploadCategory, setUploadCategory] = useState("other");
+  const [assetCategoryFilter, setAssetCategoryFilter] = useState("all");
+  const [assetKindFilter, setAssetKindFilter] = useState("all");
   const [conflict, setConflict] = useState(false),
     [recoveryBusy, setRecoveryBusy] = useState(false);
   const conflictRef = useRef(false);
@@ -1239,14 +1256,14 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setTimeout(() => fitView({ padding: 0.2 }), 80);
     setNotice("已补齐分镜生成节点，检查提示词后可运行画布");
   }
-  async function uploadFiles(files: FileList | null) {
+  async function uploadFiles(files: FileList | null, category = uploadCategory) {
     if (!files || !project) return;
     setBusy(true);
     try {
       for (const file of Array.from(files)) {
         const form = new FormData();
         form.append("file", file);
-        await api(`/projects/${project.id}/assets`, {
+        await api(`/projects/${project.id}/assets?category=${encodeURIComponent(category)}`, {
           method: "POST",
           body: form,
         });
@@ -1259,6 +1276,14 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     } finally {
       setBusy(false);
     }
+  }
+  async function changeAssetCategory(asset: Asset, category: string) {
+    if (!project) return;
+    try {
+      const updated = await api(`/projects/${project.id}/assets/${asset.id}`, send("PATCH", { category }));
+      setAssets((items) => items.map((item) => item.id === asset.id ? { ...item, ...updated } : item));
+      setNotice(`已归类为${assetCategories[category]}`);
+    } catch (e) { report(e); }
   }
   function addTimeline(asset: Asset) {
     update((d) => ({
@@ -2721,8 +2746,13 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   <Upload size={16} />
                   上传素材
                 </button>
+                <div className="asset-filters">
+                  <label>上传到<select value={uploadCategory} onChange={(e) => setUploadCategory(e.target.value)}>{Object.entries(assetCategories).map(([key,label]) => <option key={key} value={key}>{String(label)}</option>)}</select></label>
+                  <label>业务分类<select value={assetCategoryFilter} onChange={(e) => setAssetCategoryFilter(e.target.value)}><option value="all">全部分类</option>{Object.entries(assetCategories).map(([key,label]) => <option key={key} value={key}>{String(label)}</option>)}</select></label>
+                  <label>媒体类型<select value={assetKindFilter} onChange={(e) => setAssetKindFilter(e.target.value)}><option value="all">全部媒体</option>{Object.entries(assetKinds).map(([key,label]) => <option key={key} value={key}>{String(label)}</option>)}</select></label>
+                </div>
                 <div className="asset-grid">
-                  {assets.map((a) => (
+                  {assets.filter((a) => (assetCategoryFilter === "all" || a.category === assetCategoryFilter) && (assetKindFilter === "all" || a.kind === assetKindFilter)).map((a) => (
                     <article className="asset-card" key={a.id}>
                       <button
                         className="asset-visual"
@@ -2737,6 +2767,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                         />
                       </button>
                       <b title={a.name}>{a.name}</b>
+                      <select aria-label={`${a.name} 分类`} value={a.category || "other"} onChange={(e) => void changeAssetCategory(a, e.target.value)}>{Object.entries(assetCategories).map(([key,label]) => <option key={key} value={key}>{String(label)}</option>)}</select>
+                      <small>{assetKinds[a.kind] || a.kind} · {a.source === "generated" ? "系统生成" : a.source === "imported" ? "导入" : "上传"}</small>
                       <div>
                         {a.kind === "image" && (
                           <button onClick={() => setPanorama(a)}>
@@ -3182,7 +3214,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime,audio/*,.srt"
         hidden
         onChange={(e) => {
-          uploadFiles(e.target.files);
+          uploadFiles(e.target.files, uploadCategory);
           e.target.value = "";
         }}
       />

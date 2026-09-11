@@ -9,7 +9,7 @@ def test_sheet_uses_project_owned_images_and_paginates():
     Image.new('RGB',(64,64),'red').save(path)
     with s.db() as c:
         c.execute('INSERT INTO projects VALUES(?,?,1,?,?,?)',(pid,'分镜','{}',now,now))
-        c.execute('INSERT INTO assets VALUES(?,?,?,?,?,?,?,?)',(aid,pid,'红色','image',path.name,'image/png','{}',now))
+        c.execute('INSERT INTO assets(id,project_id,name,kind,path,mime,metadata,created) VALUES(?,?,?,?,?,?,?,?)',(aid,pid,'红色','image',path.name,'image/png','{}',now))
     project={'id':pid,'name':'测试','document':{'nodes':[{'id':'n','data':{'assetId':aid}}],'shots':[{'id':str(i),'imageNode':'n','duration':5,'action':'橘猫发现机器人'} for i in range(10)]}}
     image=Image.open(io.BytesIO(render_sheet(project,3,2)))
     assert image.size==(1536,518)

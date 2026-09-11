@@ -1,5 +1,6 @@
 import time
 import pytest
+from PIL import Image
 from backend import store as s
 from backend import worker
 from backend.providers import common
@@ -19,3 +20,15 @@ def test_cancel_during_media_probe_never_publishes_asset(monkeypatch,tmp_path):
     with s.db() as c:assert c.execute('SELECT count(*) FROM assets WHERE project_id=?',(pid,)).fetchone()[0]==0
     assert set(s.ASSETS.iterdir())==existing
     assert source.exists()
+
+def test_generated_assets_record_semantic_category_and_source(tmp_path):
+    s.init();pid=s.uid();jid=s.uid();now=time.time()
+    with s.db() as c:
+        c.execute('INSERT INTO projects VALUES(?,?,1,?,?,?)',(pid,'category','{}',now,now))
+        c.execute('INSERT INTO jobs(id,submission_id,project_id,node_id,kind,status,input,created,updated) VALUES(?,?,?,?,?,?,?,?,?)',(jid,jid,pid,'n','image','running',s.dumps({'asset_category':'prop'}),now,now))
+    source=tmp_path/'prop.png';Image.new('RGB',(20,20),'red').save(source)
+    result=common.register({'id':jid,'project_id':pid,'node_id':'n','input':{'asset_category':'prop'}},source)
+    assert result['category']=='prop' and result['source']=='generated'
+    with s.db() as c:
+        row=c.execute('SELECT category,source FROM assets WHERE id=?',(result['id'],)).fetchone()
+    assert dict(row)=={'category':'prop','source':'generated'}

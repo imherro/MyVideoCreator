@@ -53,6 +53,10 @@ def init():
         columns={row['name'] for row in c.execute('PRAGMA table_info(jobs)')}
         for column,definition in (('started','REAL'),('finished','REAL'),('telemetry','TEXT')):
             if column not in columns:c.execute(f'ALTER TABLE jobs ADD COLUMN {column} {definition}')
+        asset_columns={row['name'] for row in c.execute('PRAGMA table_info(assets)')}
+        if 'category' not in asset_columns:c.execute("ALTER TABLE assets ADD COLUMN category TEXT NOT NULL DEFAULT 'other'")
+        if 'source' not in asset_columns:c.execute("ALTER TABLE assets ADD COLUMN source TEXT NOT NULL DEFAULT 'uploaded'")
+        c.execute('CREATE INDEX IF NOT EXISTS assets_project_category_created ON assets(project_id,category,created)')
 
 def get_setting(key, default=None):
     with db() as c:
