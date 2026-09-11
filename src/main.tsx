@@ -90,6 +90,12 @@ const DirectorStage = lazy(() =>
 import { updateShot, framesForDuration } from "./shotSync";
 import { TimelinePreview } from "./TimelinePreview";
 import type { Clip } from "./timeline";
+import type { EditorDocument } from "./editor/editorDocument";
+const EditorWorkspace = lazy(() =>
+  import("./editor/EditorWorkspace").then((module) => ({
+    default: module.EditorWorkspace,
+  })),
+);
 
 type Any = Record<string, any>;
 type Asset = {
@@ -123,6 +129,7 @@ type Doc = {
   ratio: string;
   duration: number;
   applied?: string[];
+  editor?: EditorDocument;
 };
 type Project = { id: string; name: string; revision: number; document: Doc };
 type SyncFailureKind = "api" | "sse" | "media";
@@ -1450,7 +1457,14 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               onClick={() => setView("canvas")}
             >
               <LayoutGrid size={15} />
-              画布
+              创作画布
+            </button>
+            <button
+              className={view === "editor" ? "active" : ""}
+              onClick={() => setView("editor")}
+            >
+              <Scissors size={15} />
+              剪辑
             </button>
             <button
               className={view === "shots" ? "active" : ""}
@@ -1480,23 +1494,39 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             <span>·</span>
             {doc.duration} 秒
           </div>
-          <button
-            className="quiet"
-            disabled={busy || !doc.nodes.length}
-            onClick={() => setPanel("run")}
-          >
-            <Play size={15} />
-            运行画布
-          </button>
-          <button
-            className="quiet"
-            onClick={() => setTimelineOpen(!timelineOpen)}
-          >
-            <Scissors size={15} />
-            {timelineOpen ? "收起时间线" : "时间线"}
-          </button>
+          {view !== "editor" && (
+            <>
+              <button
+                className="quiet"
+                disabled={busy || !doc.nodes.length}
+                onClick={() => setPanel("run")}
+              >
+                <Play size={15} />
+                运行画布
+              </button>
+              <button
+                className="quiet"
+                onClick={() => setTimelineOpen(!timelineOpen)}
+              >
+                <Scissors size={15} />
+                {timelineOpen ? "收起时间线" : "时间线"}
+              </button>
+            </>
+          )}
         </div>
-        {view === "canvas" ? (
+        {view === "editor" ? (
+          <Suspense fallback={<div className="loading">加载剪辑工作区…</div>}>
+            <EditorWorkspace
+              projectId={project.id}
+              editor={doc.editor}
+              assets={assets}
+              ratio={doc.ratio}
+              onChange={(editor) =>
+                update((currentDoc) => ({ ...currentDoc, editor }))
+              }
+            />
+          </Suspense>
+        ) : view === "canvas" ? (
           <div className="canvas">
             <ReactFlow
               nodes={renderedNodes}
@@ -1790,7 +1820,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             )}
           </section>
         )}
-        {timelineOpen && (
+        {view !== "editor" && timelineOpen && (
           <section className="timeline">
             <div className="timeline-header">
               <button
