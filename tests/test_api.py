@@ -56,6 +56,18 @@ def test_volcengine_ark_unified_settings_and_connection(authenticated,monkeypatc
     saved_ark=next(item for item in s.get_setting('providers',[]) if item['id']=='ark')
     assert saved_ark['api_key']=='ark-secret'
     assert saved_ark['local'] is False and 'kind' not in saved_ark
+    calls=[]
+    original=httpx.Client
+    def handle(request):
+        calls.append((request.method,str(request.url),request.headers.get('authorization')))
+        assert request.method=='GET' and request.url.path=='/api/v3/models'
+        return httpx.Response(200,json={'data':[
+            {'id':'doubao-text','name':'Doubao Text'},
+            {'id':'seedream-image','name':'Seedream'},
+            {'id':'seedance-video','name':'Seedance'},
+            {'id':'doubao-embedding','name':'Embedding'},
+        ]})
+    monkeypatch.setattr(httpx,'Client',lambda **kw:original(**kw,transport=httpx.MockTransport(handle)))
     ark_image_model=c.get('/api/providers/ark/models?kind=image').json()['models'][0]
     assert ark_image_model['id']=='seedream-image'
     assert ark_image_model['capabilities']['image_reference'] is True
@@ -113,16 +125,14 @@ def test_volcengine_ark_unified_settings_and_connection(authenticated,monkeypatc
     cancelled=c.post('/api/jobs/'+queued['id']+'/cancel').json()
     assert cancelled['status']=='cancelled'
     assert cancelled['phase']=='本地已取消；供应商可能继续生成并产生费用'
-    calls=[]
-    original=httpx.Client
-    def handle(request):
-        calls.append((request.method,str(request.url),request.headers.get('authorization'),request.read()))
-        return httpx.Response(200,json={'choices':[{'message':{'content':'OK'}}]})
-    monkeypatch.setattr(httpx,'Client',lambda **kw:original(**kw,transport=httpx.MockTransport(handle)))
-    tested=c.post('/api/providers/ark/test')
-    assert tested.status_code==200,tested.text
-    assert tested.json()['status']=='ready'
-    assert calls[0][0:3]==('POST','https://ark.cn-beijing.volces.com/api/v3/chat/completions','Bearer ark-secret')
+    verified=c.post('/api/providers/ark/verify')
+    assert verified.status_code==200,verified.text
+    assert verified.json()['counts']=={'text':1,'image':1,'video':1}
+    for kind,model in provider['models'].items():
+        tested=c.post('/api/providers/ark/test?kind='+kind)
+        assert tested.status_code==200,tested.text
+        assert tested.json()['status']=='listed' and tested.json()['model']==model
+    assert all(call==('GET','https://ark.cn-beijing.volces.com/api/v3/models','Bearer ark-secret') for call in calls)
 
 
 def test_ark_cancel_rereads_handle_attached_after_initial_snapshot(authenticated,monkeypatch):

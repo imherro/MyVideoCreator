@@ -65,7 +65,7 @@ Windows，Python 3.11+ 与 Node.js 20+：
 
 Replicate 模型平台也可作为云端服务添加。它能运行平台提供的官方模型，例如 Seedance、Kling、Veo、Flux、Imagen，以及填写 `owner/model:版本 ID` 的社区模型。每个服务配置选择一种用途并填写该模型的输入 JSON；`{{prompt}}`、`{{system_prompt}}`、`{{target_duration}}`、`{{image}}` 和 `{{images}}` 会在提交时替换。参考素材会作为 data URI 发送给该云端服务。Replicate 的输入和输出字段随模型而异，请在模型 API 页面核对输入模板与计费；取消按钮会同时请求取消远端 prediction。真实账号调用尚未在本机验收。
 
-火山方舟作为统一 Provider 接入：在“模型与服务”中点击“添加火山方舟”，保存一次 ARK API Key，并分别填写文本、图片和视频模型 ID。默认地址为 `https://ark.cn-beijing.volces.com/api/v3`，三个模型 ID 都可修改。文本与分镜复用 OpenAI-compatible `/chat/completions`；Seedream 文生图及单张/多张参考图调用 `/images/generations`，参考图由服务端从当前项目素材库读取并转换为 data URI；Seedance 文生视频、单首帧图生视频及首尾帧视频调用 `/contents/generations/tasks`，首尾帧分别以 `first_frame` / `last_frame` 角色发送，task id 会立即持久化，服务中断后只恢复查询原任务。媒体结果仍下载并登记到当前项目素材库。“保存并测试连接”只发出一个 `max_tokens=1` 的文本请求。浏览器读取配置时只获得 `api_key_set`，不会取得完整 Key。当前尚不向 Seedance 发送一般参考图、参考音频或参考视频。
+火山方舟作为统一 Provider 接入：在“模型与服务”中点击“添加火山方舟”，保存一次 ARK API Key，再点击“保存并验证 Key”。服务端通过方舟 `/models` 验证 Key 并读取模型目录，不提交生成任务；验证成功后，文本、图片和视频模型均可从目录选择，也可手动填写自定义接入点 ID。每类模型旁的“检测”用于确认所选 ID 是否出现在方舟目录中，不产生图片或视频费用；目录存在不代表账号已经开通该模型，实际权限以首次生成结果为准。默认地址为 `https://ark.cn-beijing.volces.com/api/v3`。文本与分镜复用 OpenAI-compatible `/chat/completions`；Seedream 文生图及单张/多张参考图调用 `/images/generations`，参考图由服务端从当前项目素材库读取并转换为 data URI；Seedance 文生视频、单首帧图生视频及首尾帧视频调用 `/contents/generations/tasks`，首尾帧分别以 `first_frame` / `last_frame` 角色发送，task id 会立即持久化，服务中断后只恢复查询原任务。媒体结果仍下载并登记到当前项目素材库。浏览器读取配置时只获得 `api_key_set`，不会取得完整 Key。当前尚不向 Seedance 发送一般参考图、参考音频或参考视频。
 
 ## 数据与队列
 

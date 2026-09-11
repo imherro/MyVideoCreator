@@ -307,19 +307,11 @@ def provider_models(provider_id:str,kind:str|None=None):
     headers={'Authorization':'Bearer '+provider['api_key']} if provider.get('api_key') else {}
     url=provider['url'].rstrip('/')
     if provider['type']=='volcengine_ark':
-        from .providers.volcengine_ark import max_image_references, model_for
-        kinds=[kind] if kind in ('text','image','video') else ['text','image','video']
-        models=[]
-        for item in kinds:
-            model=model_for(provider,item)
-            if not model:continue
-            capabilities={
-                'image_reference':item in ('image','video'),
-                'max_references':max_image_references(provider) if item=='image' else 1 if item=='video' else None,
-                'end_frame':item=='video',
-            }
-            models.append({'id':model,'name':model,'capabilities':capabilities})
-        return {'models':models,'status':'configured'}
+        from .providers.volcengine_ark import list_models
+        models=list_models(provider)
+        if kind in ('text','image','video'):
+            models=[model for model in models if model['kind']==kind]
+        return {'models':models,'status':'ready'}
     if provider['type']=='maestro' and provider.get('local') and provider.get('auto_start') and url=='http://127.0.0.1:7870':
         state=runtime.start_maestro()
         if state['status']=='starting':
@@ -342,21 +334,21 @@ def provider_models(provider_id:str,kind:str|None=None):
     except httpx.HTTPError as exc:
         raise HTTPException(502,'模型服务连接失败，请确认服务地址、启动状态和密钥') from exc
 
-@app.post('/api/providers/{provider_id}/test')
-def test_provider(provider_id:str):
-    import httpx
-    from .worker import checked
+@app.post('/api/providers/{provider_id}/verify')
+def verify_provider(provider_id:str):
     provider=next((p for p in s.get_setting('providers',[]) if p['id']==provider_id),None)
     if not provider or provider.get('type')!='volcengine_ark':raise ValueError('火山方舟服务配置不存在')
-    from .providers.volcengine_ark import model_for
-    model=model_for(provider,'text')
-    if not model:raise ValueError('请填写火山方舟文本模型 ID')
-    key=str(provider.get('api_key') or '').strip()
-    if not key:raise ValueError('请先保存 ARK API Key')
-    body={'model':model,'messages':[{'role':'user','content':'只回复 OK'}],'max_tokens':1,'stream':False}
-    with httpx.Client(timeout=30,headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'},trust_env=True) as client:
-        checked(client.post(provider['url'].rstrip('/')+'/chat/completions',json=body))
-    return {'status':'ready','message':'火山方舟连接成功','model':model}
+    from .providers.volcengine_ark import list_models
+    models=list_models(provider)
+    counts={kind:sum(model['kind']==kind for model in models) for kind in ('text','image','video')}
+    return {'status':'ready','message':f'ARK API Key 鉴权通过，读取到 {len(models)} 个适用模型','models':models,'counts':counts}
+
+@app.post('/api/providers/{provider_id}/test')
+def test_provider(provider_id:str,kind:str='text'):
+    provider=next((p for p in s.get_setting('providers',[]) if p['id']==provider_id),None)
+    if not provider or provider.get('type')!='volcengine_ark':raise ValueError('火山方舟服务配置不存在')
+    from .providers.volcengine_ark import check_configured_model
+    return check_configured_model(provider,kind)
 
 class JobCreate(BaseModel):
     node_id:str

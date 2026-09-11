@@ -278,3 +278,39 @@ def test_seedance_expired_status_is_explicit(monkeypatch):
 def test_ark_http_errors_are_clear_in_chinese(status,phrase):
     with pytest.raises(ValueError,match=phrase):
         checked(httpx.Response(status,json={'error':{'message':'upstream detail'}}))
+
+
+def test_model_catalog_is_grouped_and_custom_endpoints_keep_configured_kind(monkeypatch):
+    p=provider()
+    p['models']['video']='ep-custom-video'
+    original=httpx.Client
+    def handle(request):
+        assert request.method=='GET' and request.url.path=='/api/v3/models'
+        return httpx.Response(200,json={'data':[
+            {'id':'doubao-seed-2-0-pro','name':'Doubao'},
+            {'id':'doubao-seedream-4-5-251128','name':'Seedream 4.5'},
+            {'id':'doubao-seedance-1-5-pro-251215','name':'Seedance 1.5'},
+            {'id':'ep-custom-video','name':'私有接入点'},
+            {'id':'doubao-embedding-large','name':'Embedding'},
+        ]})
+    monkeypatch.setattr(ark.httpx,'Client',lambda **kw:original(**kw,transport=httpx.MockTransport(handle)))
+    models=ark.list_models(p)
+    assert {m['id']:m['kind'] for m in models}=={
+        'doubao-seed-2-0-pro':'text',
+        'doubao-seedream-4-5-251128':'image',
+        'doubao-seedance-1-5-pro-251215':'video',
+        'ep-custom-video':'video',
+    }
+    assert models[0]['id']=='ep-custom-video'
+    assert ark.check_configured_model(p,'video')['status']=='listed'
+
+
+def test_unlisted_custom_model_is_reported_without_generation(monkeypatch):
+    p=provider();p['models']['image']='ep-not-returned'
+    original=httpx.Client
+    monkeypatch.setattr(ark.httpx,'Client',lambda **kw:original(**kw,transport=httpx.MockTransport(
+        lambda request:httpx.Response(200,json={'data':[]})
+    )))
+    result=ark.check_configured_model(p,'image')
+    assert result['status']=='unlisted'
+    assert result['model']=='ep-not-returned'

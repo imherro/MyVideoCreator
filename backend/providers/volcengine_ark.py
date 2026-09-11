@@ -41,6 +41,105 @@ def max_image_references(provider):
         raise ValueError('火山方舟参考图上限必须是 1–10 的整数')
 
 
+def _catalog_kind(model_id, provider, item=None):
+    """Infer the studio lane for one Ark catalog item.
+
+    Ark endpoint IDs do not encode a capability.  A model already assigned in
+    this provider therefore wins over the public-model naming convention.
+    """
+    model_id = str(model_id or '').strip()
+    configured = provider.get('models') if isinstance(provider.get('models'), dict) else {}
+    for kind in ('text', 'image', 'video'):
+        if model_id and model_id == str(configured.get(kind) or '').strip():
+            return kind
+    domain = str((item or {}).get('domain') or '').lower()
+    outputs = (item or {}).get('modalities', {}).get('output_modalities', [])
+    if domain == 'imagegeneration' or 'image' in outputs:
+        return 'image'
+    if domain == 'videogeneration' or 'video' in outputs:
+        return 'video'
+    lowered = model_id.lower()
+    if 'seedream' in lowered or 'image' in lowered:
+        return 'image'
+    if 'seedance' in lowered or 'video' in lowered:
+        return 'video'
+    # Do not offer specialist endpoints in the chat-model picker merely because
+    # they are neither Seedream nor Seedance.
+    if any(token in lowered for token in ('embedding', 'rerank', 'speech', 'tts', 'asr')):
+        return None
+    return 'text'
+
+
+def list_models(provider):
+    """Return the authenticated Ark model catalog without running a model."""
+    try:
+        with httpx.Client(timeout=30, headers=_headers(provider), trust_env=True) as client:
+            value = common.checked(client.get(_root(provider) + '/models'))
+    except httpx.HTTPError as exc:
+        raise ValueError('火山方舟连接失败，请检查网络、服务地址和代理设置') from exc
+    data = value.get('data')
+    if not isinstance(data, list):
+        raise ValueError('火山方舟模型目录返回格式不正确')
+    models = []
+    seen = set()
+    configured = provider.get('models') if isinstance(provider.get('models'), dict) else {}
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        model_id = str(item.get('id') or '').strip()
+        if not model_id or model_id in seen:
+            continue
+        seen.add(model_id)
+        kind = _catalog_kind(model_id, provider, item)
+        if not kind:
+            continue
+        lifecycle = str(item.get('status') or 'Active')
+        if lifecycle.lower() == 'shutdown':
+            continue
+        modalities = item.get('modalities') if isinstance(item.get('modalities'), dict) else {}
+        inputs = modalities.get('input_modalities', [])
+        configured_for_kind = model_id == str(configured.get(kind) or '').strip()
+        capabilities = {
+            'image_reference': (
+                kind == 'image' and 'image' in inputs
+                or kind == 'video' and any(mode in inputs for mode in ('image', 'first_frame', 'first_last_frame'))
+                or not inputs and configured_for_kind and kind in ('image', 'video')
+            ),
+            'max_references': max_image_references(provider) if kind == 'image' else 1 if kind == 'video' else None,
+            'end_frame': kind == 'video' and (
+                'first_last_frame' in inputs or 'seedance-2-' in model_id.lower() or not inputs and configured_for_kind
+            ),
+        }
+        models.append({
+            'id': model_id,
+            'name': model_id + (' · 即将下线' if lifecycle.lower() == 'retiring' else ''),
+            'kind': kind,
+            'lifecycle': lifecycle,
+            'capabilities': capabilities,
+        })
+    return sorted(models, key=lambda model: (model['id'] != configured.get(model['kind']), model['id']), reverse=False)
+
+
+def check_configured_model(provider, kind):
+    """Check catalog visibility for a configured model without billed generation."""
+    if kind not in ('text', 'image', 'video'):
+        raise ValueError('火山方舟模型用途无效')
+    model = model_for(provider, kind)
+    if not model:
+        label = {'text': '文本', 'image': '图片', 'video': '视频'}[kind]
+        raise ValueError(f'请先选择或填写火山方舟{label}模型 ID')
+    catalog = list_models(provider)
+    found = next((item for item in catalog if item['id'] == model), None)
+    if found:
+        return {'status': 'listed', 'kind': kind, 'model': model, 'message': '模型已在方舟目录中；实际调用权限以首次生成结果为准'}
+    return {
+        'status': 'unlisted',
+        'kind': kind,
+        'model': model,
+        'message': '方舟模型目录中未找到该 ID；可保留自定义接入点，实际生成时再验证',
+    }
+
+
 def load_image_asset(asset):
     """Load and decode an internal image without applying model-specific limits."""
     if asset.get('kind') != 'image':

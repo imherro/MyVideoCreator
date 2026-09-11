@@ -79,6 +79,7 @@ import {
 } from "./graph";
 import { PromptLibrary } from "./PromptLibrary";
 import { ModelSelector } from "./ModelSelector";
+import { ArkProviderSettings } from "./ArkProviderSettings";
 import { StoryboardGrid } from "./StoryboardGrid";
 import { JobProgress } from "./JobProgress";
 import { RunWorkflow } from "./RunWorkflow";
@@ -3295,8 +3296,26 @@ function SettingsPanel({
 }) {
   const [value, setValue] = useState<Any>(config),
     [status, setStatus] = useState(""),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    [arkCatalogs, setArkCatalogs] = useState<Record<string, Any[]>>({}),
+    [arkVerified, setArkVerified] = useState<Record<string, boolean>>({}),
+    [arkChecks, setArkChecks] = useState<Record<string, Record<string, Any>>>({});
   function patchProvider(index: number, patch: Any) {
+    const current = value.providers[index];
+    const changedKind = patch.changed_model_kind;
+    if (changedKind) {
+      const { changed_model_kind: _changedModelKind, ...cleanPatch } = patch;
+      patch = cleanPatch;
+      setArkChecks((checks) => ({
+        ...checks,
+        [current.id]: { ...checks[current.id], [changedKind]: undefined },
+      }));
+    }
+    if (current?.type === "volcengine_ark" && ("api_key" in patch || "url" in patch)) {
+      setArkVerified((verified) => ({ ...verified, [current.id]: false }));
+      setArkCatalogs((catalogs) => ({ ...catalogs, [current.id]: [] }));
+      setArkChecks((checks) => ({ ...checks, [current.id]: {} }));
+    }
     setValue({
       ...value,
       providers: value.providers.map((p: Any, i: number) =>
@@ -3326,14 +3345,45 @@ function SettingsPanel({
       setBusy(false);
     }
   }
-  async function testArk(providerId: string) {
+  async function verifyArk(providerId: string) {
     setBusy(true);
     try {
       await onSave(value);
       clearEnteredApiKeys();
-      const result = await api(`/providers/${encodeURIComponent(providerId)}/test`, send("POST"));
-      setStatus(result.message || "火山方舟连接成功");
-    } catch (e) {
+      const result = await api(`/providers/${encodeURIComponent(providerId)}/verify`, send("POST"));
+      setArkCatalogs((catalogs) => ({ ...catalogs, [providerId]: result.models || [] }));
+      setArkVerified((verified) => ({ ...verified, [providerId]: true }));
+      setArkChecks((checks) => ({ ...checks, [providerId]: {} }));
+      setStatus(result.message || "ARK API Key 可用");
+    } catch (e: any) {
+      setArkVerified((verified) => ({ ...verified, [providerId]: false }));
+      onError(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function testArkModel(providerId: string, kind: "text" | "image" | "video") {
+    setBusy(true);
+    try {
+      await onSave(value);
+      clearEnteredApiKeys();
+      const result = await api(
+        `/providers/${encodeURIComponent(providerId)}/test?kind=${encodeURIComponent(kind)}`,
+        send("POST"),
+      );
+      setArkChecks((checks) => ({
+        ...checks,
+        [providerId]: { ...checks[providerId], [kind]: result },
+      }));
+      setStatus(result.message);
+    } catch (e: any) {
+      setArkChecks((checks) => ({
+        ...checks,
+        [providerId]: {
+          ...checks[providerId],
+          [kind]: { status: "failed", message: e.message || "模型检测失败" },
+        },
+      }));
       onError(e);
     } finally {
       setBusy(false);
@@ -3523,14 +3573,7 @@ function SettingsPanel({
               placeholder="http://127.0.0.1:8188"
             />
           </label>
-          {p.type === "volcengine_ark" ? (
-            <>
-              <label>文本模型 ID<input value={p.models?.text || ""} onChange={(e) => patchProvider(i, { models: { ...p.models, text: e.target.value } })} /></label>
-              <label>图片模型 ID<input value={p.models?.image || ""} onChange={(e) => patchProvider(i, { models: { ...p.models, image: e.target.value } })} /></label>
-              <label>视频模型 ID<input value={p.models?.video || ""} onChange={(e) => patchProvider(i, { models: { ...p.models, video: e.target.value } })} /></label>
-              <label>Seedream 参考图上限<input type="number" min="1" max="10" value={p.parameters?.image?.max_references ?? 10} onChange={(e) => patchProvider(i, { parameters: { ...p.parameters, image: { ...p.parameters?.image, max_references: Number(e.target.value) } } })} /><small>按当前图片模型能力设置，最多 10 张；图片会在服务端编码后发送。</small></label>
-            </>
-          ) : (
+          {p.type !== "volcengine_ark" && (
             <label>
               默认模型 ID
               <input
@@ -3552,7 +3595,19 @@ function SettingsPanel({
             />
           </label>
           {p.type === "volcengine_ark" ? (
-            <p className="muted">云端服务；运行节点前必须明确允许云端调用。</p>
+            <>
+              <ArkProviderSettings
+                provider={p}
+                catalog={arkCatalogs[p.id] || []}
+                verified={!!arkVerified[p.id]}
+                checks={arkChecks[p.id] || {}}
+                busy={busy}
+                onPatch={(patch) => patchProvider(i, patch)}
+                onVerify={() => void verifyArk(p.id)}
+                onTest={(kind) => void testArkModel(p.id, kind)}
+              />
+              <p className="muted">一个 ARK API Key 统一调用豆包文本、Seedream 图片与 Seedance 视频。云端生成节点仍需明确允许调用。</p>
+            </>
           ) : (
             <label className="check-label">
               <input
@@ -3562,12 +3617,6 @@ function SettingsPanel({
               />
               本地服务，不产生云端调用费用
             </label>
-          )}
-          {p.type === "volcengine_ark" && (
-            <>
-              <p className="muted">一个 ARK API Key 统一调用豆包文本、Seedream 文生图/多参考图与 Seedance 文生视频、单首帧及首尾帧视频。任务只保存素材 ID；参考图内容仅由服务端读取并编码。</p>
-              <button className="secondary full" disabled={busy} onClick={() => void testArk(p.id)}>保存并测试连接</button>
-            </>
           )}
           {p.type === "comfy" && (
             <label>
@@ -3751,7 +3800,7 @@ function SettingsPanel({
                   local: false,
                   models: {
                     text: "doubao-seed-2-1-pro-260628",
-                    image: "doubao-seedream-5-0-260128",
+                    image: "doubao-seedream-5-0-pro-260628",
                     video: "doubao-seedance-2-0-260128",
                   },
                   parameters: {
