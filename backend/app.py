@@ -14,6 +14,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from . import store as s, runtime
 from .prompts import TEMPLATES
+from .generation_policy import default_ark_policy, validate_generation_policy
+from .project_schema import migrate_document, new_document
 
 @asynccontextmanager
 async def lifespan(app):
@@ -121,7 +123,9 @@ def project(pid):
         row = c.execute('SELECT * FROM projects WHERE id=?',(pid,)).fetchone()
     if not row:
         raise HTTPException(404,'项目不存在')
-    return s.unpack(row)
+    value=s.unpack(row)
+    value['document']=migrate_document(value['document'])
+    return value
 
 @app.get('/api/projects')
 def projects():
@@ -137,7 +141,7 @@ def normalized_project_name(name:str)->str:
 @app.post('/api/projects')
 def create_project(body:ProjectCreate):
     pid = s.uid('project-')
-    document = {'nodes':[],'edges':[],'shots':[],'timeline':[],'characters':[],'brief':'','style':'电影写实','ratio':'16:9','duration':15}
+    document = new_document(default_ark_policy(s.get_setting('providers',[])))
     with s.db() as c:
         c.execute('INSERT INTO projects VALUES(?,?,1,?,?,?)',(pid,normalized_project_name(body.name),s.dumps(document),time.time(),time.time()))
     return project(pid)
@@ -152,7 +156,7 @@ def delete_empty_project(pid:str):
         c.execute('BEGIN IMMEDIATE')
         row=c.execute('SELECT * FROM projects WHERE id=?',(pid,)).fetchone()
         if not row: raise HTTPException(404,'项目不存在')
-        document=s.unpack(row)['document']
+        document=migrate_document(s.unpack(row)['document'])
         has_content=bool(str(document.get('brief','')).strip()) or any(document.get(key) for key in ('nodes','edges','shots','timeline','characters'))
         has_assets=c.execute('SELECT 1 FROM assets WHERE project_id=? LIMIT 1',(pid,)).fetchone()
         has_jobs=c.execute('SELECT 1 FROM jobs WHERE project_id=? LIMIT 1',(pid,)).fetchone()
@@ -174,7 +178,11 @@ class ProjectSave(BaseModel):
 
 @app.put('/api/projects/{pid}')
 def save_project(pid:str,body:ProjectSave):
-    encoded = s.dumps(body.document)
+    document=migrate_document(body.document)
+    # Preserve deleted provider ids so ordinary project edits remain savable;
+    # the resolver reports the invalid target before any generation starts.
+    document['generationPolicy']=validate_generation_policy(document['generationPolicy'],s.get_setting('providers',[]),allow_missing=True)
+    encoded = s.dumps(document)
     if len(encoded)>8_000_000:
         raise HTTPException(413,'项目数据过大，请将素材上传到素材库。')
     with s.db() as c:
@@ -198,7 +206,9 @@ def revision(pid:str,rid:str):
     with s.db() as c:
         row=c.execute('SELECT * FROM revisions WHERE project_id=? AND id=?',(pid,rid)).fetchone()
     if not row: raise HTTPException(404,'历史版本不存在')
-    return s.unpack(row)
+    value=s.unpack(row)
+    value['document']=migrate_document(value['document'])
+    return value
 
 def asset_row(aid):
     with s.db() as c:

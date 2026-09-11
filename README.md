@@ -67,6 +67,12 @@ Replicate 模型平台也可作为云端服务添加。它能运行平台提供�
 
 火山方舟作为统一 Provider 接入：在“模型与服务”中点击“添加火山方舟”，保存一次 ARK API Key，再点击“保存并验证 Key”。服务端通过方舟 `/models` 验证 Key 并读取模型目录，不提交生成任务；验证成功后，文本、图片和视频模型均可从目录选择，也可手动填写自定义接入点 ID。每类模型旁的“检测”用于确认所选 ID 是否出现在方舟目录中，不产生图片或视频费用；目录存在不代表账号已经开通该模型，实际权限以首次生成结果为准。默认地址为 `https://ark.cn-beijing.volces.com/api/v3`。文本与分镜复用 OpenAI-compatible `/chat/completions`；Seedream 文生图及单张/多张参考图调用 `/images/generations`，参考图由服务端从当前项目素材库读取并转换为 data URI；Seedance 文生视频、单首帧图生视频及首尾帧视频调用 `/contents/generations/tasks`，首尾帧分别以 `first_frame` / `last_frame` 角色发送，task id 会立即持久化，服务中断后只恢复查询原任务。媒体结果仍下载并登记到当前项目素材库。浏览器读取配置时只获得 `api_key_set`，不会取得完整 Key。当前尚不向 Seedance 发送一般参考图、参考音频或参考视频。
 
+## 项目 Schema 与默认模型策略
+
+项目文档现在带有 `schemaVersion`。旧项目和历史版本在读取时通过纯函数迁移到当前内存结构；历史 JSON 不会被后台改写，只有用户正常保存当前项目时才持久化当前 Schema。Phase 0 已预留并行的 `filmBible.visual/continuity/style/story` 结构，尚未开始生成视觉卡片或改变分镜协议。
+
+“我的项目”面板可分别设置项目默认文本、图片和视频 Provider/Model。解析顺序为“节点显式覆盖 → 项目默认 → 现有系统回退”；继承结果不会被写回成节点覆盖。新建项目在已经配置火山方舟时默认选择该服务的三类模型；迁移后的旧项目保持三个空策略，继续使用原有回退。Provider 被删除后配置会保留并显示失效，生成解析不会静默切换到其他收费服务。项目文档只保存 Provider ID 和 Model ID，不保存 API Key。
+
 ## 数据与队列
 
 `data/studio.sqlite` 保存项目、历史版本、任务和模型服务设置；`data/assets` 保存原始素材和生成结果。`data` 不进入 Git，备份时包含整个目录。API Key 仅在服务端保存，设置接口不回传密钥内容。配置文件与数据库需要按照本机用户权限保护。

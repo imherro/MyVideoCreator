@@ -26,6 +26,38 @@ def project(c):
     assert response.status_code==200,response.text
     return response.json()
 
+def test_project_schema_revision_migration_and_generation_policy_roundtrip(authenticated):
+    c=authenticated
+    old_providers=s.get_setting('providers',[])
+    ark={'id':'phase0-ark','name':'Phase 0 Ark','type':'volcengine_ark','local':False,
+         'url':'https://ark.cn-beijing.volces.com/api/v3','api_key':'test-only',
+         'models':{'text':'doubao','image':'seedream','video':'seedance'}}
+    s.set_setting('providers',[*old_providers,ark])
+    try:
+        created=project(c)
+        assert created['document']['schemaVersion']==1
+        assert created['document']['generationPolicy']['image']=={'providerId':'phase0-ark','modelId':'seedream'}
+        document=created['document'];document['generationPolicy']['video']={'providerId':'phase0-ark','modelId':'seedance-custom'}
+        saved=c.put('/api/projects/'+created['id'],json={'name':created['name'],'revision':created['revision'],'document':document})
+        assert saved.status_code==200,saved.text
+        assert c.get('/api/projects/'+created['id']).json()['document']['generationPolicy']['video']['modelId']=='seedance-custom'
+
+        pid=s.uid('legacy-');rid=s.uid('revision-');now=time.time()
+        legacy={'nodes':[{'id':'old-node'}],'edges':[],'shots':[],'timeline':[],'editor':{'timeline':{'tracks':[]}}}
+        encoded=s.dumps(legacy)
+        with s.db() as db:
+            db.execute('INSERT INTO projects VALUES(?,?,1,?,?,?)',(pid,'旧项目',encoded,now,now))
+            db.execute('INSERT INTO revisions VALUES(?,?,?,?,?)',(rid,pid,1,encoded,now))
+        current=c.get('/api/projects/'+pid).json()['document']
+        historical=c.get(f'/api/projects/{pid}/revisions/{rid}').json()['document']
+        assert current['schemaVersion']==1 and historical['schemaVersion']==1
+        assert current['nodes']==legacy['nodes'] and historical['editor']==legacy['editor']
+        with s.db() as db:
+            assert db.execute('SELECT document FROM revisions WHERE id=?',(rid,)).fetchone()['document']==encoded
+            assert db.execute('SELECT document FROM projects WHERE id=?',(pid,)).fetchone()['document']==encoded
+    finally:
+        s.set_setting('providers',old_providers)
+
 def test_cross_origin_and_secret_masking(authenticated):
     c=authenticated
     assert c.post('/api/projects',json={'name':'bad'},headers={'Origin':'https://other.example'}).status_code==403

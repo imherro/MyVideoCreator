@@ -80,6 +80,8 @@ import {
 import { PromptLibrary } from "./PromptLibrary";
 import { ModelSelector } from "./ModelSelector";
 import { ArkProviderSettings } from "./ArkProviderSettings";
+import { GenerationPolicyPanel } from "./GenerationPolicyPanel";
+import type { GenerationPolicy } from "./generationPolicy";
 import { StoryboardGrid } from "./StoryboardGrid";
 import { JobProgress } from "./JobProgress";
 import { RunWorkflow } from "./RunWorkflow";
@@ -120,6 +122,9 @@ type Job = {
   provider_job_id?: string;
 };
 type Doc = {
+  schemaVersion: number;
+  filmBible: Any;
+  generationPolicy: GenerationPolicy;
   nodes: Node[];
   edges: Edge[];
   shots: Any[];
@@ -2666,6 +2671,14 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                     }
                   />
                 </label>
+                <GenerationPolicyPanel
+                  value={doc.generationPolicy}
+                  providers={config.providers}
+                  localModels={system.models}
+                  onChange={(generationPolicy) =>
+                    update((d) => ({ ...d, generationPolicy }))
+                  }
+                />
                 <hr />
                 {projects.map((p) => (
                   <button
