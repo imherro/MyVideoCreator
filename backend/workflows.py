@@ -1,0 +1,37 @@
+"""Project graph validation and dependency-aware execution snapshots."""
+def topological(nodes,edges):
+    ids={n['id'] for n in nodes}
+    if len(ids)!=len(nodes): raise ValueError('画布存在重复节点编号')
+    children={n:[] for n in ids}; degree={n:0 for n in ids}
+    for edge in edges:
+        source,target=edge.get('source'),edge.get('target')
+        if source not in ids or target not in ids: raise ValueError('连线引用了不存在的节点')
+        children[source].append(target); degree[target]+=1
+    ready=sorted(n for n in ids if degree[n]==0); result=[]
+    while ready:
+        current=ready.pop(0);result.append(current)
+        for child in children[current]:
+            degree[child]-=1
+            if degree[child]==0: ready.append(child)
+    if len(result)!=len(ids): raise ValueError('画布包含循环连线，请先解除循环后执行')
+    return result
+
+def execution_plan(document,selected=None,include_descendants=False):
+    nodes=document.get('nodes',[]);edges=document.get('edges',[])
+    order=topological(nodes,edges);mapping={n['id']:n for n in nodes}
+    parents={n:[] for n in mapping}
+    for edge in edges: parents[edge['target']].append(edge['source'])
+    wanted=set(selected or order)
+    if not wanted<=mapping.keys(): raise ValueError('选中的节点不存在')
+    if include_descendants:
+        pending=list(wanted)
+        while pending:
+            current=pending.pop()
+            for edge in edges:
+                if edge['source']==current and edge['target'] not in wanted:
+                    wanted.add(edge['target']);pending.append(edge['target'])
+    pending=list(wanted)
+    while pending:
+        for parent in parents[pending.pop()]:
+            if parent not in wanted: wanted.add(parent);pending.append(parent)
+    return [(mapping[n],parents[n]) for n in order if n in wanted]
