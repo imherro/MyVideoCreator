@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Pause, Play, X } from "lucide-react";
 import { timelineDuration, timelinePosition, type Clip } from "./timeline";
+import "./timelinePreview.css";
 
 type Asset = {
   id: string;
