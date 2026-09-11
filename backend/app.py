@@ -490,10 +490,19 @@ def create_job_record(c,pid,body):
 
 @app.post('/api/projects/{pid}/jobs')
 def submit(pid:str,body:JobCreate):
-    project(pid)
+    saved_project=project(pid)
+    from .reference_compiler import compile_shot_image_input
+    body=body.model_copy(update={'input':compile_shot_image_input(
+        saved_project['document'],body.node_id,body.kind,body.input,
+        s.get_setting('providers',[]),
+    )})
     tracking = None
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
+        if body.input.get('reference_compiler'):
+            current_revision=c.execute('SELECT revision FROM projects WHERE id=?',(pid,)).fetchone()
+            if not current_revision or current_revision['revision']!=saved_project['revision']:
+                raise HTTPException(409,'视觉绑定在任务准备期间已更新，请重试生成')
         result=create_job_record(c,pid,body)
         if body.input.get('visual_reference') is not None:
             from .visual_references import record_visual_reference_submission
@@ -527,8 +536,6 @@ async def run_workflow(pid:str,request:Request):
         data=node.get('data',{})
         if data.get('kind') not in ('text','storyboard','image','video'): continue
         if not data.get('prompt','').strip() and not parents: raise ValueError('起始节点缺少创作描述')
-        for aid in data.get('asset_ids',[]):
-            if asset_row(aid)['project_id']!=pid: raise ValueError('批次不能引用其他项目素材')
     # A reference node is a static asset rather than a runnable job.  Preserve
     # that asset in the downstream job snapshot, just as the canvas's
     # single-node submit path does.  Runnable image parents are deliberately
@@ -537,15 +544,27 @@ async def run_workflow(pid:str,request:Request):
     mapping={node['id']:node for node,_ in plan}
     runnable={'text','storyboard','image','video'}
     prepared=[]
+    from .reference_compiler import compile_shot_image_input
+    from .visual_references import resolve_image_model_capabilities
+    capability_cache={}
+    def cached_image_capabilities(provider,model_id):
+        key=(provider.get('id'),model_id)
+        if key not in capability_cache:
+            capability_cache[key]=resolve_image_model_capabilities(provider,model_id)
+        return capability_cache[key]
     for node,parents in plan:
         data=dict(node.get('data',{}));kind=data.get('kind')
         if kind not in runnable: continue
+        data=compile_shot_image_input(
+            p['document'],node['id'],kind,data,list(providers.values()),cached_image_capabilities,
+        )
+        film_bible_compiled=bool(data.get('reference_compiler'))
         manual_assets=list(data.get('asset_ids',[]))
         static_assets=[]
         generated_image_parents=0
         reference_sources=[]
         seen_reference_sources=set()
-        for parent_id in parents:
+        for parent_id in ([] if film_bible_compiled else parents):
             parent_data=mapping[parent_id].get('data',{})
             if parent_data.get('kind')=='image':
                 generated_image_parents+=1
@@ -564,7 +583,16 @@ async def run_workflow(pid:str,request:Request):
             if key not in seen_reference_sources:
                 reference_sources.append({'type':'asset','asset_id':asset_id})
                 seen_reference_sources.add(key)
-        data['asset_ids']=list(dict.fromkeys([*manual_assets,*static_assets]))
+        data['asset_ids']=(
+            manual_assets
+            if film_bible_compiled
+            else list(dict.fromkeys([*manual_assets,*static_assets]))
+        )
+        if film_bible_compiled:
+            reference_sources=list(data['image_reference_sources'])
+            generated_image_parents=0
+        for aid in data['asset_ids']:
+            if asset_row(aid)['project_id']!=pid: raise ValueError('批次不能引用其他项目素材')
         provider=providers.get(data.get('provider','local'))
         if provider and provider.get('type')=='volcengine_ark':
             from .providers.volcengine_ark import max_image_references
@@ -593,12 +621,16 @@ async def run_workflow(pid:str,request:Request):
     jobs_by_node={};created=[]
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
+        if any(data.get('reference_compiler') for _,_,data,_ in prepared):
+            current_revision=c.execute('SELECT revision FROM projects WHERE id=?',(pid,)).fetchone()
+            if not current_revision or current_revision['revision']!=p['revision']:
+                raise HTTPException(409,'视觉绑定在批量任务准备期间已更新，请重试运行')
         for node,parents,data,reference_sources in prepared:
             kind=data.get('kind')
             data['upstream_job_ids']=[jobs_by_node[n] for n in parents if n in jobs_by_node]
-            # Freeze the exact visual-reference order shown by sourceAssets():
-            # incoming canvas edges first, then explicit node asset_ids. Dynamic
-            # parents are stored by durable job id and resolved by the worker.
+            # Film Bible shots already carry compiler-owned asset sources in
+            # character/scene/prop order. Other nodes retain canvas-edge order.
+            # Dynamic parents are stored by durable job id for the worker.
             data['image_reference_sources']=[
                 ({'type':'upstream_job','job_id':jobs_by_node[item['node_id']]}
                  if item['type']=='upstream_node' else item)

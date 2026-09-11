@@ -123,7 +123,11 @@ class Worker:
                 else:
                     raise ValueError('批次图像参考来源已损坏，请重新运行画布')
         if upstream_text: inp['prompt']=inp['prompt']+'\n\n上游创作内容：\n'+'\n\n'.join(upstream_text)
-        inp['asset_ids']=list(dict.fromkeys(asset_ids))
+        inp['asset_ids']=(
+            asset_ids
+            if inp.get('reference_compiler')
+            else list(dict.fromkeys(asset_ids))
+        )
         job={**job,'input':inp}
         self.progress(job,'准备任务')
         if kind=='export':

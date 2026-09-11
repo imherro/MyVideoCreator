@@ -160,6 +160,103 @@ def test_visual_reference_queue_validates_server_capability_and_persists_ownersh
     finally:
         s.set_setting('providers',old_providers)
 
+def test_shot_reference_compiler_is_identical_for_single_and_batch_submission(authenticated,monkeypatch):
+    import io
+    from PIL import Image
+    import backend.reference_compiler as reference_compiler
+    import backend.visual_references as visual_references
+    from backend.film_bible import normalize_visual_bible
+
+    c=authenticated
+    old_providers=s.get_setting('providers',[])
+    provider={
+        'id':'phase4-image','name':'Phase 4 Image','type':'openai','kind':'image',
+        'url':'http://127.0.0.1:1/v1','local':True,'model':'image-model',
+    }
+    s.set_setting('providers',[*old_providers,provider])
+    try:
+        p=project(c);doc=p['document']
+        visual,keys=normalize_visual_bible({'cards':[
+            {'key':'hero','kind':'character','name':'林岚','parent_key':'','description':'灰色风衣','attributes':[],'invariants':['脸型不变']},
+            {'key':'alley','kind':'scene','name':'雨巷','parent_key':'','description':'青砖窄巷','attributes':[],'invariants':['拱门位置不变']},
+        ]})
+        assets={}
+        for key,color in [('hero','#334455'),('alley','#556677'),('manual','#778899')]:
+            stream=io.BytesIO();Image.new('RGB',(24,24),color).save(stream,format='PNG')
+            assets[key]=c.post(
+                f'/api/projects/{p["id"]}/assets?category=character',
+                files={'file':(key+'.png',stream.getvalue(),'image/png')},
+            ).json()
+        for key in ('hero','alley'):
+            version=visual['versions'][keys[key][1]]
+            version['status']='locked'
+            version['references']=[{'role':'primary','assetId':assets[key]['id']}]
+        image_node={
+            'id':'phase4-image-node','type':'media','position':{'x':0,'y':0},
+            'data':{
+                'kind':'image','label':'分镜图','provider':'phase4-image','model':'image-model',
+                'prompt':'中景，人物穿过雨巷','asset_ids':[assets['manual']['id']],
+            },
+        }
+        manual_node={
+            'id':'manual-reference','type':'media','position':{'x':0,'y':0},
+            'data':{'kind':'reference','assetId':assets['manual']['id']},
+        }
+        doc['filmBible']['visual']=visual
+        doc['nodes']=[manual_node,image_node]
+        doc['edges']=[{'id':'manual-edge','source':'manual-reference','target':'phase4-image-node'}]
+        doc['shots']=[{
+            'id':'shot-001','uid':'phase4-shot','imageNode':'phase4-image-node',
+            'assetBindings':{
+                'characters':[{'role':'主角','versionId':keys['hero'][1]}],
+                'scene':{'versionId':keys['alley'][1]},'props':[],
+            },
+        }]
+        saved=c.put(f'/api/projects/{p["id"]}',json={'name':p['name'],'revision':p['revision'],'document':doc})
+        assert saved.status_code==200,saved.text
+
+        maximum={'value':1}
+        def capabilities(provider_value,model_id):
+            return {'image_reference':True,'max_references':maximum['value']}
+        monkeypatch.setattr(reference_compiler,'resolve_image_model_capabilities',capabilities)
+        monkeypatch.setattr(visual_references,'resolve_image_model_capabilities',capabilities)
+
+        single_payload={
+            'node_id':'phase4-image-node','kind':'image','submission_id':'phase4-single-rejected',
+            'input':{**image_node['data'],'allow_cloud':False},
+        }
+        rejected=c.post(f'/api/projects/{p["id"]}/jobs',json=single_payload)
+        assert rejected.status_code==400 and '不会截断参考图' in rejected.text
+        assert c.get(f'/api/projects/{p["id"]}/jobs').json()==[]
+
+        maximum['value']=2
+        single_payload['submission_id']='phase4-single-accepted'
+        accepted=c.post(f'/api/projects/{p["id"]}/jobs',json=single_payload)
+        assert accepted.status_code==200,accepted.text
+        single=c.get('/api/jobs/'+accepted.json()['id']).json()['input']
+        expected=[assets['hero']['id'],assets['alley']['id']]
+        assert single['asset_ids']==expected
+        assert single['image_reference_sources']==[
+            {'type':'asset','asset_id':asset_id} for asset_id in expected
+        ]
+        assert single['reference_compiler']['source']=='shot.assetBindings'
+        assert assets['manual']['id'] not in single['asset_ids']
+        assert '视觉圣经一致性约束' in single['prompt']
+
+        batch=c.post(
+            f'/api/projects/{p["id"]}/run',
+            json={'submission_id':'phase4-batch-accepted','node_ids':['phase4-image-node']},
+        )
+        assert batch.status_code==200,batch.text
+        batch_job=c.get('/api/jobs/'+batch.json()['job_ids'][0]).json()['input']
+        assert batch_job['asset_ids']==single['asset_ids']
+        assert batch_job['image_reference_sources']==single['image_reference_sources']
+        assert batch_job['reference_compiler']['bindings']==single['reference_compiler']['bindings']
+        for job_id in [accepted.json()['id'],*batch.json()['job_ids']]:
+            c.post('/api/jobs/'+job_id+'/cancel')
+    finally:
+        s.set_setting('providers',old_providers)
+
 def test_asset_library_semantic_categories(authenticated):
     import io
     from PIL import Image
