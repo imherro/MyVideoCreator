@@ -60,6 +60,9 @@ def test_volcengine_ark_unified_settings_and_connection(authenticated,monkeypatc
     assert ark_image_model['id']=='seedream-image'
     assert ark_image_model['capabilities']['image_reference'] is True
     assert ark_image_model['capabilities']['max_references']==10
+    ark_video_model=c.get('/api/providers/ark/models?kind=video').json()['models'][0]
+    assert ark_video_model['capabilities']['image_reference'] is True
+    assert ark_video_model['capabilities']['max_references']==1
     p=project(c)
     import io
     from PIL import Image
@@ -70,12 +73,18 @@ def test_volcengine_ark_unified_settings_and_connection(authenticated,monkeypatc
         'input':{'provider':'ark','prompt':'参考图一的人物生成新场景','asset_ids':[reference['id']],'allow_cloud':True},
     })
     assert accepted.status_code==200,accepted.text
-    rejected_video=c.post('/api/projects/'+p['id']+'/jobs',json={
+    accepted_video=c.post('/api/projects/'+p['id']+'/jobs',json={
         'node_id':'ark-video-reference','kind':'video','submission_id':'ark-video-reference-job',
         'input':{'provider':'ark','prompt':'让人物走动','asset_ids':[reference['id']],'allow_cloud':True},
     })
-    assert rejected_video.status_code==400 and '视频仅支持纯文生视频' in rejected_video.text
+    assert accepted_video.status_code==200,accepted_video.text
+    rejected_video=c.post('/api/projects/'+p['id']+'/jobs',json={
+        'node_id':'ark-video-many-references','kind':'video','submission_id':'ark-video-many-references-job',
+        'input':{'provider':'ark','prompt':'让人物走动','asset_ids':[reference['id'],reference['id']],'allow_cloud':True},
+    })
+    assert rejected_video.status_code==400 and '最多接受一张首帧' in rejected_video.text
     c.post('/api/jobs/'+accepted.json()['id']+'/cancel')
+    c.post('/api/jobs/'+accepted_video.json()['id']+'/cancel')
     rejected=c.post('/api/projects/'+p['id']+'/jobs',json={
         'node_id':'ark-image','kind':'image','submission_id':'ark-cloud-gate',
         'input':{'provider':'ark','prompt':'一只猫'},

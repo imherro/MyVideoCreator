@@ -12,6 +12,7 @@ from . import common
 DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
 SUPPORTED_REFERENCE_FORMATS = {'JPEG': 'image/jpeg', 'PNG': 'image/png'}
 MAX_REFERENCE_BYTES = 10 * 1024 * 1024
+MAX_REFERENCE_DIMENSION = 6000
 
 
 def model_for(provider, kind):
@@ -40,27 +41,49 @@ def max_image_references(provider):
         raise ValueError('火山方舟参考图上限必须是 1–10 的整数')
 
 
-def resolve_image_reference(asset):
-    """Resolve an internal asset to the data URI accepted by Seedream."""
+def load_image_asset(asset):
+    """Load and decode an internal image without applying model-specific limits."""
     if asset.get('kind') != 'image':
         raise ValueError('火山方舟参考素材必须是图片')
     path = (s.ASSETS / str(asset.get('path') or '')).resolve()
     if not path.is_relative_to(s.ASSETS) or not path.is_file():
         raise ValueError('火山方舟参考图文件已丢失')
-    if path.stat().st_size > MAX_REFERENCE_BYTES:
-        raise ValueError('火山方舟单张参考图不能超过 10MB')
     try:
         with Image.open(path) as image:
             mime = SUPPORTED_REFERENCE_FORMATS.get(image.format or '')
             width, height = image.size
             image.verify()
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, Image.DecompressionBombError) as exc:
         raise ValueError('火山方舟无法读取参考图，请重新上传 PNG 或 JPEG') from exc
     if not mime:
         raise ValueError('火山方舟参考图仅支持 PNG 或 JPEG')
+    return {'path':path,'size':path.stat().st_size,'mime':mime,'width':width,'height':height}
+
+
+def resolve_image_reference(asset):
+    """Resolve an internal asset to the data URI accepted by Seedream."""
+    loaded=load_image_asset(asset)
+    if loaded['size'] > MAX_REFERENCE_BYTES:
+        raise ValueError('火山方舟单张参考图不能超过 10MB')
+    width,height=loaded['width'],loaded['height']
     if width <= 14 or height <= 14 or not 1 / 3 <= width / height <= 3:
         raise ValueError('火山方舟参考图尺寸或宽高比不符合要求（边长需大于 14，宽高比 1:3–3:1）')
-    return f'data:{mime};base64,' + base64.b64encode(path.read_bytes()).decode('ascii')
+    if width > MAX_REFERENCE_DIMENSION or height > MAX_REFERENCE_DIMENSION:
+        raise ValueError('火山方舟参考图长边不能超过 6000 像素')
+    return f'data:{loaded["mime"]};base64,' + base64.b64encode(loaded['path'].read_bytes()).decode('ascii')
+
+
+def resolve_seedance_frame(asset):
+    """Resolve one local still as a Seedance first-frame content item."""
+    loaded=load_image_asset(asset)
+    if loaded['size'] > MAX_REFERENCE_BYTES:
+        raise ValueError('火山方舟视频首帧不能超过 10MB')
+    width,height=loaded['width'],loaded['height']
+    if width <= 14 or height <= 14 or not 1 / 3 <= width / height <= 3:
+        raise ValueError('火山方舟视频首帧尺寸或宽高比不符合要求（边长需大于 14，宽高比 1:3–3:1）')
+    if width > MAX_REFERENCE_DIMENSION or height > MAX_REFERENCE_DIMENSION:
+        raise ValueError('火山方舟视频首帧长边不能超过 6000 像素')
+    return f'data:{loaded["mime"]};base64,' + base64.b64encode(loaded['path'].read_bytes()).decode('ascii')
 
 
 def _image_result(worker, job, value):
@@ -118,8 +141,10 @@ def _video_url(value):
 
 
 def generate_video(worker, job, provider):
-    if common.assets_for(job) or job['input'].get('end_asset_id'):
-        raise ValueError('本轮火山方舟仅支持纯文生视频，请移除首帧、尾帧和参考素材')
+    if job['input'].get('end_asset_id'):
+        raise ValueError('当前火山方舟视频仅支持单首帧，不支持尾帧')
+    if len(job['input'].get('asset_ids',[]))>1:
+        raise ValueError('当前火山方舟视频最多接受一张首帧，请移除多余引用')
     model = model_for(provider, 'video')
     if not model:
         raise ValueError('请填写火山方舟视频模型 ID')
@@ -128,9 +153,17 @@ def generate_video(worker, job, provider):
     params = {**provider.get('parameters', {}).get('video', {}), **job['input'].get('parameters', {})}
     with httpx.Client(timeout=120, headers=_headers(provider), trust_env=True) as client:
         if not remote:
+            assets=common.assets_for(job)
+            content=[{'type': 'text', 'text': job['input']['prompt']}]
+            if assets:
+                content.append({
+                    'type':'image_url',
+                    'image_url':{'url':resolve_seedance_frame(assets[0])},
+                    'role':'first_frame',
+                })
             body = {
                 'model': job['input'].get('model') or model,
-                'content': [{'type': 'text', 'text': job['input']['prompt']}],
+                'content': content,
                 'duration': int(params.get('duration', 5)),
                 'resolution': str(params.get('resolution', '720p')),
                 'ratio': str(job['input'].get('ratio') or params.get('ratio') or '16:9'),

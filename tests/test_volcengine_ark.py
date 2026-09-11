@@ -130,6 +130,9 @@ def test_seedance_persists_task_and_resume_only_queries(monkeypatch):
     assert calls==[('POST','/api/v3/contents/generations/tasks'),('GET','/api/v3/contents/generations/tasks/ark-task-1')]
 
     resumed=stored_job('video',p,'existing-task')
+    # Once Ark has accepted an I2V task, resume must only poll the durable task
+    # id and must not need to reload or re-encode the original first frame.
+    resumed['input']['asset_ids']=['source-no-longer-needed-for-polling']
     calls.clear()
     assert worker.execute(resumed)['assets'][0]['id']=='asset-video'
     assert calls==[('GET','/api/v3/contents/generations/tasks/existing-task')]
@@ -137,6 +140,36 @@ def test_seedance_persists_task_and_resume_only_queries(monkeypatch):
         ('https://result.example/movie.mp4','.mp4',True),
         ('https://result.example/movie.mp4','.mp4',True),
     ]
+
+
+def test_seedance_sends_one_local_image_as_first_frame(monkeypatch):
+    p=provider();item=stored_job('video',p)
+    aid,expected=add_image_asset(item,'首帧',(24,48,96))
+    item['input']['asset_ids']=[aid]
+    original=httpx.Client
+    calls=[]
+    def handle(request):
+        calls.append((request.method,request.url.path))
+        if request.method=='POST':
+            body=json.loads(request.read())
+            assert body['content'][0]=={'type':'text','text':item['input']['prompt']}
+            frame=body['content'][1]
+            assert frame['type']=='image_url' and frame['role']=='first_frame'
+            assert base64.b64decode(frame['image_url']['url'].split(',',1)[1])==expected
+            return httpx.Response(200,json={'id':'i2v-task'})
+        return httpx.Response(200,json={'id':'i2v-task','status':'succeeded','content':{'video_url':'https://result.example/i2v.mp4'}})
+    monkeypatch.setattr(ark.httpx,'Client',lambda **kw:original(**kw,transport=httpx.MockTransport(handle)))
+    monkeypatch.setattr(common,'download_result',lambda job,url,ext,recoverable=False:{'id':'i2v-result','kind':'video'})
+    worker=Worker();worker.halt=NoWait()
+    assert worker.execute(item)['assets'][0]['id']=='i2v-result'
+    assert calls==[('POST','/api/v3/contents/generations/tasks'),('GET','/api/v3/contents/generations/tasks/i2v-task')]
+
+
+def test_seedance_rejects_more_than_one_first_frame():
+    item=stored_job('video',provider())
+    item['input']['asset_ids']=[add_image_asset(item,'一',(1,2,3))[0],add_image_asset(item,'二',(3,2,1))[0]]
+    with pytest.raises(ValueError,match='最多接受一张首帧'):
+        Worker().execute(item)
 
 
 def test_seedance_cancel_requests_remote_delete(monkeypatch):

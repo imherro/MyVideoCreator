@@ -101,13 +101,27 @@ class Worker:
                 # can persist a review acknowledgement. Do not let that race
                 # send an unchecked opening frame to a video model.
                 require_video_source_reviews(json.loads(saved['document']),job['node_id'],include_pending=True)
-        upstream_text=[];asset_ids=list(inp.get('asset_ids',[]))
+        upstream_text=[];asset_ids=list(inp.get('asset_ids',[]));upstream_results={}
         for dependency in inp.get('upstream_job_ids',[]):
             with s.db() as c: previous=c.execute('SELECT * FROM jobs WHERE id=? AND project_id=?',(dependency,job['project_id'])).fetchone()
             if not previous or previous['status']!='succeeded': raise ValueError('上游任务尚未完成')
             result=json.loads(previous['result'] or '{}')
+            upstream_results[dependency]=result
             if result.get('text'): upstream_text.append(result['text'])
-            asset_ids.extend(a['id'] for a in result.get('assets',[]) if a.get('kind')=='image')
+            if 'image_reference_sources' not in inp:
+                asset_ids.extend(a['id'] for a in result.get('assets',[]) if a.get('kind')=='image')
+        if 'image_reference_sources' in inp:
+            asset_ids=[]
+            for source in inp['image_reference_sources']:
+                if source.get('type')=='asset' and source.get('asset_id'):
+                    asset_ids.append(source['asset_id'])
+                elif source.get('type')=='upstream_job' and source.get('job_id') in upstream_results:
+                    asset_ids.extend(
+                        a['id'] for a in upstream_results[source['job_id']].get('assets',[])
+                        if a.get('kind')=='image' and a.get('id')
+                    )
+                else:
+                    raise ValueError('批次图像参考来源已损坏，请重新运行画布')
         if upstream_text: inp['prompt']=inp['prompt']+'\n\n上游创作内容：\n'+'\n\n'.join(upstream_text)
         inp['asset_ids']=list(dict.fromkeys(asset_ids))
         job={**job,'input':inp}

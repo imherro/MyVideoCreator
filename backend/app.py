@@ -313,7 +313,11 @@ def provider_models(provider_id:str,kind:str|None=None):
         for item in kinds:
             model=model_for(provider,item)
             if not model:continue
-            capabilities={'image_reference':item=='image','max_references':max_image_references(provider) if item=='image' else None,'end_frame':False}
+            capabilities={
+                'image_reference':item in ('image','video'),
+                'max_references':max_image_references(provider) if item=='image' else 1 if item=='video' else None,
+                'end_frame':False,
+            }
             models.append({'id':model,'name':model,'capabilities':capabilities})
         return {'models':models,'status':'configured'}
     if provider['type']=='maestro' and provider.get('local') and provider.get('auto_start') and url=='http://127.0.0.1:7870':
@@ -426,8 +430,10 @@ def create_job_record(c,pid,body):
     if body.input.get('end_asset_id'):references.append(body.input['end_asset_id'])
     if selected and selected.get('type')=='volcengine_ark':
         from .providers.volcengine_ark import max_image_references
-        if body.kind=='video' and references:
-            raise ValueError('本轮火山方舟视频仅支持纯文生视频，请移除首帧、尾帧和参考素材')
+        if body.kind=='video' and body.input.get('end_asset_id'):
+            raise ValueError('当前火山方舟视频仅支持单首帧，不支持尾帧')
+        if body.kind=='video' and len(body.input.get('asset_ids',[]))>1:
+            raise ValueError('当前火山方舟视频最多接受一张首帧，请移除多余引用')
         if body.kind=='image' and len(references)>max_image_references(selected):
             raise ValueError(f'当前火山方舟图片模型最多支持 {max_image_references(selected)} 张参考图，请移除多余引用')
     for aid in references:
@@ -484,20 +490,39 @@ async def run_workflow(pid:str,request:Request):
     for node,parents in plan:
         data=dict(node.get('data',{}));kind=data.get('kind')
         if kind not in runnable: continue
+        manual_assets=list(data.get('asset_ids',[]))
         static_assets=[]
         generated_image_parents=0
+        reference_sources=[]
+        seen_reference_sources=set()
         for parent_id in parents:
             parent_data=mapping[parent_id].get('data',{})
-            if parent_data.get('kind')=='image': generated_image_parents+=1
+            if parent_data.get('kind')=='image':
+                generated_image_parents+=1
+                key=('upstream_node',parent_id)
+                if key not in seen_reference_sources:
+                    reference_sources.append({'type':'upstream_node','node_id':parent_id})
+                    seen_reference_sources.add(key)
             if parent_data.get('kind') not in runnable and parent_data.get('assetId'):
-                static_assets.append(parent_data['assetId'])
-        data['asset_ids']=list(dict.fromkeys([*data.get('asset_ids',[]),*static_assets]))
+                asset_id=parent_data['assetId'];static_assets.append(asset_id)
+                key=('asset',asset_id)
+                if key not in seen_reference_sources:
+                    reference_sources.append({'type':'asset','asset_id':asset_id})
+                    seen_reference_sources.add(key)
+        for asset_id in manual_assets:
+            key=('asset',asset_id)
+            if key not in seen_reference_sources:
+                reference_sources.append({'type':'asset','asset_id':asset_id})
+                seen_reference_sources.add(key)
+        data['asset_ids']=list(dict.fromkeys([*manual_assets,*static_assets]))
         provider=providers.get(data.get('provider','local'))
         if provider and provider.get('type')=='volcengine_ark':
             from .providers.volcengine_ark import max_image_references
             reference_count=len(data['asset_ids'])+generated_image_parents
-            if kind=='video' and reference_count:
-                raise ValueError('本轮火山方舟视频不接收参考素材，请断开图像输入后再运行')
+            if kind=='video' and data.get('end_asset_id'):
+                raise ValueError('当前火山方舟视频仅支持单首帧，不支持尾帧')
+            if kind=='video' and reference_count>1:
+                raise ValueError('当前火山方舟视频最多接受一张首帧，请只保留一条图像连线或一张素材')
             if kind=='image' and reference_count>max_image_references(provider):
                 raise ValueError(f'当前火山方舟图片模型最多支持 {max_image_references(provider)} 张参考图，请移除多余引用')
         if provider and provider.get('type')=='minimax':
@@ -512,13 +537,21 @@ async def run_workflow(pid:str,request:Request):
         data['project_style']=p['document'].get('style','')
         data['ratio']=p['document'].get('ratio','16:9')
         if kind=='storyboard':data['target_duration']=data.get('target_duration') or p['document'].get('duration',15)
-        prepared.append((node,parents,data))
+        prepared.append((node,parents,data,reference_sources))
     jobs_by_node={};created=[]
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
-        for node,parents,data in prepared:
+        for node,parents,data,reference_sources in prepared:
             kind=data.get('kind')
             data['upstream_job_ids']=[jobs_by_node[n] for n in parents if n in jobs_by_node]
+            # Freeze the exact visual-reference order shown by sourceAssets():
+            # incoming canvas edges first, then explicit node asset_ids. Dynamic
+            # parents are stored by durable job id and resolved by the worker.
+            data['image_reference_sources']=[
+                ({'type':'upstream_job','job_id':jobs_by_node[item['node_id']]}
+                 if item['type']=='upstream_node' else item)
+                for item in reference_sources
+            ]
             result=create_job_record(c,pid,JobCreate(node_id=node['id'],kind=kind,submission_id=f'{group}:{node["id"]}',input=data))
             jobs_by_node[node['id']]=result['id'];created.append(result['id'])
     for jid in created:s.event(pid,{'type':'job','id':jid})

@@ -1098,13 +1098,13 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         (item) => item.data.kind === "storyboard" && Boolean(item.data.text),
       )?.id;
   }
-  function setMiniMaxFirstFrame(assetId: string) {
+  function setSingleFirstFrame(assetId: string, providerName: string) {
     if (!selected) return;
     update((d) => setSingleImageReference(d, selected, assetId));
     setNotice(
       assetId
-        ? "已将 MiniMax 首帧限定为所选素材"
-        : "已清除 MiniMax 的图像首帧引用",
+        ? `已将 ${providerName} 首帧限定为所选素材`
+        : `已清除 ${providerName} 的图像首帧引用`,
     );
   }
   async function run(n = node) {
@@ -2158,16 +2158,25 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               </label>
             )}
             {data.kind === "video" &&
-              config.providers.find((p: Any) => p.id === data.provider)
-                ?.type === "minimax" &&
+              ["minimax", "volcengine_ark"].includes(
+                config.providers.find((p: Any) => p.id === data.provider)
+                  ?.type,
+              ) &&
               (() => {
                 const references = sourceAssets(node.id) as string[];
+                const providerType = config.providers.find(
+                  (p: Any) => p.id === data.provider,
+                )?.type;
+                const providerName =
+                  providerType === "volcengine_ark" ? "Seedance" : "MiniMax";
                 return (
                   <label>
                     首帧（可选，图生视频）
                     <select
                       value={references.length === 1 ? references[0] : ""}
-                      onChange={(e) => setMiniMaxFirstFrame(e.target.value)}
+                      onChange={(e) =>
+                        setSingleFirstFrame(e.target.value, providerName)
+                      }
                     >
                       <option value="">不指定首帧</option>
                       {assets
@@ -2183,7 +2192,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                     </small>
                     {references.length > 1 && (
                       <small className="error">
-                        当前已有 {references.length} 张图像参考，MiniMax
+                        当前已有 {references.length} 张图像参考，{providerName}
                         只能使用一张。请选择一张素材以整理引用。
                       </small>
                     )}
@@ -2191,8 +2200,13 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 );
               })()}
             {["image", "video"].includes(data.kind) &&
-              config.providers.find((p: Any) => p.id === data.provider)
-                ?.type !== "minimax" && (
+              !(
+                data.kind === "video" &&
+                ["minimax", "volcengine_ark"].includes(
+                  config.providers.find((p: Any) => p.id === data.provider)
+                    ?.type,
+                )
+              ) && (
                 <>
                   <div className="two-fields">
                     <label>
@@ -3525,7 +3539,7 @@ function SettingsPanel({
           )}
           {p.type === "volcengine_ark" && (
             <>
-              <p className="muted">一个 ARK API Key 统一调用豆包文本、Seedream 文生图/多参考图与 Seedance 文生视频。任务只保存素材 ID；参考图内容仅由服务端读取并编码。</p>
+              <p className="muted">一个 ARK API Key 统一调用豆包文本、Seedream 文生图/多参考图与 Seedance 文生视频/单首帧图生视频。任务只保存素材 ID；参考图内容仅由服务端读取并编码。</p>
               <button className="secondary full" disabled={busy} onClick={() => void testArk(p.id)}>保存并测试连接</button>
             </>
           )}

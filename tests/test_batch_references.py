@@ -1,9 +1,14 @@
 import io
+import base64
+import json
+import httpx
 import pytest
 from PIL import Image
 from fastapi.testclient import TestClient
 from backend.app import app
 from backend import store as s
+from backend.providers import common, volcengine_ark as ark
+from backend.worker import Worker
 from test_api import project
 
 
@@ -27,6 +32,14 @@ def _minimax_settings(client):
     client.put('/api/settings',json={'providers':[{
         'id':'hailuo','name':'Hailuo','type':'minimax','kind':'video',
         'url':'https://api.minimax.io/v1','model':'MiniMax-Hailuo-2.3','local':False
+    }]})
+
+
+def _ark_settings(client):
+    client.put('/api/settings',json={'providers':[{
+        'id':'ark','name':'火山方舟','type':'volcengine_ark','local':False,
+        'url':'https://ark.example/api/v3','api_key':'secret',
+        'models':{'text':'doubao','image':'seedream','video':'seedance'},
     }]})
 
 
@@ -63,3 +76,48 @@ def test_batch_rejects_multiple_minimax_frames_before_queueing(batch_authenticat
     assert result.status_code==400
     assert '一张首帧' in result.text
     assert client.get('/api/projects/'+item['id']+'/jobs').json()==[]
+
+
+def test_batch_seedream_keeps_canvas_reference_order_after_parent_finishes(batch_authenticated,monkeypatch):
+    client=batch_authenticated;item=project(client);_ark_settings(client)
+    generated=_image(client,item['id'],'generated.png')
+    static=_image(client,item['id'],'static.png')
+    manual=_image(client,item['id'],'manual.png')
+    doc=item['document']
+    doc['nodes']=[
+        {'id':'generated-node','data':{'kind':'image','provider':'ark','prompt':'生成角色定妆图'}},
+        {'id':'static-node','data':{'kind':'reference','assetId':static['id']}},
+        {'id':'target','data':{'kind':'image','provider':'ark','prompt':'融合三张参考图','asset_ids':[manual['id']]}},
+    ]
+    doc['edges']=[
+        {'id':'generated-first','source':'generated-node','target':'target'},
+        {'id':'static-second','source':'static-node','target':'target'},
+    ]
+    saved=client.put('/api/projects/'+item['id'],json={'name':item['name'],'revision':item['revision'],'document':doc})
+    assert saved.status_code==200,saved.text
+    result=client.post('/api/projects/'+item['id']+'/run',json={'submission_id':'ordered-ark-batch-001','allow_cloud':True})
+    assert result.status_code==200,result.text
+    jobs={job['node_id']:job for job in client.get('/api/projects/'+item['id']+'/jobs').json()}
+    parent,target=jobs['generated-node'],jobs['target']
+    assert target['input']['image_reference_sources']==[
+        {'type':'upstream_job','job_id':parent['id']},
+        {'type':'asset','asset_id':static['id']},
+        {'type':'asset','asset_id':manual['id']},
+    ]
+    with s.db() as db:
+        db.execute("UPDATE jobs SET status='succeeded',result=? WHERE id=?",(
+            s.dumps({'assets':[{'id':generated['id'],'kind':'image'}]}),parent['id']))
+        db.execute("UPDATE jobs SET status='running' WHERE id=?",(target['id'],))
+    expected=[]
+    for asset in (generated,static,manual):
+        with s.db() as db:
+            row=db.execute('SELECT path FROM assets WHERE id=?',(asset['id'],)).fetchone()
+        expected.append((s.ASSETS/row['path']).read_bytes())
+    original=httpx.Client
+    def handle(request):
+        body=json.loads(request.read())
+        assert [base64.b64decode(value.split(',',1)[1]) for value in body['image']]==expected
+        return httpx.Response(200,json={'data':[{'url':'https://result.example/frame.png'}]})
+    monkeypatch.setattr(ark.httpx,'Client',lambda **kw:original(**kw,transport=httpx.MockTransport(handle)))
+    monkeypatch.setattr(common,'download_result',lambda job,url,ext:{'id':'result','kind':'image'})
+    assert Worker().execute(target)['assets'][0]['id']=='result'
