@@ -92,6 +92,17 @@ import {
   updateDraftVisualVersion,
 } from "./filmBible/commands";
 import {
+  acceptVisualReferenceResult,
+  attachUploadedPrimaryReference,
+  isStateCard,
+  lockVisualVersion,
+  planVisualReferenceGeneration,
+  resolveVisualGenerationTarget,
+  setVisualCardImageOverride,
+  startVisualReferenceGeneration,
+  visualAssetCategory,
+} from "./filmBible/references";
+import {
   deriveManagedGraph,
   filterManagedEdgeRemovals,
   isManagedVisualNode,
@@ -854,7 +865,11 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     if (!completed.length) return;
     update((d) => {
       let next = d;
-      for (const job of completed) next = acceptResult(next, job, jobs);
+      for (const job of completed) {
+        next = job.node_id.startsWith("visual-version:")
+          ? acceptVisualReferenceResult(next, job)
+          : acceptResult(next, job, jobs);
+      }
       return {
         ...next,
         applied: [...(d.applied || []), ...completed.map((j) => j.id)],
@@ -1313,6 +1328,99 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       setBusy(false);
     }
   }
+  async function uploadVisualReference(versionId: string, file: File) {
+    const snapshot = current.current;
+    if (!snapshot.project || !snapshot.doc) return;
+    const visual = visualBibleOf(snapshot.doc);
+    const version = visual.versions[versionId];
+    const card = version ? visual.cards[version.cardId] : undefined;
+    if (!version || !card) throw new Error("视觉版本不存在");
+    const form = new FormData();
+    form.append("file", file);
+    const asset = await api(
+      `/projects/${snapshot.project.id}/assets?category=${encodeURIComponent(visualAssetCategory(card))}`,
+      { method: "POST", body: form },
+    );
+    if (asset.kind !== "image") throw new Error("主参考素材必须是图片");
+    update((document) =>
+      attachUploadedPrimaryReference(document, versionId, asset),
+    );
+    setAssets((items) => [
+      asset,
+      ...items.filter((item) => item.id !== asset.id),
+    ]);
+    setNotice("主参考图已上传，请检查画面后确认锁定");
+  }
+  async function generateVisualReference(
+    versionId: string,
+    allowCloud: boolean,
+  ) {
+    const snapshot = current.current;
+    if (!snapshot.project || !snapshot.doc) return;
+    const visual = visualBibleOf(snapshot.doc);
+    const version = visual.versions[versionId];
+    const card = version ? visual.cards[version.cardId] : undefined;
+    if (!version || !card) throw new Error("视觉版本不存在");
+    const target = resolveVisualGenerationTarget(
+      card,
+      snapshot.doc.generationPolicy,
+      config.providers,
+      system.models,
+    );
+    const provider = config.providers.find(
+      (item: Any) => item.id === target.providerId,
+    );
+    if (!provider) throw new Error("图片生成服务已不存在，请重新选择");
+    if (!provider.local && !allowCloud)
+      throw new Error("请先明确允许本次使用云端图片模型");
+    let capabilities: Any | undefined;
+    if (isStateCard(card)) {
+      const catalog = await api(
+        `/providers/${encodeURIComponent(target.providerId)}/models?kind=image`,
+      );
+      const model = (catalog.models || []).find(
+        (item: Any) => item.id === target.modelId,
+      );
+      capabilities = model?.capabilities;
+    }
+    const plan = planVisualReferenceGeneration(
+      snapshot.doc,
+      versionId,
+      target,
+      capabilities,
+    );
+    await save();
+    if (dirty.current) throw new Error("项目尚未保存，请先解决保存冲突");
+    const job = await api(
+      `/projects/${snapshot.project.id}/jobs`,
+      send("POST", {
+        node_id: `visual-version:${versionId}`,
+        kind: "image",
+        submission_id: id(),
+        input: {
+          provider: plan.providerId,
+          model: plan.modelId,
+          prompt: plan.prompt,
+          asset_ids: plan.assetIds,
+          asset_category: plan.assetCategory,
+          allow_cloud: !provider.local ? allowCloud : false,
+          ratio: snapshot.doc.ratio || "16:9",
+          size: "2K",
+          visual_reference: {
+            versionId,
+            targetSource: plan.targetSource,
+            parentVersionId: plan.parentVersionId,
+            parentReferenceAssetId: plan.parentReferenceAssetId,
+          },
+        },
+      }),
+    );
+    update((document) =>
+      startVisualReferenceGeneration(document, plan, job.id),
+    );
+    await refresh(snapshot.project.id);
+    setNotice("主参考图任务已进入队列；完成后请人工确认并锁定");
+  }
   async function changeAssetCategory(asset: Asset, category: string) {
     if (!project) return;
     try {
@@ -1628,7 +1736,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           </Suspense>
         ) : view === "canvas" ? (
           <div className="canvas">
-            <VisualBibleGraphProvider visual={visualBibleOf(doc)}>
+            <VisualBibleGraphProvider visual={visualBibleOf(doc)} assets={assets}>
             <ReactFlow
               nodes={renderedNodes}
               edges={renderedEdges}
@@ -2669,6 +2777,12 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               <FilmBiblePanel
                 visual={visualBibleOf(doc)}
                 shots={doc.shots}
+                assets={assets}
+                jobs={jobs}
+                generationPolicy={doc.generationPolicy}
+                providers={config.providers}
+                localModels={system.models}
+                request={api}
                 focusVersionId={visualFocus}
                 onFocusVersion={setVisualFocus}
                 onRenameCard={(cardId, name) => {
@@ -2699,6 +2813,32 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   try {
                     const next = setVisualVersionStatus(doc, versionId, status);
                     update(() => next);
+                  } catch (reason) {
+                    report(reason);
+                  }
+                }}
+                onSetImageOverride={(cardId, override) => {
+                  try {
+                    update((document) =>
+                      setVisualCardImageOverride(document, cardId, override),
+                    );
+                    setNotice(
+                      override.mode === "override"
+                        ? "此资产将使用自定义图片模型"
+                        : "此资产将继承项目默认图片模型",
+                    );
+                  } catch (reason) {
+                    report(reason);
+                  }
+                }}
+                onUploadReference={uploadVisualReference}
+                onGenerateReference={generateVisualReference}
+                onLock={(versionId) => {
+                  try {
+                    update((document) =>
+                      lockVisualVersion(document, versionId),
+                    );
+                    setNotice("视觉版本已确认锁定");
                   } catch (reason) {
                     report(reason);
                   }

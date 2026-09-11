@@ -67,12 +67,22 @@ def test_film_bible_and_shot_bindings_round_trip_through_project_document(authen
       'attributes':[],'invariants':['灰色风衣'],
     }]})
     doc['filmBible']['visual']=visual;version_id=key_ids['hero'][1]
+    card_id=key_ids['hero'][0]
+    visual['cards'][card_id]['generation']={'image':{'mode':'override','providerId':'ark','modelId':'seedream-custom'}}
+    visual['versions'][version_id]['status']='locked'
+    visual['versions'][version_id]['references']=[{
+      'role':'primary','assetId':'asset-reference','source':'generated','createdAt':123,
+      'provenance':{'jobId':'job-reference','providerId':'ark','modelId':'seedream-custom','targetSource':'override'},
+    }]
+    visual['versions'][version_id]['provenance']={'lockedAt':124}
     doc['shots']=[{'id':'shot-001','uid':'shot-stable-1','order':1,'assetBindings':{
       'characters':[{'role':'林岚','versionId':version_id}],'scene':None,'props':[]},'pipeline':{}}]
     saved=c.put('/api/projects/'+p['id'],json={'name':p['name'],'revision':p['revision'],'document':doc})
     assert saved.status_code==200,saved.text
     restored=c.get('/api/projects/'+p['id']).json()['document']
     assert restored['filmBible']['visual']==doc['filmBible']['visual']
+    assert restored['filmBible']['visual']['cards'][card_id]['generation']['image']['mode']=='override'
+    assert restored['filmBible']['visual']['versions'][version_id]['references'][0]['assetId']=='asset-reference'
     assert restored['shots']==doc['shots']
     assert all(card['source']=={'type':'script_extraction'} for card in restored['filmBible']['visual']['cards'].values())
 

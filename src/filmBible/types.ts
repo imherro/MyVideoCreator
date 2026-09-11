@@ -13,6 +13,27 @@ export type VisualVersionStatus =
 
 export type VisualAttribute = { name: string; value: string };
 
+export type VisualGenerationOverride =
+  | { mode: "inherit" }
+  | { mode: "override"; providerId: string; modelId: string };
+
+export type VisualReference = {
+  role: "primary";
+  assetId: string;
+  source: "uploaded" | "generated";
+  createdAt: number;
+  provenance: {
+    jobId?: string;
+    providerId?: string;
+    modelId?: string;
+    targetSource?: "override" | "project" | "system";
+    prompt?: string;
+    parentVersionId?: string;
+    parentReferenceAssetId?: string;
+    filename?: string;
+  };
+};
+
 export type VisualCard = {
   id: string;
   kind: VisualKind;
@@ -21,6 +42,7 @@ export type VisualCard = {
   currentVersionId: string;
   status: "active" | "deprecated";
   source: { type: "script_extraction" };
+  generation?: { image?: VisualGenerationOverride };
 };
 
 export type VisualVersion = {
@@ -34,7 +56,7 @@ export type VisualVersion = {
     attributes: VisualAttribute[];
   };
   invariants: string[];
-  references: Array<Record<string, unknown>>;
+  references: VisualReference[];
   createdAt: number;
   provenance: Record<string, unknown>;
 };
@@ -81,4 +103,3 @@ export function visualBibleOf(document: FilmBibleDocument): VisualBible {
   const value = document.filmBible?.visual;
   return value && value.cards && value.versions ? value : emptyVisualBible();
 }
-

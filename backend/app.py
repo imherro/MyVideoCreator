@@ -435,6 +435,13 @@ def create_job_record(c,pid,body):
         if saved: require_video_source_reviews(json.loads(saved['document']),body.node_id)
     if body.kind=='storyboard' and body.input.get('target_duration') is not None:
         if not 1<=float(body.input['target_duration'])<=3000:raise ValueError('分镜目标时长应为 1–3000 秒')
+    if body.input.get('visual_reference') is not None:
+        from .visual_references import validate_visual_reference_job
+        saved=c.execute('SELECT document FROM projects WHERE id=?',(pid,)).fetchone()
+        validate_visual_reference_job(
+            json.loads(saved['document']) if saved else {},body.node_id,body.kind,
+            body.input,s.get_setting('providers',[]),
+        )
     if body.kind in ('image','video') and body.input.get('provider','local')=='local':raise ValueError('请为图像或视频节点选择对应的本地媒体服务')
     selected = None
     if body.input.get('provider','local')!='local' and body.kind!='export':

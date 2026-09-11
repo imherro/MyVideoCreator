@@ -1,11 +1,30 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowUpRight, Link2, LockKeyhole, Unlink } from "lucide-react";
-import type { VisualAttribute, VisualBible, VisualVersionStatus } from "./types.ts";
+import {
+  ArrowUpRight,
+  ImagePlus,
+  Link2,
+  LoaderCircle,
+  LockKeyhole,
+  Sparkles,
+  Unlink,
+} from "lucide-react";
+import { ModelSelector } from "../ModelSelector.tsx";
+import type { GenerationPolicy } from "../generationPolicy.ts";
+import type {
+  VisualAttribute,
+  VisualBible,
+  VisualGenerationOverride,
+  VisualVersionStatus,
+} from "./types.ts";
 import { visualKindLabels, visualStatusLabels } from "./types.ts";
 import {
   isVersionBound,
   isVisualBindingActionDisabled,
 } from "./commands.ts";
+import {
+  primaryReference,
+  resolveVisualGenerationTarget,
+} from "./references.ts";
 
 type VersionDraft = {
   description: string;
@@ -21,9 +40,19 @@ export function FilmBiblePanel({
   onRenameCard,
   onSaveVersion,
   onStatus,
+  onSetImageOverride,
+  onUploadReference,
+  onGenerateReference,
+  onLock,
   onBind,
   onUnbind,
   onLocate,
+  assets,
+  jobs,
+  generationPolicy,
+  providers,
+  localModels,
+  request,
 }: {
   visual: VisualBible;
   shots: Array<Record<string, any>>;
@@ -32,9 +61,22 @@ export function FilmBiblePanel({
   onRenameCard: (cardId: string, name: string) => void;
   onSaveVersion: (versionId: string, draft: VersionDraft) => void;
   onStatus: (versionId: string, status: VisualVersionStatus) => void;
+  onSetImageOverride: (
+    cardId: string,
+    override: VisualGenerationOverride,
+  ) => void;
+  onUploadReference: (versionId: string, file: File) => Promise<void>;
+  onGenerateReference: (versionId: string, allowCloud: boolean) => Promise<void>;
+  onLock: (versionId: string) => void;
   onBind: (shotUid: string, versionId: string) => void;
   onUnbind: (shotUid: string, versionId: string) => void;
   onLocate: (versionId: string) => void;
+  assets: Array<Record<string, any>>;
+  jobs: Array<Record<string, any>>;
+  generationPolicy: GenerationPolicy | undefined;
+  providers: Array<Record<string, any>>;
+  localModels: Array<Record<string, any>>;
+  request: (path: string) => Promise<any>;
 }) {
   const versions = useMemo(
     () =>
@@ -64,6 +106,9 @@ export function FilmBiblePanel({
     attributes: selected?.spec.attributes || [],
     invariants: selected?.invariants || [],
   });
+  const [referenceBusy, setReferenceBusy] = useState(false);
+  const [referenceError, setReferenceError] = useState("");
+  const [allowCloud, setAllowCloud] = useState(false);
   useEffect(() => {
     if (focusVersionId && visual.versions[focusVersionId])
       setSelectedId(focusVersionId);
@@ -80,6 +125,10 @@ export function FilmBiblePanel({
   useEffect(() => {
     if (!shotUid && shots[0]) setShotUid(String(shots[0].uid || shots[0].id));
   }, [shotUid, shots]);
+  useEffect(() => {
+    setReferenceError("");
+    setAllowCloud(false);
+  }, [selected?.id]);
   if (!versions.length)
     return (
       <div className="empty-state film-bible-empty">
@@ -96,6 +145,45 @@ export function FilmBiblePanel({
     card.status,
     bound,
   );
+  const reference = primaryReference(selected);
+  const referenceAsset = assets.find((item) => item.id === reference?.assetId);
+  const generationRecord = selected.provenance?.referenceGeneration as
+    | Record<string, any>
+    | undefined;
+  const referenceJob = jobs.find(
+    (item) => item.id === generationRecord?.jobId,
+  );
+  const generationRunning = ["queued", "running"].includes(
+    referenceJob?.status || "",
+  );
+  let resolvedTarget: ReturnType<typeof resolveVisualGenerationTarget> | undefined;
+  let targetError = "";
+  try {
+    resolvedTarget = resolveVisualGenerationTarget(
+      card,
+      generationPolicy,
+      providers,
+      localModels,
+    );
+  } catch (reason: any) {
+    targetError = reason?.message || String(reason);
+  }
+  const targetProvider = providers.find(
+    (item) => item.id === resolvedTarget?.providerId,
+  );
+  const cloudTarget = Boolean(targetProvider && !targetProvider.local);
+  const override = card.generation?.image;
+  const perform = async (action: () => Promise<void>) => {
+    setReferenceBusy(true);
+    setReferenceError("");
+    try {
+      await action();
+    } catch (reason: any) {
+      setReferenceError(reason?.message || String(reason));
+    } finally {
+      setReferenceBusy(false);
+    }
+  };
   const selectVersion = (versionId: string) => {
     setSelectedId(versionId);
     onFocusVersion(versionId);
@@ -208,22 +296,169 @@ export function FilmBiblePanel({
             <button className="primary" onClick={() => onSaveVersion(selected.id, draft)}>
               保存版本文字
             </button>
-            <button
-              onClick={() => onStatus(
-                selected.id,
-                selected.status === "draft" ? "pending_reference" : "draft",
-              )}
-            >
-              {selected.status === "draft" ? "标记待参考图" : "恢复草稿"}
-            </button>
+            {selected.status === "pending_reference" && (
+              <button onClick={() => onStatus(selected.id, "draft")}>
+                恢复草稿
+              </button>
+            )}
             <button className="danger-button" onClick={() => onStatus(selected.id, "deprecated")}>弃用版本</button>
           </div>
         )}
         {!editable && (
           <p className="muted">
             {selected.status === "locked"
-              ? "已锁定版本只读；Phase 3 将提供参考图和锁定流程。"
+              ? "已锁定版本只读；当前仍可用于分镜绑定或保留为历史。"
               : "已弃用版本保留历史，但不能编辑或建立新绑定。"}
+          </p>
+        )}
+        <hr />
+        <h3>主参考图</h3>
+        <div className="reference-policy">
+          <label>
+            图片模型策略
+            <select
+              value={override?.mode === "override" ? "override" : "inherit"}
+              disabled={!editable}
+              onChange={(event) => {
+                if (event.target.value === "inherit") {
+                  onSetImageOverride(card.id, { mode: "inherit" });
+                  return;
+                }
+                const fallback =
+                  resolvedTarget ||
+                  (() => {
+                    const provider = providers.find(
+                      (item) => !item.kind || item.kind === "image",
+                    );
+                    return {
+                      providerId: provider?.id || "",
+                      modelId:
+                        provider?.models?.image || provider?.model || "",
+                    };
+                  })();
+                onSetImageOverride(card.id, {
+                  mode: "override",
+                  providerId: fallback.providerId,
+                  modelId: fallback.modelId,
+                });
+              }}
+            >
+              <option value="inherit">继承项目默认</option>
+              <option value="override">此资产自定义</option>
+            </select>
+          </label>
+          {override?.mode === "override" && (
+            <ModelSelector
+              data={{
+                kind: "image",
+                provider: override.providerId,
+                model: override.modelId,
+              }}
+              providers={providers}
+              localModels={localModels}
+              request={request}
+              onChange={(patch) =>
+                onSetImageOverride(card.id, {
+                  mode: "override",
+                  providerId: String(patch.provider || override.providerId),
+                  modelId: String(patch.model ?? override.modelId),
+                })
+              }
+            />
+          )}
+          {override?.mode !== "override" && resolvedTarget && (
+            <p className="muted">
+              当前继承：{targetProvider?.name || resolvedTarget.providerId} · {resolvedTarget.modelId || "服务默认模型"}
+            </p>
+          )}
+          {targetError && <p className="error">{targetError}</p>}
+        </div>
+        {reference ? (
+          <div className="primary-reference">
+            {referenceAsset ? (
+              <img src={referenceAsset.url} alt={`${card.name} 主参考图`} />
+            ) : (
+              <div className="missing-reference">参考素材暂未加载：{reference.assetId}</div>
+            )}
+            <div>
+              <b>{reference.source === "generated" ? "模型生成" : "本地上传"}</b>
+              <small>{referenceAsset?.name || reference.assetId}</small>
+              {reference.provenance.providerId && (
+                <small>
+                  {reference.provenance.providerId} · {reference.provenance.modelId}
+                </small>
+              )}
+            </div>
+          </div>
+        ) : (
+          <p className="muted">尚未设置主参考图。提取剧本和分镜不会自动调用图片模型。</p>
+        )}
+        {editable && (
+          <div className="reference-actions">
+            <label className="upload-reference-button">
+              <ImagePlus size={15} /> 上传主参考图
+              <input
+                type="file"
+                accept="image/png,image/jpeg"
+                disabled={referenceBusy || generationRunning}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (file)
+                    void perform(() => onUploadReference(selected.id, file));
+                }}
+              />
+            </label>
+            <button
+              className="primary"
+              disabled={
+                referenceBusy ||
+                generationRunning ||
+                Boolean(targetError) ||
+                !resolvedTarget?.providerId ||
+                !resolvedTarget?.modelId ||
+                (cloudTarget && !allowCloud)
+              }
+              onClick={() =>
+                void perform(() =>
+                  onGenerateReference(selected.id, allowCloud),
+                )
+              }
+            >
+              {referenceBusy || generationRunning ? (
+                <LoaderCircle className="spin" size={15} />
+              ) : (
+                <Sparkles size={15} />
+              )}
+              {reference ? "重新生成参考图" : "生成主参考图"}
+            </button>
+          </div>
+        )}
+        {editable && cloudTarget && (
+          <label className="check-label">
+            <input
+              type="checkbox"
+              checked={allowCloud}
+              onChange={(event) => setAllowCloud(event.target.checked)}
+            />
+            允许本次使用云端图片模型，按供应商计费
+          </label>
+        )}
+        {referenceJob?.status === "failed" && (
+          <p className="error">参考图生成失败：{referenceJob.error}</p>
+        )}
+        {referenceError && <p className="error">{referenceError}</p>}
+        {selected.status === "pending_reference" && reference && (
+          <button
+            className="primary full lock-reference"
+            onClick={() => onLock(selected.id)}
+          >
+            <LockKeyhole size={15} /> 确认此图并锁定版本
+          </button>
+        )}
+        {selected.status === "locked" && (
+          <p className="locked-reference-note">
+            <LockKeyhole size={14} /> 此参考图已确认锁定，可安全用于后续分镜一致性约束。
           </p>
         )}
         <hr />
