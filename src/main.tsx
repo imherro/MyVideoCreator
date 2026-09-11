@@ -893,6 +893,20 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   }, [project?.id, update, config.providers, system.models]);
   const node = doc?.nodes.find((n) => n.id === selected);
   const data = (node?.data || {}) as Any;
+  function pendingInitialStateChecks(targetId: string) {
+    return (doc?.edges || [])
+      .filter((edge) => edge.target === targetId)
+      .map((edge) => doc?.nodes.find((item) => item.id === edge.source))
+      .filter(
+        (source) =>
+          source?.data.kind === "image" &&
+          source.data.assetId &&
+          requiresInitialStateReview(source.data.prompt) &&
+          !source.data.state_reviewed,
+      );
+  }
+  const pendingInitialStateNodes =
+    node?.data.kind === "video" ? pendingInitialStateChecks(node.id) : [];
   const activeJob = jobs.find((j) => j.node_id === selected);
   const activeCount = jobs.filter((j) =>
     ["queued", "running"].includes(j.status),
@@ -993,24 +1007,18 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   }
   async function run(n = node) {
     if (!n || !project || busy) return;
-    if (n.data.kind === "video") {
-      const pendingChecks = (doc?.edges || [])
-        .filter((edge) => edge.target === n.id)
-        .map((edge) => doc?.nodes.find((item) => item.id === edge.source))
-        .filter(
-          (source) =>
-            source?.data.kind === "image" &&
-            source.data.assetId &&
-            requiresInitialStateReview(source.data.prompt) &&
-            !source.data.state_reviewed,
-        );
-      if (pendingChecks.length) {
-        throw new Error("请先在关联分镜图中确认首帧状态，再生成视频。");
-      }
-    }
     setBusy(true);
     setError("");
     try {
+      if (n.data.kind === "video") {
+        const pendingChecks = pendingInitialStateChecks(n.id);
+        if (pendingChecks.length) {
+          const names = pendingChecks
+            .map((item) => item?.data.label || "关联分镜图")
+            .join("、");
+          throw new Error(`请先核验「${names}」的首帧状态，再生成视频。`);
+        }
+      }
       await save();
       if (dirty.current) throw new Error("项目尚未保存，请先解决保存冲突");
       const input = {
@@ -1872,6 +1880,29 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 ) : (
                   <small>生成图片后，在预览画面核对状态，再确认。</small>
                 )}
+              </div>
+            )}
+            {data.kind === "video" && pendingInitialStateNodes.length > 0 && (
+              <div className="error">
+                <div>
+                  <b>生成前需要核验首帧</b>
+                  <p>
+                    关联分镜图「
+                    {pendingInitialStateNodes
+                      .map((item) => item?.data.label || "未命名分镜图")
+                      .join("、")}
+                    」尚未确认动作发生前的画面状态。
+                  </p>
+                  <button
+                    className="secondary"
+                    onClick={() => {
+                      const first = pendingInitialStateNodes[0];
+                      if (first) setSelected(first.id);
+                    }}
+                  >
+                    前往核验首帧
+                  </button>
+                </div>
               </div>
             )}
             {["text", "storyboard"].includes(data.kind) && (
