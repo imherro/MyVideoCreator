@@ -772,7 +772,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       saveFlight.current = null;
     }
   }
-
   useEffect(() => {
     const interval = setInterval(() => {
       if (dirty.current) save();
@@ -1130,6 +1129,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         asset_ids: sourceAssets(n.id),
         allow_cloud: cloud,
         prompt: String(n.data.prompt || ""),
+        ratio: doc?.ratio || "16:9",
         size: n.data.resolution || "1024x1024",
         target_duration:
           n.data.kind === "storyboard"
@@ -3263,11 +3263,35 @@ function SettingsPanel({
       ),
     });
   }
+  function clearEnteredApiKeys() {
+    setValue((current: Any) => ({
+      ...current,
+      providers: current.providers.map((provider: Any) =>
+        provider.api_key
+          ? { ...provider, api_key: "", api_key_set: true }
+          : provider,
+      ),
+    }));
+  }
   async function save() {
     setBusy(true);
     try {
       await onSave(value);
+      clearEnteredApiKeys();
       setStatus("设置已保存");
+    } catch (e) {
+      onError(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function testArk(providerId: string) {
+    setBusy(true);
+    try {
+      await onSave(value);
+      clearEnteredApiKeys();
+      const result = await api(`/providers/${encodeURIComponent(providerId)}/test`, send("POST"));
+      setStatus(result.message || "火山方舟连接成功");
     } catch (e) {
       onError(e);
     } finally {
@@ -3408,7 +3432,22 @@ function SettingsPanel({
               接口类型
               <select
                 value={p.type}
-                onChange={(e) => patchProvider(i, { type: e.target.value })}
+                onChange={(e) =>
+                  patchProvider(
+                    i,
+                    e.target.value === "volcengine_ark"
+                      ? {
+                          type: e.target.value,
+                          kind: undefined,
+                          local: false,
+                          url: "https://ark.cn-beijing.volces.com/api/v3",
+                          models: p.models || { text: "", image: "", video: "" },
+                        }
+                      : p.type === "volcengine_ark"
+                        ? { type: e.target.value, kind: "text", model: p.models?.text || "", models: undefined }
+                        : { type: e.target.value },
+                  )
+                }
               >
                 <option value="openai">OpenAI 兼容文本 / 图像</option>
                 <option value="maestro">内置 / WanGP 兼容引擎</option>
@@ -3416,19 +3455,24 @@ function SettingsPanel({
                 <option value="video_api">异步视频 JSON 网关</option>
                 <option value="minimax">MiniMax 原生视频</option>
                 <option value="replicate">Replicate 模型平台</option>
+                <option value="volcengine_ark">火山方舟（文本 / 图像 / 视频）</option>
               </select>
             </label>
-            <label>
-              用途
-              <select
-                value={p.kind || "text"}
-                onChange={(e) => patchProvider(i, { kind: e.target.value })}
-              >
-                <option value="text">文本</option>
-                <option value="image">图像</option>
-                <option value="video">视频</option>
-              </select>
-            </label>
+            {p.type === "volcengine_ark" ? (
+              <label>用途<input value="统一：文本、图像、视频" readOnly /></label>
+            ) : (
+              <label>
+                用途
+                <select
+                  value={p.kind || "text"}
+                  onChange={(e) => patchProvider(i, { kind: e.target.value })}
+                >
+                  <option value="text">文本</option>
+                  <option value="image">图像</option>
+                  <option value="video">视频</option>
+                </select>
+              </label>
+            )}
           </div>
           <label>
             服务地址
@@ -3438,13 +3482,21 @@ function SettingsPanel({
               placeholder="http://127.0.0.1:8188"
             />
           </label>
-          <label>
-            默认模型 ID
-            <input
-              value={p.model || ""}
-              onChange={(e) => patchProvider(i, { model: e.target.value })}
-            />
-          </label>
+          {p.type === "volcengine_ark" ? (
+            <>
+              <label>文本模型 ID<input value={p.models?.text || ""} onChange={(e) => patchProvider(i, { models: { ...p.models, text: e.target.value } })} /></label>
+              <label>图片模型 ID<input value={p.models?.image || ""} onChange={(e) => patchProvider(i, { models: { ...p.models, image: e.target.value } })} /></label>
+              <label>视频模型 ID<input value={p.models?.video || ""} onChange={(e) => patchProvider(i, { models: { ...p.models, video: e.target.value } })} /></label>
+            </>
+          ) : (
+            <label>
+              默认模型 ID
+              <input
+                value={p.model || ""}
+                onChange={(e) => patchProvider(i, { model: e.target.value })}
+              />
+            </label>
+          )}
           <label>
             API Key
             <input
@@ -3457,14 +3509,24 @@ function SettingsPanel({
               onChange={(e) => patchProvider(i, { api_key: e.target.value })}
             />
           </label>
-          <label className="check-label">
-            <input
-              type="checkbox"
-              checked={!!p.local}
-              onChange={(e) => patchProvider(i, { local: e.target.checked })}
-            />
-            本地服务，不产生云端调用费用
-          </label>
+          {p.type === "volcengine_ark" ? (
+            <p className="muted">云端服务；运行节点前必须明确允许云端调用。</p>
+          ) : (
+            <label className="check-label">
+              <input
+                type="checkbox"
+                checked={!!p.local}
+                onChange={(e) => patchProvider(i, { local: e.target.checked })}
+              />
+              本地服务，不产生云端调用费用
+            </label>
+          )}
+          {p.type === "volcengine_ark" && (
+            <>
+              <p className="muted">一个 ARK API Key 统一调用豆包文本、Seedream 文生图与 Seedance 文生视频。本阶段不发送本地参考素材。</p>
+              <button className="secondary full" disabled={busy} onClick={() => void testArk(p.id)}>保存并测试连接</button>
+            </>
+          )}
           {p.type === "comfy" && (
             <label>
               API 工作流 JSON
@@ -3632,6 +3694,34 @@ function SettingsPanel({
           }
         >
           添加 Replicate
+        </button>
+        <button
+          onClick={() =>
+            setValue({
+              ...value,
+              providers: [
+                ...value.providers,
+                {
+                  id: id(),
+                  name: "火山方舟",
+                  type: "volcengine_ark",
+                  url: "https://ark.cn-beijing.volces.com/api/v3",
+                  local: false,
+                  models: {
+                    text: "doubao-seed-2-1-pro-260628",
+                    image: "doubao-seedream-5-0-260128",
+                    video: "doubao-seedance-2-0-260128",
+                  },
+                  parameters: {
+                    image: { size: "2K", watermark: false },
+                    video: { duration: 5, resolution: "720p", ratio: "16:9", generate_audio: true },
+                  },
+                },
+              ],
+            })
+          }
+        >
+          添加火山方舟
         </button>
         <button
           onClick={() =>

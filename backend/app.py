@@ -268,7 +268,11 @@ async def update_settings(request:Request):
     if 'providers' in body:
         old={p['id']:p for p in s.get_setting('providers',[])}
         for p in body['providers']:
-            if not p.get('id') or p.get('type') not in ('openai','comfy','maestro','video_api','minimax','replicate'): raise ValueError('模型服务配置无效')
+            if not p.get('id') or p.get('type') not in ('openai','comfy','maestro','video_api','minimax','replicate','volcengine_ark'): raise ValueError('模型服务配置无效')
+            if p.get('type')=='volcengine_ark':
+                from .providers.volcengine_ark import DEFAULT_BASE_URL
+                p['url']=p.get('url') or DEFAULT_BASE_URL
+                if not isinstance(p.get('models'),dict):raise ValueError('火山方舟模型配置无效')
             url=p.get('url','')
             if urlparse(url).scheme not in ('http','https') or urlparse(url).username: raise ValueError('请输入 HTTP(S) 服务地址')
             if 'api_key' not in p: p['api_key']=old.get(p['id'],{}).get('api_key','')
@@ -288,12 +292,17 @@ def start_maestro():
     return runtime.start_maestro()
 
 @app.get('/api/providers/{provider_id}/models')
-def provider_models(provider_id:str):
+def provider_models(provider_id:str,kind:str|None=None):
     import httpx
     provider=next((p for p in s.get_setting('providers',[]) if p['id']==provider_id),None)
     if not provider: raise ValueError('模型服务不存在')
     headers={'Authorization':'Bearer '+provider['api_key']} if provider.get('api_key') else {}
     url=provider['url'].rstrip('/')
+    if provider['type']=='volcengine_ark':
+        from .providers.volcengine_ark import model_for
+        kinds=[kind] if kind in ('text','image','video') else ['text','image','video']
+        models=[{'id':model_for(provider,item),'name':model_for(provider,item)} for item in kinds if model_for(provider,item)]
+        return {'models':models,'status':'configured'}
     if provider['type']=='maestro' and provider.get('local') and provider.get('auto_start') and url=='http://127.0.0.1:7870':
         state=runtime.start_maestro()
         if state['status']=='starting':
@@ -315,6 +324,22 @@ def provider_models(provider_id:str):
             return {'models':[{'id':provider.get('model',''),'name':provider.get('model','配置的视频模型')}]}
     except httpx.HTTPError as exc:
         raise HTTPException(502,'模型服务连接失败，请确认服务地址、启动状态和密钥') from exc
+
+@app.post('/api/providers/{provider_id}/test')
+def test_provider(provider_id:str):
+    import httpx
+    from .worker import checked
+    provider=next((p for p in s.get_setting('providers',[]) if p['id']==provider_id),None)
+    if not provider or provider.get('type')!='volcengine_ark':raise ValueError('火山方舟服务配置不存在')
+    from .providers.volcengine_ark import model_for
+    model=model_for(provider,'text')
+    if not model:raise ValueError('请填写火山方舟文本模型 ID')
+    key=str(provider.get('api_key') or '').strip()
+    if not key:raise ValueError('请先保存 ARK API Key')
+    body={'model':model,'messages':[{'role':'user','content':'只回复 OK'}],'max_tokens':1,'stream':False}
+    with httpx.Client(timeout=30,headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'},trust_env=True) as client:
+        checked(client.post(provider['url'].rstrip('/')+'/chat/completions',json=body))
+    return {'status':'ready','message':'火山方舟连接成功','model':model}
 
 class JobCreate(BaseModel):
     node_id:str
@@ -373,6 +398,9 @@ def create_job_record(c,pid,body):
         selected=configured.get(body.input['provider'])
         if not selected: raise ValueError('模型服务未配置')
         if selected.get('kind') and selected['kind']!=('text' if body.kind=='storyboard' else body.kind):raise ValueError('模型服务用途与节点不匹配，请选择适用服务')
+        if selected.get('type')=='volcengine_ark':
+            from .providers.volcengine_ark import model_for
+            if not model_for(selected,body.kind):raise ValueError('请先配置火山方舟对应类型的模型 ID')
         if not selected.get('local',False) and body.input.get('allow_cloud') is not True: raise ValueError('请选择允许使用此云端服务后再提交')
     if selected and selected['type']=='minimax':
         from .minimax_video import payload
@@ -380,6 +408,8 @@ def create_job_record(c,pid,body):
         payload(body.input,selected)
     references=list(body.input.get('asset_ids',[]))
     if body.input.get('end_asset_id'):references.append(body.input['end_asset_id'])
+    if selected and selected.get('type')=='volcengine_ark' and references:
+        raise ValueError('本轮火山方舟仅支持纯文生图和纯文生视频，请移除参考素材')
     for aid in references:
         asset=asset_row(aid)
         if asset['project_id']!=pid: raise ValueError('不能引用其他项目的素材')
@@ -443,6 +473,8 @@ async def run_workflow(pid:str,request:Request):
                 static_assets.append(parent_data['assetId'])
         data['asset_ids']=list(dict.fromkeys([*data.get('asset_ids',[]),*static_assets]))
         provider=providers.get(data.get('provider','local'))
+        if provider and provider.get('type')=='volcengine_ark' and (data['asset_ids'] or generated_image_parents):
+            raise ValueError('本轮火山方舟不接收参考素材，请断开图像输入后再运行')
         if provider and provider.get('type')=='minimax':
             # Hailuo accepts exactly one initial image.  Detect multiple
             # upstream image branches before any expensive parent job starts.
@@ -453,6 +485,7 @@ async def run_workflow(pid:str,request:Request):
             data['prompt']={'text':'根据上游信息编写剧本','storyboard':'将上游剧本拆解为结构化分镜','image':'生成上游描述的电影画面','video':'根据上游画面与描述生成动态镜头'}[kind]
         data['allow_cloud']=bool(body.get('allow_cloud'))
         data['project_style']=p['document'].get('style','')
+        data['ratio']=p['document'].get('ratio','16:9')
         if kind=='storyboard':data['target_duration']=data.get('target_duration') or p['document'].get('duration',15)
         prepared.append((node,parents,data))
     jobs_by_node={};created=[]
@@ -491,6 +524,9 @@ def cancel(jid:str):
             if provider.get('type')=='replicate':
                 from .replicate_api import cancel as cancel_replicate
                 cancel_replicate(job,provider)
+            elif provider.get('type')=='volcengine_ark':
+                from .providers.volcengine_ark import cancel as cancel_ark
+                cancel_ark(job,provider)
     return read_job(jid)
 
 @app.post('/api/jobs/{jid}/resume')
@@ -505,7 +541,7 @@ def resume(jid:str):
         if job['status']!='interrupted': raise HTTPException(409,'只有中断任务可以恢复查询')
         snapshot=c.execute('SELECT provider FROM job_private WHERE job_id=?',(jid,)).fetchone()
         provider=json.loads(snapshot['provider']) if snapshot else {}
-        if not job['provider_job_id'] or provider.get('type') not in ('maestro','comfy','video_api','minimax','replicate'):
+        if not job['provider_job_id'] or provider.get('type') not in ('maestro','comfy','video_api','minimax','replicate','volcengine_ark'):
             raise HTTPException(409,'此任务没有可恢复的上游编号或查询接口，请核对服务后从节点重新生成')
         c.execute("UPDATE jobs SET status='queued',error=NULL,phase='恢复查询已有上游任务',updated=? WHERE id=?",(time.time(),jid))
     s.event(job['project_id'],{'type':'job','id':jid})

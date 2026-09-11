@@ -34,6 +34,31 @@ def test_cross_origin_and_secret_masking(authenticated):
     assert 'do-not-expose' not in c.get('/api/settings').text
     assert c.get('/api/settings').json()['providers'][0]['api_key_set'] is True
 
+def test_volcengine_ark_unified_settings_and_connection(authenticated,monkeypatch):
+    import httpx
+    c=authenticated
+    provider={
+        'id':'ark','name':'火山方舟','type':'volcengine_ark','local':False,
+        'url':'https://ark.cn-beijing.volces.com/api/v3','api_key':'ark-secret',
+        'models':{'text':'doubao-text','image':'seedream-image','video':'seedance-video'},
+    }
+    assert c.put('/api/settings',json={'providers':[ *s.get_setting('providers',[]), provider]}).status_code==200
+    public=c.get('/api/settings')
+    assert 'ark-secret' not in public.text
+    public_ark=next(item for item in public.json()['providers'] if item['id']=='ark')
+    assert public_ark['api_key_set'] is True
+    assert c.get('/api/providers/ark/models?kind=image').json()['models']==[{'id':'seedream-image','name':'seedream-image'}]
+    calls=[]
+    original=httpx.Client
+    def handle(request):
+        calls.append((request.method,str(request.url),request.headers.get('authorization'),request.read()))
+        return httpx.Response(200,json={'choices':[{'message':{'content':'OK'}}]})
+    monkeypatch.setattr(httpx,'Client',lambda **kw:original(**kw,transport=httpx.MockTransport(handle)))
+    tested=c.post('/api/providers/ark/test')
+    assert tested.status_code==200,tested.text
+    assert tested.json()['status']=='ready'
+    assert calls[0][0:3]==('POST','https://ark.cn-beijing.volces.com/api/v3/chat/completions','Bearer ark-secret')
+
 def test_revision_conflict_and_restore(authenticated):
     c=authenticated;p=project(c)
     doc=p['document'];doc['brief']='中文故事，严格保存。'

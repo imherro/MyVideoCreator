@@ -193,6 +193,9 @@ class Worker:
             from .replicate_api import execute
             return execute(self,job,provider)
         if kind in ('text','storyboard'):
+            if provider['type']=='volcengine_ark':
+                from .providers.volcengine_ark import model_for
+                provider={**provider,'model':model_for(provider,'text')}
             try: return self.text(job,provider)
             finally:
                 if provider_id=='local': runtime.schedule_idle()
@@ -204,6 +207,9 @@ class Worker:
             from .minimax_video import execute
             return execute(self,job,provider)
         if kind=='video' and provider['type']=='video_api': return self.video_api(job,provider)
+        if provider['type']=='volcengine_ark':
+            from .providers.volcengine_ark import execute
+            return execute(self,job,provider)
         raise ValueError('所选服务不支持此任务类型，请更换模型服务。')
 
     def text(self,job,p):
