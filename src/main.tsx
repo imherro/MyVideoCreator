@@ -1521,6 +1521,10 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               editor={doc.editor}
               assets={assets}
               ratio={doc.ratio}
+              shots={doc.shots}
+              nodes={doc.nodes}
+              audioId={(doc as any).audio_id}
+              musicVolume={(doc as any).music_volume ?? 0.3}
               onChange={(editor) =>
                 update((currentDoc) => ({ ...currentDoc, editor }))
               }
