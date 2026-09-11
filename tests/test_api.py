@@ -90,6 +90,7 @@ def test_phase5_roundtrip_preserves_versions_binding_fingerprint_stale_and_media
     import copy
     import io
     from PIL import Image
+    from backend.generation_fingerprint import build_generation_fingerprint
     c=authenticated;p=project(c);doc=p['document']
     v1={
         'id':'hero-v1','cardId':'hero','version':1,'parentVersionId':None,'status':'locked',
@@ -107,10 +108,14 @@ def test_phase5_roundtrip_preserves_versions_binding_fingerprint_stale_and_media
         {'id':'A','uid':'shot-A','imageNode':'image-A','assetBindings':{'characters':[{'role':'林岚','versionId':'hero-v1'}],'scene':None,'props':[]}},
         {'id':'B','uid':'shot-B','imageNode':'image-B','assetBindings':{'characters':[{'role':'林岚','versionId':'hero-v1'}],'scene':None,'props':[]}},
     ]
-    doc['nodes']=[
-        {'id':'image-A','data':{'kind':'image','assetId':media['id'],'resultJob':'historical-job-A','generationFingerprint':{'hash':'old-hash'}}},
-        {'id':'image-B','data':{'kind':'image','assetId':media['id'],'resultJob':'historical-job-B','generationFingerprint':{'hash':'old-hash'}}},
-    ]
+    doc['nodes']=[]
+    for shot in doc['shots']:
+        fingerprint=build_generation_fingerprint(doc,shot,'phase5-provider','phase5-model',1)
+        doc['nodes'].append({'id':shot['imageNode'],'data':{
+            'kind':'image','provider':'phase5-provider','model':'phase5-model',
+            'assetId':media['id'],'resultJob':'historical-job-'+shot['id'],
+            'generationFingerprint':fingerprint,
+        }})
     before_jobs=len(c.get(f'/api/projects/{p["id"]}/jobs').json())
     first=c.put(f'/api/projects/{p["id"]}',json={'name':p['name'],'revision':p['revision'],'document':doc})
     assert first.status_code==200,first.text
@@ -136,7 +141,6 @@ def test_phase5_roundtrip_preserves_versions_binding_fingerprint_stale_and_media
     assert third.status_code==200,third.text
     doc=c.get(f'/api/projects/{p["id"]}').json()['document']
     doc['shots'][0]['assetBindings']['characters'][0]['versionId']='hero-v2'
-    doc['nodes'][0]['data'].update(stale=True,staleReason='visual-version-upgraded')
     fourth=c.put(f'/api/projects/{p["id"]}',json={'name':p['name'],'revision':third.json()['revision'],'document':doc})
     assert fourth.status_code==200,fourth.text
     restored=c.get(f'/api/projects/{p["id"]}').json()['document']
@@ -144,9 +148,11 @@ def test_phase5_roundtrip_preserves_versions_binding_fingerprint_stale_and_media
     assert restored['filmBible']['visual']['versions']['hero-v2']['parentVersionId']=='hero-v1'
     assert restored['shots'][0]['assetBindings']['characters'][0]['versionId']=='hero-v2'
     assert restored['shots'][1]['assetBindings']['characters'][0]['versionId']=='hero-v1'
-    assert restored['nodes'][0]['data']['generationFingerprint']['hash']=='old-hash'
+    assert restored['nodes'][0]['data']['generationFingerprint']['hash']!=restored['nodes'][0]['data']['currentGenerationFingerprint']['hash']
+    assert restored['nodes'][0]['data']['generationStatus']=='stale'
     assert restored['nodes'][0]['data']['stale'] is True
-    assert restored['nodes'][1]['data'].get('stale') is None
+    assert restored['nodes'][1]['data']['generationStatus']=='current'
+    assert restored['nodes'][1]['data'].get('stale') is not True
 
     # The HTTP save boundary blocks direct tampering and hard deletion.
     mutation=copy.deepcopy(restored);mutation['filmBible']['visual']['versions']['hero-v1']['spec']['description']='覆盖历史'

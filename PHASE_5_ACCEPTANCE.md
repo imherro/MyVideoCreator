@@ -12,6 +12,8 @@ Phase 5 只实现 Visual Version 升级、影响分析、陈旧提示和 Generat
 | 显式范围升级 | `upgradeVisualBindings()` 支持指定 Shot、scene、sequence，只替换同 Card 的绑定 | selected / scene / sequence 测试 |
 | impacted-shot discovery | `discoverImpactedShots()` 比较每个 Shot 的同 Card 绑定与 `currentVersionId`，只返回旧绑定 | 精确列表及升级后列表测试 |
 | stale 与旧媒体 | 显式升级或 style version 变化只给已有分镜节点写入 `stale` 和原因，保留 `assetId`、`resultJob` 与素材文件 | 前端测试、API 文件读取测试 |
+| 重开自动对账 | 读取项目时 `reconcile_generation_staleness()` 用当前绑定、style、compiler、Provider/模型重算指纹；不匹配即提示 stale | compiler/provider/model 变化及 API reopen 测试 |
+| 下游传播 | 视觉依赖陈旧会传播到该 Shot 的 image、video 和已生成图下游，不删除任何结果 | image→video 前端与 Python 测试 |
 | Generation Fingerprint | 服务端以 canonical JSON 的 SHA-256 覆盖 Shot 变量、按语义顺序的绑定版本、style version、compiler version、resolved provider/model | deterministic 及逐依赖变化测试 |
 | 结果 provenance | Compiler 把指纹冻结进 Job input；素材登记把同一指纹写入 Asset metadata 和 Job result；浏览器应用结果时持久化到节点 | compiler、asset registration、graph 回归测试 |
 | deprecated 解析 | 已经锁定后再弃用的版本可继续为旧 Shot 编译，不能建立新绑定 | Reference Compiler 和绑定测试 |

@@ -14,12 +14,16 @@ function fixture(){
   return {
     filmBible:{visual:{cards:{hero:{id:'hero',kind:'character',name:'林岚',parentCardId:null,currentVersionId:'hero-v1',status:'active',source:{type:'script_extraction'}}},versions:{'hero-v1':v1}},style:{palette:'cold'},styleVersion:3,continuity:{},story:{}},
     shots:[
-      {id:'A',uid:'shot-A',scene:'雨巷',sequence:'seq-1',imageNode:'image-A',assetBindings:{characters:[{role:'林岚',versionId:'hero-v1'}],scene:null,props:[]}},
-      {id:'B',uid:'shot-B',scene:'雨巷',sequence:'seq-1',imageNode:'image-B',assetBindings:{characters:[{role:'林岚',versionId:'hero-v1'}],scene:null,props:[]}},
-      {id:'C',uid:'shot-C',scene:'室内',sequence:'seq-2',imageNode:'image-C',assetBindings:{characters:[{role:'林岚',versionId:'hero-v1'}],scene:null,props:[]}},
+      {id:'A',uid:'shot-A',scene:'雨巷',sequence:'seq-1',imageNode:'image-A',videoNode:'video-A',assetBindings:{characters:[{role:'林岚',versionId:'hero-v1'}],scene:null,props:[]}},
+      {id:'B',uid:'shot-B',scene:'雨巷',sequence:'seq-1',imageNode:'image-B',videoNode:'video-B',assetBindings:{characters:[{role:'林岚',versionId:'hero-v1'}],scene:null,props:[]}},
+      {id:'C',uid:'shot-C',scene:'室内',sequence:'seq-2',imageNode:'image-C',videoNode:'video-C',assetBindings:{characters:[{role:'林岚',versionId:'hero-v1'}],scene:null,props:[]}},
     ],
-    nodes:['A','B','C'].map(id=>({id:`image-${id}`,data:{kind:'image',assetId:`frame-${id}`,resultJob:`job-${id}`,generationFingerprint:{hash:'old'}}})),
-    edges:[],jobs:[],assets:['old-reference','frame-A','frame-B','frame-C'],
+    nodes:[
+      ...['A','B','C'].map(id=>({id:`image-${id}`,data:{kind:'image',assetId:`frame-${id}`,resultJob:`image-job-${id}`,generationFingerprint:{hash:`image-${id}`}}})),
+      ...['A','B','C'].map(id=>({id:`video-${id}`,data:{kind:'video',assetId:`clip-${id}`,resultJob:`video-job-${id}`,generationFingerprint:{hash:`video-${id}`}}})),
+    ],
+    edges:['A','B','C'].map(id=>({id:`edge-${id}`,source:`image-${id}`,target:`video-${id}`})),
+    jobs:[],assets:['old-reference','frame-A','frame-B','frame-C','clip-A','clip-B','clip-C'],
   };
 }
 
@@ -62,6 +66,11 @@ test('impacted discovery is exact and selected upgrade preserves old media as st
   assert.equal(upgraded.nodes[0].data.stale,true);
   assert.equal(upgraded.nodes[0].data.staleReason,'visual-version-upgraded');
   assert.equal(upgraded.nodes[1].data.stale,undefined);
+  assert.equal(upgraded.nodes[3].data.stale,true);
+  assert.equal(upgraded.nodes[3].data.assetId,'clip-A');
+  assert.equal(upgraded.nodes[3].data.resultJob,'video-job-A');
+  assert.deepEqual(upgraded.nodes[3].data.generationFingerprint,{hash:'video-A'});
+  assert.equal(upgraded.nodes[4].data.stale,undefined);
   assert.deepEqual(upgraded.jobs,[]);
   assert.deepEqual(upgraded.assets,document.assets);
 });
@@ -89,6 +98,8 @@ test('style version changes mark generated shots stale without removing media',(
   const changed=setProjectVisualStyle(doc,'水彩动画');
   assert.equal(changed.filmBible.styleVersion,4);
   assert.ok(changed.nodes.every(node=>node.data.stale&&node.data.assetId));
+  assert.equal(changed.nodes.find(node=>node.id==='video-A').data.resultJob,'video-job-A');
+  assert.deepEqual(changed.nodes.find(node=>node.id==='video-A').data.generationFingerprint,{hash:'video-A'});
   assert.deepEqual(changed.assets,doc.assets);
   assert.equal(setProjectVisualStyle(changed,'水彩动画'),changed);
 });

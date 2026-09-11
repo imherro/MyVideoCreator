@@ -125,6 +125,10 @@ def project(pid):
         raise HTTPException(404,'项目不存在')
     value=s.unpack(row)
     value['document']=migrate_document(value['document'])
+    from .generation_staleness import reconcile_generation_staleness
+    value['document']=reconcile_generation_staleness(
+        value['document'],s.get_setting('providers',[]),
+    )
     return value
 
 @app.get('/api/projects')

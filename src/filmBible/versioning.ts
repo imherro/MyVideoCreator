@@ -143,6 +143,30 @@ function inScope(shot: Record<string, any>, scope: UpgradeScope) {
   return String(shot.sequence || shot.sequenceId || "") === scope.sequence;
 }
 
+function staleGeneratedOutputs<T extends FilmBibleDocument>(
+  document: T,
+  roots: Set<string>,
+  reason: string,
+): T["nodes"] {
+  const affected = new Set(roots);
+  const pending = [...roots];
+  while (pending.length) {
+    const source = pending.pop();
+    for (const edge of document.edges) {
+      if (edge.source === source && !affected.has(edge.target)) {
+        affected.add(edge.target);
+        pending.push(edge.target);
+      }
+    }
+  }
+  return document.nodes.map((node) =>
+    affected.has(node.id) &&
+    (node.data?.assetId || node.data?.resultJob || node.data?.generationFingerprint)
+      ? { ...node, data: { ...node.data, stale: true, staleReason: reason } }
+      : node,
+  );
+}
+
 export function upgradeVisualBindings<T extends FilmBibleDocument>(
   document: T,
   cardId: string,
@@ -172,27 +196,17 @@ export function upgradeVisualBindings<T extends FilmBibleDocument>(
       },
     };
     if (JSON.stringify(next.assetBindings) !== JSON.stringify(bindings)) {
-      const nodeId = shot.imageNode || shot.pipeline?.imageNodeId;
-      if (nodeId) affectedNodeIds.add(nodeId);
+      const imageNodeId = shot.imageNode || shot.pipeline?.imageNodeId;
+      const videoNodeId = shot.videoNode || shot.pipeline?.videoNodeId;
+      if (imageNodeId) affectedNodeIds.add(imageNodeId);
+      if (videoNodeId) affectedNodeIds.add(videoNodeId);
     }
     return next;
   });
   return {
     ...document,
     shots,
-    nodes: document.nodes.map((node) =>
-      affectedNodeIds.has(node.id) &&
-      (node.data?.assetId || node.data?.resultJob)
-        ? {
-            ...node,
-            data: {
-              ...node.data,
-              stale: true,
-              staleReason: "visual-version-upgraded",
-            },
-          }
-        : node,
-    ),
+    nodes: staleGeneratedOutputs(document, affectedNodeIds, "visual-version-upgraded"),
   } as T;
 }
 
@@ -227,11 +241,13 @@ export function setProjectVisualStyle<T extends FilmBibleDocument>(
   style: string,
 ): T {
   if (String(document.style || "") === style) return document;
-  const shotNodes = new Set(
-    document.shots
-      .map((shot) => shot.imageNode || shot.pipeline?.imageNodeId)
-      .filter(Boolean),
-  );
+  const shotNodes = new Set<string>();
+  for (const shot of document.shots) {
+    const image = shot.imageNode || shot.pipeline?.imageNodeId;
+    const video = shot.videoNode || shot.pipeline?.videoNodeId;
+    if (image) shotNodes.add(image);
+    if (video) shotNodes.add(video);
+  }
   const previous = Number(document.filmBible?.styleVersion || 1);
   return {
     ...document,
@@ -240,10 +256,6 @@ export function setProjectVisualStyle<T extends FilmBibleDocument>(
       ...(document.filmBible || {}),
       styleVersion: Number.isFinite(previous) ? previous + 1 : 2,
     },
-    nodes: document.nodes.map((node) =>
-      shotNodes.has(node.id) && (node.data?.assetId || node.data?.resultJob)
-        ? { ...node, data: { ...node.data, stale: true, staleReason: "style-version-changed" } }
-        : node,
-    ),
+    nodes: staleGeneratedOutputs(document, shotNodes, "style-version-changed"),
   } as T;
 }
