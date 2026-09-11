@@ -74,7 +74,7 @@ export type ShotAssetBindings = {
 };
 
 export type FilmBibleDocument = {
-  filmBible?: { visual?: VisualBible; [key: string]: unknown };
+  filmBible?: { visual?: VisualBible; styleVersion?: number | string; [key: string]: unknown };
   shots: Array<Record<string, any>>;
   nodes: Array<Record<string, any>>;
   edges: Array<Record<string, any>>;

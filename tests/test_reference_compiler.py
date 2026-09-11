@@ -109,6 +109,12 @@ def test_compiler_uses_only_asset_bindings_in_character_scene_prop_order():
     assert '不可改变：林岚不可改变' in result['prompt']
     assert '拼贴画' in result['prompt']
     assert 'composite' not in result['reference_compiler']
+    assert result['generation_fingerprint']['algorithm'] == 'sha256'
+    assert result['generation_fingerprint']['inputs']['providerId'] == 'image-provider'
+    assert result['generation_fingerprint']['inputs']['modelId'] == 'image-model'
+    assert [item['versionId'] for item in result['generation_fingerprint']['inputs']['boundVisualVersions']] == [
+        'hero-v1', 'friend-v1', 'alley-v1', 'umbrella-v1',
+    ]
 
 
 def state_document():
@@ -228,3 +234,15 @@ def test_non_shot_and_unbound_shot_inputs_are_not_rewritten():
         unbound, 'image-1', 'image', value, PROVIDERS,
         lambda *_: (_ for _ in ()).throw(AssertionError('must not resolve')),
     ) == value
+
+
+def test_deprecated_previously_locked_version_remains_resolvable_for_old_shot():
+    value = document()
+    version = value['filmBible']['visual']['versions']['hero-v1']
+    version['status'] = 'deprecated'
+    version.setdefault('provenance', {})['lockedAt'] = 123
+    result = compile_shot_image_input(
+        value, 'image-1', 'image', input_value(), PROVIDERS, supports(),
+    )
+    assert result['reference_compiler']['bindings'][0]['versionId'] == 'hero-v1'
+    assert result['asset_ids'][0] == 'asset-hero'

@@ -92,6 +92,11 @@ import {
   updateDraftVisualVersion,
 } from "./filmBible/commands";
 import {
+  forkLockedVisualVersion,
+  setProjectVisualStyle,
+  upgradeVisualBindings,
+} from "./filmBible/versioning";
+import {
   acceptVisualReferenceResult,
   attachUploadedPrimaryReference,
   isStateCard,
@@ -2853,6 +2858,33 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                     report(reason);
                   }
                 }}
+                onFork={(versionId, draft) => {
+                  try {
+                    const next = forkLockedVisualVersion(doc, versionId, {
+                      spec: {
+                        description: draft.description,
+                        attributes: draft.attributes,
+                      },
+                      invariants: draft.invariants,
+                    });
+                    update(() => next);
+                    const source = visualBibleOf(doc).versions[versionId];
+                    const created = visualBibleOf(next).cards[source.cardId].currentVersionId;
+                    setVisualFocus(created);
+                    setNotice("已派生新草稿版本；旧版本和分镜绑定保持不变");
+                  } catch (reason) {
+                    report(reason);
+                  }
+                }}
+                onUpgrade={(cardId, targetVersionId, scope) => {
+                  try {
+                    const next = upgradeVisualBindings(doc, cardId, targetVersionId, scope);
+                    update(() => next);
+                    setNotice("已升级明确范围内的分镜；旧生成素材已保留并标记待更新");
+                  } catch (reason) {
+                    report(reason);
+                  }
+                }}
                 onBind={(shotUid, versionId) => {
                   try {
                     const next = bindVisualVersion(doc, shotUid, versionId);
@@ -3027,7 +3059,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   <input
                     value={doc.style}
                     onChange={(e) =>
-                      update((d) => ({ ...d, style: e.target.value }))
+                      update((d) => setProjectVisualStyle(d, e.target.value))
                     }
                   />
                 </label>

@@ -4,6 +4,10 @@ from __future__ import annotations
 import json
 
 from .visual_references import resolve_image_model_capabilities
+from .generation_fingerprint import (
+    PROMPT_COMPILER_VERSION,
+    build_generation_fingerprint,
+)
 
 
 GROUP_KINDS = {
@@ -171,7 +175,11 @@ def compile_shot_image_input(
             raise ValueError(f'分镜视觉绑定 {version_id} 已悬空，请重新绑定资产')
         if card.get('kind') not in GROUP_KINDS[group]:
             raise ValueError(f'分镜视觉绑定 {card.get("name", version_id)} 的资产类型不正确')
-        if version.get('status') != 'locked':
+        confirmed_deprecated = (
+            version.get('status') == 'deprecated'
+            and (version.get('provenance') or {}).get('lockedAt') is not None
+        )
+        if version.get('status') != 'locked' and not confirmed_deprecated:
             raise ValueError(f'高一致性生成要求先确认并锁定“{card.get("name", version_id)}”的主参考图')
         reference = _primary_reference(version)
         asset_id = reference.get('assetId') if reference else None
@@ -221,7 +229,7 @@ def compile_shot_image_input(
             {'type': 'asset', 'asset_id': asset_id} for asset_id in asset_ids
         ],
         'reference_compiler': {
-            'version': 1,
+            'version': PROMPT_COMPILER_VERSION,
             'source': 'shot.assetBindings',
             'shotUid': str(shot.get('uid') or shot.get('id') or ''),
             'consistency': 'high',
@@ -230,5 +238,8 @@ def compile_shot_image_input(
             'maximumReferences': maximum,
             'bindings': compiled,
         },
+        'generation_fingerprint': build_generation_fingerprint(
+            document, shot, provider_id, model_id, PROMPT_COMPILER_VERSION,
+        ),
     })
     return result

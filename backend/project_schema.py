@@ -5,13 +5,14 @@ import copy
 import json
 import uuid
 
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 def empty_film_bible():
     return {
         'visual': {'cards': {}, 'versions': {}},
         'continuity': {},
         'style': {},
+        'styleVersion': 1,
         'story': {},
     }
 
@@ -56,6 +57,14 @@ def _migrate_v1_to_v2(value):
     value['schemaVersion']=2
     return value
 
+def _migrate_v2_to_v3(value):
+    # Style content and its identity evolve independently. Existing projects
+    # start at version 1 without rewriting any style value or old revision.
+    film=value.setdefault('filmBible',{})
+    film.setdefault('styleVersion',1)
+    value['schemaVersion']=3
+    return value
+
 def migrate_document(document):
     """Return a migrated copy. Reject future schemas rather than downgrading."""
     source = document if isinstance(document, dict) else {}
@@ -72,6 +81,9 @@ def migrate_document(document):
         elif version == 1:
             value = _migrate_v1_to_v2(value)
             version = 2
+        elif version == 2:
+            value = _migrate_v2_to_v3(value)
+            version = 3
         else:
             raise ValueError(f'缺少项目 Schema v{version} 的迁移程序')
     return value

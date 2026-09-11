@@ -190,6 +190,8 @@ def save_project(pid:str,body:ProjectSave):
         old=c.execute('SELECT * FROM projects WHERE id=?',(pid,)).fetchone()
         if not old: raise HTTPException(404,'项目不存在')
         if old['revision']!=body.revision: raise HTTPException(409,'项目已在其他页面更新，请重新加载后编辑。')
+        from .film_bible.versioning import validate_film_bible_transition
+        validate_film_bible_transition(migrate_document(s.unpack(old)['document']),document)
         c.execute('INSERT INTO revisions VALUES(?,?,?,?,?)',(s.uid(),pid,old['revision'],old['document'],time.time()))
         c.execute('UPDATE projects SET name=?,revision=revision+1,document=?,updated=? WHERE id=?',(normalized_project_name(body.name),encoded,time.time(),pid))
     s.event(pid,{'type':'project','revision':body.revision+1})

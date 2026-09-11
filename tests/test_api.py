@@ -86,6 +86,80 @@ def test_film_bible_and_shot_bindings_round_trip_through_project_document(authen
     assert restored['shots']==doc['shots']
     assert all(card['source']=={'type':'script_extraction'} for card in restored['filmBible']['visual']['cards'].values())
 
+def test_phase5_roundtrip_preserves_versions_binding_fingerprint_stale_and_media_without_jobs(authenticated):
+    import copy
+    import io
+    from PIL import Image
+    c=authenticated;p=project(c);doc=p['document']
+    v1={
+        'id':'hero-v1','cardId':'hero','version':1,'parentVersionId':None,'status':'locked',
+        'spec':{'description':'灰色风衣','attributes':[]},'invariants':['脸型不变'],
+        'references':[{'role':'primary','assetId':'ref-v1'}],'createdAt':1,'provenance':{'lockedAt':2},
+    }
+    stream=io.BytesIO();Image.new('RGB',(16,16),'#334455').save(stream,format='PNG')
+    media=c.post(f'/api/projects/{p["id"]}/assets?category=shot',files={'file':('old.png',stream.getvalue(),'image/png')}).json()
+    v1['references'][0]['assetId']=media['id']
+    doc['filmBible']['visual']={
+        'cards':{'hero':{'id':'hero','kind':'character','name':'林岚','parentCardId':None,'currentVersionId':'hero-v1','status':'active','source':{'type':'script_extraction'}}},
+        'versions':{'hero-v1':v1},
+    }
+    doc['shots']=[
+        {'id':'A','uid':'shot-A','imageNode':'image-A','assetBindings':{'characters':[{'role':'林岚','versionId':'hero-v1'}],'scene':None,'props':[]}},
+        {'id':'B','uid':'shot-B','imageNode':'image-B','assetBindings':{'characters':[{'role':'林岚','versionId':'hero-v1'}],'scene':None,'props':[]}},
+    ]
+    doc['nodes']=[
+        {'id':'image-A','data':{'kind':'image','assetId':media['id'],'resultJob':'historical-job-A','generationFingerprint':{'hash':'old-hash'}}},
+        {'id':'image-B','data':{'kind':'image','assetId':media['id'],'resultJob':'historical-job-B','generationFingerprint':{'hash':'old-hash'}}},
+    ]
+    before_jobs=len(c.get(f'/api/projects/{p["id"]}/jobs').json())
+    first=c.put(f'/api/projects/{p["id"]}',json={'name':p['name'],'revision':p['revision'],'document':doc})
+    assert first.status_code==200,first.text
+
+    # Fork v1 -> draft v2. Merely moving currentVersionId must not upgrade a Shot.
+    doc=c.get(f'/api/projects/{p["id"]}').json()['document']
+    doc['filmBible']['visual']['versions']['hero-v2']={
+        **copy.deepcopy(v1),'id':'hero-v2','version':2,'parentVersionId':'hero-v1','status':'draft',
+        'spec':{'description':'蓝色风衣','attributes':[]},'references':[],
+        'provenance':{'forkedFromVersionId':'hero-v1'},
+    }
+    doc['filmBible']['visual']['cards']['hero']['currentVersionId']='hero-v2'
+    second=c.put(f'/api/projects/{p["id"]}',json={'name':p['name'],'revision':first.json()['revision'],'document':doc})
+    assert second.status_code==200,second.text
+    after_fork=c.get(f'/api/projects/{p["id"]}').json()['document']
+    assert [shot['assetBindings']['characters'][0]['versionId'] for shot in after_fork['shots']]==['hero-v1','hero-v1']
+    assert after_fork['filmBible']['visual']['versions']['hero-v1']==v1
+
+    # Confirm v2, then explicitly upgrade only Shot A and mark its old result stale.
+    doc=copy.deepcopy(after_fork);v2=doc['filmBible']['visual']['versions']['hero-v2']
+    v2['status']='locked';v2['references']=[{'role':'primary','assetId':media['id']}];v2['provenance']['lockedAt']=3
+    third=c.put(f'/api/projects/{p["id"]}',json={'name':p['name'],'revision':second.json()['revision'],'document':doc})
+    assert third.status_code==200,third.text
+    doc=c.get(f'/api/projects/{p["id"]}').json()['document']
+    doc['shots'][0]['assetBindings']['characters'][0]['versionId']='hero-v2'
+    doc['nodes'][0]['data'].update(stale=True,staleReason='visual-version-upgraded')
+    fourth=c.put(f'/api/projects/{p["id"]}',json={'name':p['name'],'revision':third.json()['revision'],'document':doc})
+    assert fourth.status_code==200,fourth.text
+    restored=c.get(f'/api/projects/{p["id"]}').json()['document']
+    assert restored['filmBible']['visual']['versions']['hero-v1']['spec']['description']=='灰色风衣'
+    assert restored['filmBible']['visual']['versions']['hero-v2']['parentVersionId']=='hero-v1'
+    assert restored['shots'][0]['assetBindings']['characters'][0]['versionId']=='hero-v2'
+    assert restored['shots'][1]['assetBindings']['characters'][0]['versionId']=='hero-v1'
+    assert restored['nodes'][0]['data']['generationFingerprint']['hash']=='old-hash'
+    assert restored['nodes'][0]['data']['stale'] is True
+    assert restored['nodes'][1]['data'].get('stale') is None
+
+    # The HTTP save boundary blocks direct tampering and hard deletion.
+    mutation=copy.deepcopy(restored);mutation['filmBible']['visual']['versions']['hero-v1']['spec']['description']='覆盖历史'
+    assert c.put(f'/api/projects/{p["id"]}',json={'name':p['name'],'revision':fourth.json()['revision'],'document':mutation}).status_code==400
+    deletion=copy.deepcopy(restored);del deletion['filmBible']['visual']['versions']['hero-v1']
+    assert c.put(f'/api/projects/{p["id"]}',json={'name':p['name'],'revision':fourth.json()['revision'],'document':deletion}).status_code==400
+    deprecated=copy.deepcopy(restored);deprecated['filmBible']['visual']['versions']['hero-v1']['status']='deprecated'
+    archived=c.put(f'/api/projects/{p["id"]}',json={'name':p['name'],'revision':fourth.json()['revision'],'document':deprecated})
+    assert archived.status_code==200,archived.text
+    assert c.get(f'/api/projects/{p["id"]}').json()['document']['shots'][1]['assetBindings']['characters'][0]['versionId']=='hero-v1'
+    assert len(c.get(f'/api/projects/{p["id"]}/jobs').json())==before_jobs
+    assert c.get(f'/api/assets/{media["id"]}/file').status_code==200
+
 def test_visual_reference_queue_validates_server_capability_and_persists_ownership(authenticated,monkeypatch):
     import io
     from PIL import Image

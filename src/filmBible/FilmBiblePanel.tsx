@@ -25,6 +25,7 @@ import {
   primaryReference,
   resolveVisualGenerationTarget,
 } from "./references.ts";
+import { discoverImpactedShots } from "./versioning.ts";
 
 type VersionDraft = {
   description: string;
@@ -44,6 +45,8 @@ export function FilmBiblePanel({
   onUploadReference,
   onGenerateReference,
   onLock,
+  onFork,
+  onUpgrade,
   onBind,
   onUnbind,
   onLocate,
@@ -68,6 +71,12 @@ export function FilmBiblePanel({
   onUploadReference: (versionId: string, file: File) => Promise<void>;
   onGenerateReference: (versionId: string, allowCloud: boolean) => Promise<void>;
   onLock: (versionId: string) => void;
+  onFork: (versionId: string, draft: VersionDraft) => void;
+  onUpgrade: (
+    cardId: string,
+    targetVersionId: string,
+    scope: { shotUids: string[] } | { scene: string } | { sequence: string },
+  ) => void;
   onBind: (shotUid: string, versionId: string) => void;
   onUnbind: (shotUid: string, versionId: string) => void;
   onLocate: (versionId: string) => void;
@@ -146,6 +155,11 @@ export function FilmBiblePanel({
     bound,
   );
   const reference = primaryReference(selected);
+  const currentVersion = visual.versions[card.currentVersionId];
+  const impacted = discoverImpactedShots(
+    { filmBible: { visual }, shots, nodes: [], edges: [] },
+    card.id,
+  );
   const referenceAsset = assets.find((item) => item.id === reference?.assetId);
   const generationRecord = selected.provenance?.referenceGeneration as
     | Record<string, any>
@@ -305,11 +319,18 @@ export function FilmBiblePanel({
           </div>
         )}
         {!editable && (
-          <p className="muted">
-            {selected.status === "locked"
-              ? "已锁定版本只读；当前仍可用于分镜绑定或保留为历史。"
-              : "已弃用版本保留历史，但不能编辑或建立新绑定。"}
-          </p>
+          <>
+            <p className="muted">
+              {selected.status === "locked"
+                ? "已锁定版本只读；修改会派生新版本，旧版本和旧分镜绑定继续保留。"
+                : "已弃用版本保留历史，但不能编辑或建立新绑定。"}
+            </p>
+            {selected.status === "locked" && card.status === "active" && (
+              <button className="secondary full" onClick={() => onFork(selected.id, draft)}>
+                创建新版本
+              </button>
+            )}
+          </>
         )}
         <hr />
         <h3>主参考图</h3>
@@ -468,6 +489,30 @@ export function FilmBiblePanel({
         )}
         <hr />
         <h3>分镜绑定</h3>
+        {selected.id === card.currentVersionId && currentVersion?.status === "locked" && impacted.length > 0 && (
+          <div className="version-impact">
+            <b>{impacted.length} 个分镜仍使用旧版本</b>
+            <small>升级只改变明确选择的分镜；旧画面会保留并标记为待更新。</small>
+            {impacted.slice(0, 8).map((item) => (
+              <div className="version-impact-row" key={`${item.shotUid}:${item.fromVersionId}`}>
+                <span>{item.shotId} · {item.scene || "未命名场景"} · V{visual.versions[item.fromVersionId]?.version}</span>
+                <button onClick={() => onUpgrade(card.id, selected.id, { shotUids: [item.shotUid] })}>
+                  升级此镜头
+                </button>
+              </div>
+            ))}
+            {shot?.scene && impacted.some((item) => item.scene === String(shot.scene)) && (
+              <button className="quiet full" onClick={() => onUpgrade(card.id, selected.id, { scene: String(shot.scene) })}>
+                升级场景“{String(shot.scene)}”内受影响镜头
+              </button>
+            )}
+            {(shot?.sequence || shot?.sequenceId) && (
+              <button className="quiet full" onClick={() => onUpgrade(card.id, selected.id, { sequence: String(shot.sequence || shot.sequenceId) })}>
+                升级当前段落内受影响镜头
+              </button>
+            )}
+          </div>
+        )}
         {!shots.length ? (
           <p className="muted">导入分镜后可以建立视觉绑定。</p>
         ) : (

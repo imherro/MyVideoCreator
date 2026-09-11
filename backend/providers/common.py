@@ -53,6 +53,8 @@ def register(job,path,name=None,category=None,asset_source='generated'):
         mime=mimetypes.guess_type(target.name)[0] or 'application/octet-stream'
         kind='image' if mime.startswith('image/') else 'audio' if mime.startswith('audio/') else 'video'
         metadata={'job_id':job['id'],'node_id':job['node_id'],'input':job['input'],'bytes':target.stat().st_size}
+        fingerprint=job.get('input',{}).get('generation_fingerprint')
+        if fingerprint:metadata['generationFingerprint']=fingerprint
         if kind=='image':
             from PIL import Image
             with Image.open(target) as img: metadata.update(width=img.width,height=img.height)
@@ -68,7 +70,9 @@ def register(job,path,name=None,category=None,asset_source='generated'):
     except BaseException:
         target.unlink(missing_ok=True)
         raise
-    return {'id':aid,'url':f'/api/assets/{aid}/file','name':name or source.name,'kind':kind,'category':semantic,'source':asset_source}
+    result={'id':aid,'url':f'/api/assets/{aid}/file','name':name or source.name,'kind':kind,'category':semantic,'source':asset_source}
+    if fingerprint:result['generationFingerprint']=fingerprint
+    return result
 
 
 def download_result(job,url,ext,recoverable=False):

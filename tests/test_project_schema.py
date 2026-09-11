@@ -14,7 +14,7 @@ def test_legacy_migration_is_lossless_and_idempotent():
     assert migrated['timeline']==old['timeline']
     assert migrated['editor']==old['editor'] and migrated['characters']==old['characters']
     assert migrated['custom']==old['custom']
-    assert migrated['filmBible']=={'visual':{'cards':{},'versions':{}},'continuity':{},'style':{},'story':{}}
+    assert migrated['filmBible']=={'visual':{'cards':{},'versions':{}},'continuity':{},'style':{},'styleVersion':1,'story':{}}
     assert migrated['generationPolicy']=={'text':None,'image':None,'video':None}
     assert migrate_document(migrated)==migrated
     assert migrate_document(old)['shots'][0]['uid']==migrated['shots'][0]['uid']
