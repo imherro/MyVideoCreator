@@ -1798,6 +1798,22 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                           <ChevronLeft size={13} />
                         </button>
                         <button
+                          disabled={index === doc.timeline.length - 1}
+                          title="后移"
+                          onClick={() =>
+                            update((d) => {
+                              const timeline = [...d.timeline];
+                              [timeline[index], timeline[index + 1]] = [
+                                timeline[index + 1],
+                                timeline[index],
+                              ];
+                              return { ...d, timeline };
+                            })
+                          }
+                        >
+                          <ChevronRight size={13} />
+                        </button>
+                        <button
                           title="移除镜头"
                           onClick={() =>
                             update((d) => ({
