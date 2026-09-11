@@ -248,3 +248,14 @@ export function isVersionBound(
     bindings.props.some((item) => item.versionId === versionId)
   );
 }
+
+export function isVisualBindingActionDisabled(
+  versionStatus: VisualVersionStatus,
+  cardStatus: "active" | "deprecated",
+  bound: boolean,
+) {
+  return (
+    !bound &&
+    (versionStatus === "deprecated" || cardStatus === "deprecated")
+  );
+}

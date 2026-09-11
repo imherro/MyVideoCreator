@@ -2,7 +2,10 @@ import React, { useEffect, useMemo, useState } from "react";
 import { ArrowUpRight, Link2, LockKeyhole, Unlink } from "lucide-react";
 import type { VisualAttribute, VisualBible, VisualVersionStatus } from "./types.ts";
 import { visualKindLabels, visualStatusLabels } from "./types.ts";
-import { isVersionBound } from "./commands.ts";
+import {
+  isVersionBound,
+  isVisualBindingActionDisabled,
+} from "./commands.ts";
 
 type VersionDraft = {
   description: string;
@@ -88,6 +91,11 @@ export function FilmBiblePanel({
   if (!selected || !card) return null;
   const editable = ["draft", "pending_reference"].includes(selected.status);
   const bound = isVersionBound(shot, selected.id);
+  const bindingActionDisabled = isVisualBindingActionDisabled(
+    selected.status,
+    card.status,
+    bound,
+  );
   const selectVersion = (versionId: string) => {
     setSelectedId(versionId);
     onFocusVersion(versionId);
@@ -236,7 +244,7 @@ export function FilmBiblePanel({
             </label>
             <button
               className={bound ? "secondary full" : "primary full"}
-              disabled={selected.status === "deprecated"}
+              disabled={bindingActionDisabled}
               onClick={() => bound ? onUnbind(shotUid, selected.id) : onBind(shotUid, selected.id)}
             >
               {bound ? <Unlink size={15} /> : <Link2 size={15} />}
@@ -249,4 +257,3 @@ export function FilmBiblePanel({
     </div>
   );
 }
-

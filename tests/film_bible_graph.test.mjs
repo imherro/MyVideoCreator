@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {bindVisualVersion,renameVisualCard,unbindVisualVersion,updateDraftVisualVersion,setVisualVersionStatus} from '../src/filmBible/commands.ts';
+import {bindVisualVersion,isVersionBound,isVisualBindingActionDisabled,renameVisualCard,unbindVisualVersion,updateDraftVisualVersion,setVisualVersionStatus} from '../src/filmBible/commands.ts';
 import {deriveManagedGraph,filterManagedEdgeRemovals,isManagedVisualEdge,isManagedVisualNode} from '../src/filmBible/managedGraph.ts';
 
 function fixture(){
@@ -75,4 +75,22 @@ test('locked and deprecated versions are immutable and deprecated versions canno
  assert.throws(()=>bindVisualVersion(doc,'shot-stable','v1'),/不能建立新绑定/);
  const locked=fixture();locked.filmBible.visual.versions.v1.status='locked';
  assert.throws(()=>updateDraftVisualVersion(locked,'v1',{spec:{description:'改写',attributes:[]},invariants:[]}),/不可修改/);
+});
+
+test('a bound deprecated version can be explicitly unbound but cannot bind again',()=>{
+ let doc=fixture();
+ doc=setVisualVersionStatus(doc,'v1','deprecated');
+ assert.equal(isVersionBound(doc.shots[0],'v1'),true);
+ assert.equal(isVisualBindingActionDisabled('deprecated','active',true),false);
+
+ doc=unbindVisualVersion(doc,'shot-stable','v1');
+ assert.equal(isVersionBound(doc.shots[0],'v1'),false);
+ assert.ok(!doc.shots[0].assetBindings.characters.some(binding=>binding.versionId==='v1'));
+ doc=deriveManagedGraph(doc);
+ assert.ok(!doc.edges.some(edge=>isManagedVisualEdge(edge)&&edge.source==='visual-version:v1'));
+
+ assert.equal(isVisualBindingActionDisabled('deprecated','active',false),true);
+ assert.equal(isVisualBindingActionDisabled('draft','deprecated',false),true);
+ assert.equal(isVisualBindingActionDisabled('locked','active',false),false);
+ assert.throws(()=>bindVisualVersion(doc,'shot-stable','v1'),/不能建立新绑定/);
 });
