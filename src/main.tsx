@@ -2257,10 +2257,11 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                     </button>
                   </div>
                   <div className="reference-strip">
-                    {sourceAssets(node.id).map((aid) => {
+                    {sourceAssets(node.id).map((aid, referenceIndex) => {
                       const a = assets.find((a) => a.id === aid);
                       return a ? (
                         <div className="reference-item" key={String(aid)}>
+                          <span className="reference-index">图 {referenceIndex + 1}</span>
                           <button onClick={() => setPreview(a)} title={a.name}>
                             <Media
                               asset={a}
@@ -3487,6 +3488,7 @@ function SettingsPanel({
               <label>文本模型 ID<input value={p.models?.text || ""} onChange={(e) => patchProvider(i, { models: { ...p.models, text: e.target.value } })} /></label>
               <label>图片模型 ID<input value={p.models?.image || ""} onChange={(e) => patchProvider(i, { models: { ...p.models, image: e.target.value } })} /></label>
               <label>视频模型 ID<input value={p.models?.video || ""} onChange={(e) => patchProvider(i, { models: { ...p.models, video: e.target.value } })} /></label>
+              <label>Seedream 参考图上限<input type="number" min="1" max="10" value={p.parameters?.image?.max_references ?? 10} onChange={(e) => patchProvider(i, { parameters: { ...p.parameters, image: { ...p.parameters?.image, max_references: Number(e.target.value) } } })} /><small>按当前图片模型能力设置，最多 10 张；图片会在服务端编码后发送。</small></label>
             </>
           ) : (
             <label>
@@ -3523,7 +3525,7 @@ function SettingsPanel({
           )}
           {p.type === "volcengine_ark" && (
             <>
-              <p className="muted">一个 ARK API Key 统一调用豆包文本、Seedream 文生图与 Seedance 文生视频。本阶段不发送本地参考素材。</p>
+              <p className="muted">一个 ARK API Key 统一调用豆包文本、Seedream 文生图/多参考图与 Seedance 文生视频。任务只保存素材 ID；参考图内容仅由服务端读取并编码。</p>
               <button className="secondary full" disabled={busy} onClick={() => void testArk(p.id)}>保存并测试连接</button>
             </>
           )}
@@ -3713,7 +3715,7 @@ function SettingsPanel({
                     video: "doubao-seedance-2-0-260128",
                   },
                   parameters: {
-                    image: { size: "2K", watermark: false },
+                    image: { size: "2K", watermark: false, max_references: 10 },
                     video: { duration: 5, resolution: "720p", ratio: "16:9", generate_audio: true },
                   },
                 },

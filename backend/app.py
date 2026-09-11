@@ -307,9 +307,14 @@ def provider_models(provider_id:str,kind:str|None=None):
     headers={'Authorization':'Bearer '+provider['api_key']} if provider.get('api_key') else {}
     url=provider['url'].rstrip('/')
     if provider['type']=='volcengine_ark':
-        from .providers.volcengine_ark import model_for
+        from .providers.volcengine_ark import max_image_references, model_for
         kinds=[kind] if kind in ('text','image','video') else ['text','image','video']
-        models=[{'id':model_for(provider,item),'name':model_for(provider,item)} for item in kinds if model_for(provider,item)]
+        models=[]
+        for item in kinds:
+            model=model_for(provider,item)
+            if not model:continue
+            capabilities={'image_reference':item=='image','max_references':max_image_references(provider) if item=='image' else None,'end_frame':False}
+            models.append({'id':model,'name':model,'capabilities':capabilities})
         return {'models':models,'status':'configured'}
     if provider['type']=='maestro' and provider.get('local') and provider.get('auto_start') and url=='http://127.0.0.1:7870':
         state=runtime.start_maestro()
@@ -419,8 +424,12 @@ def create_job_record(c,pid,body):
         payload(body.input,selected)
     references=list(body.input.get('asset_ids',[]))
     if body.input.get('end_asset_id'):references.append(body.input['end_asset_id'])
-    if selected and selected.get('type')=='volcengine_ark' and references:
-        raise ValueError('本轮火山方舟仅支持纯文生图和纯文生视频，请移除参考素材')
+    if selected and selected.get('type')=='volcengine_ark':
+        from .providers.volcengine_ark import max_image_references
+        if body.kind=='video' and references:
+            raise ValueError('本轮火山方舟视频仅支持纯文生视频，请移除首帧、尾帧和参考素材')
+        if body.kind=='image' and len(references)>max_image_references(selected):
+            raise ValueError(f'当前火山方舟图片模型最多支持 {max_image_references(selected)} 张参考图，请移除多余引用')
     for aid in references:
         asset=asset_row(aid)
         if asset['project_id']!=pid: raise ValueError('不能引用其他项目的素材')
@@ -484,8 +493,13 @@ async def run_workflow(pid:str,request:Request):
                 static_assets.append(parent_data['assetId'])
         data['asset_ids']=list(dict.fromkeys([*data.get('asset_ids',[]),*static_assets]))
         provider=providers.get(data.get('provider','local'))
-        if provider and provider.get('type')=='volcengine_ark' and (data['asset_ids'] or generated_image_parents):
-            raise ValueError('本轮火山方舟不接收参考素材，请断开图像输入后再运行')
+        if provider and provider.get('type')=='volcengine_ark':
+            from .providers.volcengine_ark import max_image_references
+            reference_count=len(data['asset_ids'])+generated_image_parents
+            if kind=='video' and reference_count:
+                raise ValueError('本轮火山方舟视频不接收参考素材，请断开图像输入后再运行')
+            if kind=='image' and reference_count>max_image_references(provider):
+                raise ValueError(f'当前火山方舟图片模型最多支持 {max_image_references(provider)} 张参考图，请移除多余引用')
         if provider and provider.get('type')=='minimax':
             # Hailuo accepts exactly one initial image.  Detect multiple
             # upstream image branches before any expensive parent job starts.

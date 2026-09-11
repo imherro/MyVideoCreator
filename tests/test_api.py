@@ -56,8 +56,26 @@ def test_volcengine_ark_unified_settings_and_connection(authenticated,monkeypatc
     saved_ark=next(item for item in s.get_setting('providers',[]) if item['id']=='ark')
     assert saved_ark['api_key']=='ark-secret'
     assert saved_ark['local'] is False and 'kind' not in saved_ark
-    assert c.get('/api/providers/ark/models?kind=image').json()['models']==[{'id':'seedream-image','name':'seedream-image'}]
+    ark_image_model=c.get('/api/providers/ark/models?kind=image').json()['models'][0]
+    assert ark_image_model['id']=='seedream-image'
+    assert ark_image_model['capabilities']['image_reference'] is True
+    assert ark_image_model['capabilities']['max_references']==10
     p=project(c)
+    import io
+    from PIL import Image
+    stream=io.BytesIO();Image.new('RGB',(32,24),'#445566').save(stream,format='PNG')
+    reference=c.post('/api/projects/'+p['id']+'/assets',files={'file':('ark-reference.png',stream.getvalue(),'image/png')}).json()
+    accepted=c.post('/api/projects/'+p['id']+'/jobs',json={
+        'node_id':'ark-image-reference','kind':'image','submission_id':'ark-image-reference-job',
+        'input':{'provider':'ark','prompt':'参考图一的人物生成新场景','asset_ids':[reference['id']],'allow_cloud':True},
+    })
+    assert accepted.status_code==200,accepted.text
+    rejected_video=c.post('/api/projects/'+p['id']+'/jobs',json={
+        'node_id':'ark-video-reference','kind':'video','submission_id':'ark-video-reference-job',
+        'input':{'provider':'ark','prompt':'让人物走动','asset_ids':[reference['id']],'allow_cloud':True},
+    })
+    assert rejected_video.status_code==400 and '视频仅支持纯文生视频' in rejected_video.text
+    c.post('/api/jobs/'+accepted.json()['id']+'/cancel')
     rejected=c.post('/api/projects/'+p['id']+'/jobs',json={
         'node_id':'ark-image','kind':'image','submission_id':'ark-cloud-gate',
         'input':{'provider':'ark','prompt':'一只猫'},

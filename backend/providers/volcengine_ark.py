@@ -3,12 +3,15 @@ import base64
 from urllib.parse import quote
 
 import httpx
+from PIL import Image
 
 from .. import store as s
 from . import common
 
 
 DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
+SUPPORTED_REFERENCE_FORMATS = {'JPEG': 'image/jpeg', 'PNG': 'image/png'}
+MAX_REFERENCE_BYTES = 10 * 1024 * 1024
 
 
 def model_for(provider, kind):
@@ -25,6 +28,39 @@ def _headers(provider):
 
 def _root(provider):
     return str(provider.get('url') or DEFAULT_BASE_URL).rstrip('/')
+
+
+def max_image_references(provider):
+    parameters = provider.get('parameters') if isinstance(provider.get('parameters'), dict) else {}
+    image = parameters.get('image') if isinstance(parameters.get('image'), dict) else {}
+    value = image.get('max_references', 10)
+    try:
+        return max(1, min(int(value), 10))
+    except (TypeError, ValueError):
+        raise ValueError('火山方舟参考图上限必须是 1–10 的整数')
+
+
+def resolve_image_reference(asset):
+    """Resolve an internal asset to the data URI accepted by Seedream."""
+    if asset.get('kind') != 'image':
+        raise ValueError('火山方舟参考素材必须是图片')
+    path = (s.ASSETS / str(asset.get('path') or '')).resolve()
+    if not path.is_relative_to(s.ASSETS) or not path.is_file():
+        raise ValueError('火山方舟参考图文件已丢失')
+    if path.stat().st_size > MAX_REFERENCE_BYTES:
+        raise ValueError('火山方舟单张参考图不能超过 10MB')
+    try:
+        with Image.open(path) as image:
+            mime = SUPPORTED_REFERENCE_FORMATS.get(image.format or '')
+            width, height = image.size
+            image.verify()
+    except (OSError, ValueError) as exc:
+        raise ValueError('火山方舟无法读取参考图，请重新上传 PNG 或 JPEG') from exc
+    if not mime:
+        raise ValueError('火山方舟参考图仅支持 PNG 或 JPEG')
+    if width <= 14 or height <= 14 or not 1 / 3 <= width / height <= 3:
+        raise ValueError('火山方舟参考图尺寸或宽高比不符合要求（边长需大于 14，宽高比 1:3–3:1）')
+    return f'data:{mime};base64,' + base64.b64encode(path.read_bytes()).decode('ascii')
 
 
 def _image_result(worker, job, value):
@@ -47,8 +83,10 @@ def _image_result(worker, job, value):
 
 
 def generate_image(worker, job, provider):
-    if common.assets_for(job):
-        raise ValueError('本轮火山方舟仅支持纯文生图，请移除参考素材')
+    assets = common.assets_for(job)
+    limit = max_image_references(provider)
+    if len(assets) > limit:
+        raise ValueError(f'当前火山方舟图片模型最多支持 {limit} 张参考图，请移除多余引用')
     model = model_for(provider, 'image')
     if not model:
         raise ValueError('请填写火山方舟图片模型 ID')
@@ -60,6 +98,9 @@ def generate_image(worker, job, provider):
         'response_format': 'url',
         'watermark': bool(params.get('watermark', False)),
     }
+    if assets:
+        references = [resolve_image_reference(asset) for asset in assets]
+        body['image'] = references[0] if len(references) == 1 else references
     worker.progress(job, '火山方舟生成图像')
     with httpx.Client(timeout=600, headers=_headers(provider), trust_env=True) as client:
         return _image_result(worker, job, common.checked(client.post(_root(provider) + '/images/generations', json=body)))

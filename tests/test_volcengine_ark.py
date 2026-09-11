@@ -1,9 +1,11 @@
+import base64
 import json
 import time
 import uuid
 
 import httpx
 import pytest
+from PIL import Image
 
 from backend import store as s
 from backend import worker as worker_module
@@ -40,6 +42,17 @@ def provider():
     }
 
 
+def add_image_asset(item, name, color):
+    aid='ark-ref-'+uuid.uuid4().hex
+    path=s.ASSETS/(aid+'.png')
+    Image.new('RGB',(32,24),color).save(path)
+    with s.db() as db:
+        db.execute('INSERT INTO assets VALUES(?,?,?,?,?,?,?,?)',(
+            aid,item['project_id'],name,'image',path.name,'image/png',s.dumps({'width':32,'height':24}),time.time()
+        ))
+    return aid,path.read_bytes()
+
+
 def test_ark_text_reuses_openai_compatible_worker(monkeypatch):
     item=stored_job('text',provider())
     original=httpx.Client
@@ -59,10 +72,40 @@ def test_seedream_downloads_into_existing_asset_library(monkeypatch):
         assert request.url.path=='/api/v3/images/generations'
         body=json.loads(request.read())
         assert body['model']=='seedream-image' and body['response_format']=='url'
+        assert 'image' not in body
         return httpx.Response(200,json={'data':[{'url':'https://result.example/frame.png'}]})
     monkeypatch.setattr(ark.httpx,'Client',lambda **kw:original(**kw,transport=httpx.MockTransport(handle)))
     monkeypatch.setattr(common,'download_result',lambda job,url,ext:{'id':'asset-image','kind':'image','url':'/api/assets/asset-image/file'})
     assert Worker().execute(item)['assets'][0]['id']=='asset-image'
+
+
+@pytest.mark.parametrize('count',[1,2])
+def test_seedream_resolves_ordered_local_references_as_data_uris(monkeypatch,count):
+    item=stored_job('image',provider())
+    expected=[];asset_ids=[]
+    for index,color in enumerate(((255,0,0),(0,0,255))[:count]):
+        aid,data=add_image_asset(item,f'参考图 {index+1}',color)
+        asset_ids.append(aid);expected.append(data)
+    item['input']['asset_ids']=asset_ids
+    original=httpx.Client
+    def handle(request):
+        body=json.loads(request.read())
+        references=body['image'] if isinstance(body['image'],list) else [body['image']]
+        assert len(references)==count
+        assert [base64.b64decode(value.split(',',1)[1]) for value in references]==expected
+        assert all(value.startswith('data:image/png;base64,') for value in references)
+        return httpx.Response(200,json={'data':[{'url':'https://result.example/frame.png'}]})
+    monkeypatch.setattr(ark.httpx,'Client',lambda **kw:original(**kw,transport=httpx.MockTransport(handle)))
+    monkeypatch.setattr(common,'download_result',lambda job,url,ext:{'id':'asset-image','kind':'image'})
+    assert Worker().execute(item)['assets'][0]['id']=='asset-image'
+
+
+def test_seedream_reference_limit_is_provider_configurable(monkeypatch):
+    p=provider();p['parameters']['image']={'max_references':1}
+    item=stored_job('image',p)
+    item['input']['asset_ids']=[add_image_asset(item,'一',(1,2,3))[0],add_image_asset(item,'二',(3,2,1))[0]]
+    with pytest.raises(ValueError,match='最多支持 1 张参考图'):
+        Worker().execute(item)
 
 
 def test_seedance_persists_task_and_resume_only_queries(monkeypatch):
