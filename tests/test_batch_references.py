@@ -121,3 +121,23 @@ def test_batch_seedream_keeps_canvas_reference_order_after_parent_finishes(batch
     monkeypatch.setattr(ark.httpx,'Client',lambda **kw:original(**kw,transport=httpx.MockTransport(handle)))
     monkeypatch.setattr(common,'download_result',lambda job,url,ext:{'id':'result','kind':'image'})
     assert Worker().execute(target)['assets'][0]['id']=='result'
+
+
+def test_batch_seedance_allows_dynamic_first_frame_with_explicit_last_frame(batch_authenticated):
+    client=batch_authenticated;item=project(client);_ark_settings(client)
+    tail=_image(client,item['id'],'tail.png')
+    doc=item['document']
+    doc['nodes']=[
+        {'id':'first','data':{'kind':'image','provider':'ark','prompt':'生成视频首帧'}},
+        {'id':'video','data':{'kind':'video','provider':'ark','prompt':'生成连续转场','end_asset_id':tail['id']}},
+    ]
+    doc['edges']=[{'id':'first-frame','source':'first','target':'video'}]
+    saved=client.put('/api/projects/'+item['id'],json={'name':item['name'],'revision':item['revision'],'document':doc})
+    assert saved.status_code==200,saved.text
+    result=client.post('/api/projects/'+item['id']+'/run',json={'submission_id':'ark-fl2v-batch-001','allow_cloud':True})
+    assert result.status_code==200,result.text
+    jobs={job['node_id']:job for job in client.get('/api/projects/'+item['id']+'/jobs').json()}
+    assert jobs['video']['input']['image_reference_sources']==[
+        {'type':'upstream_job','job_id':jobs['first']['id']},
+    ]
+    assert jobs['video']['input']['end_asset_id']==tail['id']

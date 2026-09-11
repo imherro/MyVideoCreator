@@ -42,13 +42,13 @@ def provider():
     }
 
 
-def add_image_asset(item, name, color):
+def add_image_asset(item, name, color, size=(32,24)):
     aid='ark-ref-'+uuid.uuid4().hex
     path=s.ASSETS/(aid+'.png')
-    Image.new('RGB',(32,24),color).save(path)
+    Image.new('RGB',size,color).save(path)
     with s.db() as db:
         db.execute('INSERT INTO assets VALUES(?,?,?,?,?,?,?,?)',(
-            aid,item['project_id'],name,'image',path.name,'image/png',s.dumps({'width':32,'height':24}),time.time()
+            aid,item['project_id'],name,'image',path.name,'image/png',s.dumps({'width':size[0],'height':size[1]}),time.time()
         ))
     return aid,path.read_bytes()
 
@@ -169,6 +169,36 @@ def test_seedance_rejects_more_than_one_first_frame():
     item=stored_job('video',provider())
     item['input']['asset_ids']=[add_image_asset(item,'一',(1,2,3))[0],add_image_asset(item,'二',(3,2,1))[0]]
     with pytest.raises(ValueError,match='最多接受一张首帧'):
+        Worker().execute(item)
+
+
+def test_seedance_sends_first_and_last_frames_in_role_order(monkeypatch):
+    item=stored_job('video',provider())
+    first_id,first_bytes=add_image_asset(item,'首帧',(12,34,56))
+    last_id,last_bytes=add_image_asset(item,'尾帧',(65,43,21),(64,48))
+    item['input'].update(asset_ids=[first_id],end_asset_id=last_id)
+    original=httpx.Client
+    def handle(request):
+        if request.method=='POST':
+            body=json.loads(request.read())
+            assert [part.get('role') for part in body['content']]==[None,'first_frame','last_frame']
+            images=[base64.b64decode(part['image_url']['url'].split(',',1)[1]) for part in body['content'][1:]]
+            assert images==[first_bytes,last_bytes]
+            return httpx.Response(200,json={'id':'fl2v-task'})
+        return httpx.Response(200,json={'status':'succeeded','content':{'video_url':'https://result.example/fl2v.mp4'}})
+    monkeypatch.setattr(ark.httpx,'Client',lambda **kw:original(**kw,transport=httpx.MockTransport(handle)))
+    monkeypatch.setattr(common,'download_result',lambda job,url,ext,recoverable=False:{'id':'fl2v-result','kind':'video'})
+    worker=Worker();worker.halt=NoWait()
+    assert worker.execute(item)['assets'][0]['id']=='fl2v-result'
+
+
+def test_seedance_rejects_mismatched_first_and_last_frame_ratios():
+    item=stored_job('video',provider())
+    item['input'].update(
+        asset_ids=[add_image_asset(item,'首帧',(1,2,3),(32,24))[0]],
+        end_asset_id=add_image_asset(item,'尾帧',(3,2,1),(32,32))[0],
+    )
+    with pytest.raises(ValueError,match='宽高比必须一致'):
         Worker().execute(item)
 
 

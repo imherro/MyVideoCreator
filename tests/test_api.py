@@ -63,6 +63,7 @@ def test_volcengine_ark_unified_settings_and_connection(authenticated,monkeypatc
     ark_video_model=c.get('/api/providers/ark/models?kind=video').json()['models'][0]
     assert ark_video_model['capabilities']['image_reference'] is True
     assert ark_video_model['capabilities']['max_references']==1
+    assert ark_video_model['capabilities']['end_frame'] is True
     p=project(c)
     import io
     from PIL import Image
@@ -78,6 +79,17 @@ def test_volcengine_ark_unified_settings_and_connection(authenticated,monkeypatc
         'input':{'provider':'ark','prompt':'让人物走动','asset_ids':[reference['id']],'allow_cloud':True},
     })
     assert accepted_video.status_code==200,accepted_video.text
+    accepted_transition=c.post('/api/projects/'+p['id']+'/jobs',json={
+        'node_id':'ark-video-transition','kind':'video','submission_id':'ark-video-transition-job',
+        'input':{'provider':'ark','prompt':'从首帧连续运动到尾帧','asset_ids':[reference['id']],
+                 'end_asset_id':reference['id'],'allow_cloud':True},
+    })
+    assert accepted_transition.status_code==200,accepted_transition.text
+    rejected_tail_only=c.post('/api/projects/'+p['id']+'/jobs',json={
+        'node_id':'ark-video-tail-only','kind':'video','submission_id':'ark-video-tail-only-job',
+        'input':{'provider':'ark','prompt':'移动到尾帧','end_asset_id':reference['id'],'allow_cloud':True},
+    })
+    assert rejected_tail_only.status_code==400 and '必须同时指定一张首帧' in rejected_tail_only.text
     rejected_video=c.post('/api/projects/'+p['id']+'/jobs',json={
         'node_id':'ark-video-many-references','kind':'video','submission_id':'ark-video-many-references-job',
         'input':{'provider':'ark','prompt':'让人物走动','asset_ids':[reference['id'],reference['id']],'allow_cloud':True},
@@ -85,6 +97,7 @@ def test_volcengine_ark_unified_settings_and_connection(authenticated,monkeypatc
     assert rejected_video.status_code==400 and '最多接受一张首帧' in rejected_video.text
     c.post('/api/jobs/'+accepted.json()['id']+'/cancel')
     c.post('/api/jobs/'+accepted_video.json()['id']+'/cancel')
+    c.post('/api/jobs/'+accepted_transition.json()['id']+'/cancel')
     rejected=c.post('/api/projects/'+p['id']+'/jobs',json={
         'node_id':'ark-image','kind':'image','submission_id':'ark-cloud-gate',
         'input':{'provider':'ark','prompt':'一只猫'},

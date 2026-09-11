@@ -316,7 +316,7 @@ def provider_models(provider_id:str,kind:str|None=None):
             capabilities={
                 'image_reference':item in ('image','video'),
                 'max_references':max_image_references(provider) if item=='image' else 1 if item=='video' else None,
-                'end_frame':False,
+                'end_frame':item=='video',
             }
             models.append({'id':model,'name':model,'capabilities':capabilities})
         return {'models':models,'status':'configured'}
@@ -430,10 +430,15 @@ def create_job_record(c,pid,body):
     if body.input.get('end_asset_id'):references.append(body.input['end_asset_id'])
     if selected and selected.get('type')=='volcengine_ark':
         from .providers.volcengine_ark import max_image_references
-        if body.kind=='video' and body.input.get('end_asset_id'):
-            raise ValueError('当前火山方舟视频仅支持单首帧，不支持尾帧')
-        if body.kind=='video' and len(body.input.get('asset_ids',[]))>1:
+        ark_video_reference_count=(
+            len(body.input['image_reference_sources'])
+            if 'image_reference_sources' in body.input
+            else len(body.input.get('asset_ids',[]))
+        )
+        if body.kind=='video' and ark_video_reference_count>1:
             raise ValueError('当前火山方舟视频最多接受一张首帧，请移除多余引用')
+        if body.kind=='video' and body.input.get('end_asset_id') and ark_video_reference_count!=1:
+            raise ValueError('使用火山方舟尾帧时必须同时指定一张首帧')
         if body.kind=='image' and len(references)>max_image_references(selected):
             raise ValueError(f'当前火山方舟图片模型最多支持 {max_image_references(selected)} 张参考图，请移除多余引用')
     for aid in references:
@@ -519,10 +524,10 @@ async def run_workflow(pid:str,request:Request):
         if provider and provider.get('type')=='volcengine_ark':
             from .providers.volcengine_ark import max_image_references
             reference_count=len(data['asset_ids'])+generated_image_parents
-            if kind=='video' and data.get('end_asset_id'):
-                raise ValueError('当前火山方舟视频仅支持单首帧，不支持尾帧')
             if kind=='video' and reference_count>1:
                 raise ValueError('当前火山方舟视频最多接受一张首帧，请只保留一条图像连线或一张素材')
+            if kind=='video' and data.get('end_asset_id') and reference_count!=1:
+                raise ValueError('使用火山方舟尾帧时必须同时保留一张首帧')
             if kind=='image' and reference_count>max_image_references(provider):
                 raise ValueError(f'当前火山方舟图片模型最多支持 {max_image_references(provider)} 张参考图，请移除多余引用')
         if provider and provider.get('type')=='minimax':

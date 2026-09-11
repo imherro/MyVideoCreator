@@ -2199,6 +2199,32 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   </label>
                 );
               })()}
+            {data.kind === "video" &&
+              config.providers.find((p: Any) => p.id === data.provider)
+                ?.type === "volcengine_ark" && (
+                <label>
+                  尾帧（可选，首尾帧视频）
+                  <select
+                    value={data.end_asset_id || ""}
+                    disabled={sourceAssets(node.id).length !== 1}
+                    onChange={(e) =>
+                      editNode({ end_asset_id: e.target.value })
+                    }
+                  >
+                    <option value="">不指定尾帧</option>
+                    {assets
+                      .filter((a) => a.kind === "image")
+                      .map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name}
+                        </option>
+                      ))}
+                  </select>
+                  <small>
+                    先保留一张首帧，再选择同宽高比的尾帧；模型会生成两帧之间的连续运动。
+                  </small>
+                </label>
+              )}
             {["image", "video"].includes(data.kind) &&
               !(
                 data.kind === "video" &&
@@ -3539,7 +3565,7 @@ function SettingsPanel({
           )}
           {p.type === "volcengine_ark" && (
             <>
-              <p className="muted">一个 ARK API Key 统一调用豆包文本、Seedream 文生图/多参考图与 Seedance 文生视频/单首帧图生视频。任务只保存素材 ID；参考图内容仅由服务端读取并编码。</p>
+              <p className="muted">一个 ARK API Key 统一调用豆包文本、Seedream 文生图/多参考图与 Seedance 文生视频、单首帧及首尾帧视频。任务只保存素材 ID；参考图内容仅由服务端读取并编码。</p>
               <button className="secondary full" disabled={busy} onClick={() => void testArk(p.id)}>保存并测试连接</button>
             </>
           )}

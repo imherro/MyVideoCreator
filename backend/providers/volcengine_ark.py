@@ -73,8 +73,8 @@ def resolve_image_reference(asset):
     return f'data:{loaded["mime"]};base64,' + base64.b64encode(loaded['path'].read_bytes()).decode('ascii')
 
 
-def resolve_seedance_frame(asset):
-    """Resolve one local still as a Seedance first-frame content item."""
+def seedance_frame(asset):
+    """Validate and resolve one local still for a Seedance frame role."""
     loaded=load_image_asset(asset)
     if loaded['size'] > MAX_REFERENCE_BYTES:
         raise ValueError('火山方舟视频首帧不能超过 10MB')
@@ -83,7 +83,15 @@ def resolve_seedance_frame(asset):
         raise ValueError('火山方舟视频首帧尺寸或宽高比不符合要求（边长需大于 14，宽高比 1:3–3:1）')
     if width > MAX_REFERENCE_DIMENSION or height > MAX_REFERENCE_DIMENSION:
         raise ValueError('火山方舟视频首帧长边不能超过 6000 像素')
-    return f'data:{loaded["mime"]};base64,' + base64.b64encode(loaded['path'].read_bytes()).decode('ascii')
+    return {
+        'url':f'data:{loaded["mime"]};base64,' + base64.b64encode(loaded['path'].read_bytes()).decode('ascii'),
+        'width':width,
+        'height':height,
+    }
+
+
+def resolve_seedance_frame(asset):
+    return seedance_frame(asset)['url']
 
 
 def _image_result(worker, job, value):
@@ -141,10 +149,10 @@ def _video_url(value):
 
 
 def generate_video(worker, job, provider):
-    if job['input'].get('end_asset_id'):
-        raise ValueError('当前火山方舟视频仅支持单首帧，不支持尾帧')
     if len(job['input'].get('asset_ids',[]))>1:
         raise ValueError('当前火山方舟视频最多接受一张首帧，请移除多余引用')
+    if job['input'].get('end_asset_id') and len(job['input'].get('asset_ids',[]))!=1:
+        raise ValueError('使用火山方舟尾帧时必须同时指定一张首帧')
     model = model_for(provider, 'video')
     if not model:
         raise ValueError('请填写火山方舟视频模型 ID')
@@ -156,11 +164,22 @@ def generate_video(worker, job, provider):
             assets=common.assets_for(job)
             content=[{'type': 'text', 'text': job['input']['prompt']}]
             if assets:
+                first=seedance_frame(assets[0])
                 content.append({
                     'type':'image_url',
-                    'image_url':{'url':resolve_seedance_frame(assets[0])},
+                    'image_url':{'url':first['url']},
                     'role':'first_frame',
                 })
+                if job['input'].get('end_asset_id'):
+                    tail=common.assets_for({**job,'input':{'asset_ids':[job['input']['end_asset_id']]}})[0]
+                    last=seedance_frame(tail)
+                    if first['width']*last['height']!=last['width']*first['height']:
+                        raise ValueError('火山方舟首帧与尾帧的宽高比必须一致')
+                    content.append({
+                        'type':'image_url',
+                        'image_url':{'url':last['url']},
+                        'role':'last_frame',
+                    })
             body = {
                 'model': job['input'].get('model') or model,
                 'content': content,
