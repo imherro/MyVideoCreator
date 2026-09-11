@@ -10,6 +10,7 @@ import {
 import { attachAssetReferences, editorResolution, readEditorTimeline } from "./editorDocument";
 import type { EditorAsset, EditorDocument } from "./editorDocument";
 import { ProjectAssetPanel } from "./ProjectAssetPanel";
+import { EditorInspector } from "./EditorInspector";
 import { planInitialTimeline } from "./initialTimeline";
 import "./editorWorkspace.css";
 
@@ -107,6 +108,7 @@ function EditorSurface({
       <div className="mvc-editor-surface">
         <VideoEditor
           leftPanel={<ProjectAssetPanel assets={assets} />}
+          rightPanel={<EditorInspector />}
           editorConfig={{
             canvasMode: true,
             videoProps: { ...videoResolution, backgroundColor: "#000000" },
