@@ -35,7 +35,8 @@ def test_project_schema_revision_migration_and_generation_policy_roundtrip(authe
     s.set_setting('providers',[*old_providers,ark])
     try:
         created=project(c)
-        assert created['document']['schemaVersion']==1
+        from backend.project_schema import CURRENT_SCHEMA_VERSION
+        assert created['document']['schemaVersion']==CURRENT_SCHEMA_VERSION
         assert created['document']['generationPolicy']['image']=={'providerId':'phase0-ark','modelId':'seedream'}
         document=created['document'];document['generationPolicy']['video']={'providerId':'phase0-ark','modelId':'seedance-custom'}
         saved=c.put('/api/projects/'+created['id'],json={'name':created['name'],'revision':created['revision'],'document':document})
@@ -50,13 +51,27 @@ def test_project_schema_revision_migration_and_generation_policy_roundtrip(authe
             db.execute('INSERT INTO revisions VALUES(?,?,?,?,?)',(rid,pid,1,encoded,now))
         current=c.get('/api/projects/'+pid).json()['document']
         historical=c.get(f'/api/projects/{pid}/revisions/{rid}').json()['document']
-        assert current['schemaVersion']==1 and historical['schemaVersion']==1
+        assert current['schemaVersion']==CURRENT_SCHEMA_VERSION and historical['schemaVersion']==CURRENT_SCHEMA_VERSION
         assert current['nodes']==legacy['nodes'] and historical['editor']==legacy['editor']
         with s.db() as db:
             assert db.execute('SELECT document FROM revisions WHERE id=?',(rid,)).fetchone()['document']==encoded
             assert db.execute('SELECT document FROM projects WHERE id=?',(pid,)).fetchone()['document']==encoded
     finally:
         s.set_setting('providers',old_providers)
+
+def test_film_bible_and_shot_bindings_round_trip_through_project_document(authenticated):
+    c=authenticated;p=project(c);doc=p['document']
+    doc['filmBible']['visual']={
+      'cards':{'vc-1':{'id':'vc-1','kind':'character','name':'林岚','currentVersionId':'vv-1'}},
+      'versions':{'vv-1':{'id':'vv-1','cardId':'vc-1','version':1,'status':'draft','spec':{'description':'灰色风衣'}}},
+    }
+    doc['shots']=[{'id':'shot-001','uid':'shot-stable-1','order':1,'assetBindings':{
+      'characters':[{'role':'林岚','versionId':'vv-1'}],'scene':None,'props':[]},'pipeline':{}}]
+    saved=c.put('/api/projects/'+p['id'],json={'name':p['name'],'revision':p['revision'],'document':doc})
+    assert saved.status_code==200,saved.text
+    restored=c.get('/api/projects/'+p['id']).json()['document']
+    assert restored['filmBible']['visual']==doc['filmBible']['visual']
+    assert restored['shots']==doc['shots']
 
 def test_asset_library_semantic_categories(authenticated):
     import io
@@ -310,6 +325,18 @@ def test_graph_cycle_rejected_without_submitting(authenticated):
     response=c.post('/api/projects/'+p['id']+'/run',json={'submission_id':'graph-cycle-test'})
     assert response.status_code==400
     assert c.get('/api/projects/'+p['id']+'/jobs').json()==[]
+
+def test_graph_storyboard_defaults_to_two_pass_film_bible(authenticated):
+    c=authenticated;p=project(c);doc=p['document']
+    c.put('/api/settings',json={'providers':[{'id':'local-test','name':'test','type':'openai','url':'http://127.0.0.1:1/v1','local':True}]})
+    doc['nodes']=[{'id':'plan','data':{'kind':'storyboard','provider':'local-test','prompt':'雨夜故事'}}]
+    assert c.put('/api/projects/'+p['id'],json={'name':p['name'],'revision':1,'document':doc}).status_code==200
+    result=c.post('/api/projects/'+p['id']+'/run',json={'submission_id':'film-bible-graph-001'})
+    assert result.status_code==200,result.text
+    jobs=c.get('/api/projects/'+p['id']+'/jobs').json()
+    assert jobs[0]['input']['film_bible'] is True
+    with s.db() as db:
+        db.execute("UPDATE jobs SET status='cancelled' WHERE project_id=?",(p['id'],))
 
 def test_graph_scheduler_consumes_upstream_text(authenticated,monkeypatch):
     c=authenticated;p=project(c);doc=p['document']

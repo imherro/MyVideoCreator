@@ -165,18 +165,15 @@ class Worker:
             return execute(self,job,provider)
         raise ValueError('所选服务不支持此任务类型，请更换模型服务。')
 
-    def text(self,job,p):
-        inp=job['input']; kind=job['kind']
-        prompt=inp['prompt']
-        if kind=='storyboard' and inp.get('target_duration'):
-            prompt+=f'\n镜头总时长必须为 {inp["target_duration"]} 秒，误差不超过 0.5 秒。'
+    def _chat_text(self,job,p,system_prompt,user_prompt,schema=None,phase='生成文本'):
+        inp=job['input']
         headers={'Authorization':'Bearer '+p['api_key']} if p.get('api_key') else {}
-        body={'model':inp.get('model') or p.get('model','local'),'messages':[{'role':'system','content':inp.get('system_prompt') or TEMPLATES[kind]},{'role':'user','content':prompt}], 'temperature':0.6,'max_tokens':min(int(inp.get('max_tokens',4096)),12000),'stream':True}
+        body={'model':inp.get('model') or p.get('model','local'),'messages':[{'role':'system','content':system_prompt},{'role':'user','content':user_prompt}], 'temperature':0.6,'max_tokens':min(int(inp.get('max_tokens',4096)),12000),'stream':True}
         if inp.get('provider','local')=='local':
             body['chat_template_kwargs']={'enable_thinking':False}
-        if kind=='storyboard' and (inp.get('provider','local')=='local' or p.get('structured')):
-            body['response_format']={'type':'json_schema','json_schema':{'name':'storyboard','strict':True,'schema':SHOT_SCHEMA}}
-        self.progress(job,'生成剧本' if kind=='text' else '拆解分镜')
+        if schema and (inp.get('provider','local')=='local' or p.get('structured')):
+            body['response_format']={'type':'json_schema','json_schema':{'name':'structured_result','strict':True,'schema':schema}}
+        self.progress(job,phase)
         chunks=[]; last=0
         with httpx.Client(timeout=httpx.Timeout(3600,connect=10),trust_env=not p.get('local',False)) as client:
             with client.stream('POST',p['url'].rstrip('/')+'/chat/completions',headers=headers,json=body) as response:
@@ -198,6 +195,25 @@ class Worker:
                         last=time.time()
         text=''.join(chunks).strip()
         if not text: raise ValueError('文本模型没有返回正文，请检查模型聊天模板或切换模型。')
+        return text
+
+    def text(self,job,p):
+        inp=job['input']; kind=job['kind']
+        if kind=='storyboard' and inp.get('film_bible'):
+            from .film_bible import extract_storyboard
+            return extract_storyboard(
+                inp['prompt'],inp.get('target_duration'),inp.get('provider','local'),
+                inp.get('model') or p.get('model','local'),
+                lambda system,user,schema,phase:self._chat_text(job,p,system,user,schema,phase),
+            )
+        prompt=inp['prompt']
+        if kind=='storyboard' and inp.get('target_duration'):
+            prompt+=f'\n镜头总时长必须为 {inp["target_duration"]} 秒，误差不超过 0.5 秒。'
+        text=self._chat_text(
+            job,p,inp.get('system_prompt') or TEMPLATES[kind],prompt,
+            SHOT_SCHEMA if kind=='storyboard' else None,
+            '生成剧本' if kind=='text' else '拆解分镜',
+        )
         if kind=='storyboard':
             start=text.find('{'); end=text.rfind('}')
             try: result=validate_shots(json.loads(text[start:end+1]),inp.get('target_duration'))

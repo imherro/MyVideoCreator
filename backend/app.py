@@ -568,7 +568,9 @@ async def run_workflow(pid:str,request:Request):
         data['allow_cloud']=bool(body.get('allow_cloud'))
         data['project_style']=p['document'].get('style','')
         data['ratio']=p['document'].get('ratio','16:9')
-        if kind=='storyboard':data['target_duration']=data.get('target_duration') or p['document'].get('duration',15)
+        if kind=='storyboard':
+            data['target_duration']=data.get('target_duration') or p['document'].get('duration',15)
+            data['film_bible']=data.get('film_bible') is not False
         prepared.append((node,parents,data,reference_sources))
     jobs_by_node={};created=[]
     with s.db() as c:

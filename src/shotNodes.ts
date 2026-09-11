@@ -105,6 +105,11 @@ export function ensureShotNodes<
       storyboardNode: storyboard?.id || shot.storyboardNode,
       imageNode: image.id,
       videoNode: video.id,
+      pipeline: {
+        ...(shot.pipeline || {}),
+        imageNodeId: image.id,
+        videoNodeId: video.id,
+      },
     };
   });
   return { ...doc, nodes, edges, shots };

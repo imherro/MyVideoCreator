@@ -10,17 +10,19 @@ def test_legacy_migration_is_lossless_and_idempotent():
     migrated=migrate_document(old)
     assert migrated['schemaVersion']==CURRENT_SCHEMA_VERSION
     assert migrated['nodes']==old['nodes'] and migrated['edges']==old['edges']
-    assert migrated['shots']==old['shots'] and migrated['timeline']==old['timeline']
+    assert migrated['shots'][0]['id']==old['shots'][0]['id'] and migrated['shots'][0]['uid'].startswith('shot-')
+    assert migrated['timeline']==old['timeline']
     assert migrated['editor']==old['editor'] and migrated['characters']==old['characters']
     assert migrated['custom']==old['custom']
     assert migrated['filmBible']=={'visual':{'cards':{},'versions':{}},'continuity':{},'style':{},'story':{}}
     assert migrated['generationPolicy']=={'text':None,'image':None,'video':None}
     assert migrate_document(migrated)==migrated
+    assert migrate_document(old)['shots'][0]['uid']==migrated['shots'][0]['uid']
     assert 'schemaVersion' not in old
 
-@pytest.mark.parametrize('version',[2,-1,1.5,True,'1'])
+@pytest.mark.parametrize('version',[CURRENT_SCHEMA_VERSION+1,-1,1.5,True,'1'])
 def test_invalid_or_future_schema_is_rejected(version):
-    message='更新版本' if version==2 else '版本无效'
+    message='更新版本' if version==CURRENT_SCHEMA_VERSION+1 else '版本无效'
     with pytest.raises(ValueError,match=message):
         migrate_document({'schemaVersion':version,'nodes':[]})
 

@@ -23,6 +23,7 @@ test('shot nodes form the script to storyboard to image to video chain',()=>{
   ['script','plan'],['plan',shot.imageNode],[shot.imageNode,shot.videoNode]
  ]);
  assert.equal(shot.storyboardNode,'plan');
+ assert.deepEqual(shot.pipeline,{imageNodeId:shot.imageNode,videoNodeId:shot.videoNode});
  assert.equal(ensureShotNodes(result,providers,[],id,undefined,'plan').edges.length,3);
 });
 test('importing storyboard shots creates the full canvas and preserves existing shot nodes',()=>{

@@ -1158,6 +1158,10 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           n.data.kind === "storyboard"
             ? n.data.target_duration || doc?.duration
             : undefined,
+        film_bible:
+          n.data.kind === "storyboard"
+            ? n.data.film_bible !== false
+            : undefined,
       };
       await api(
         `/projects/${project.id}/jobs`,
@@ -1201,8 +1205,17 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       const storyboardNode = d.nodes.find(
         (item) => item.id === job.node_id && item.data.kind === "storyboard",
       );
+      const withFilmBible = job.result.filmBible
+        ? {
+            ...d,
+            filmBible: {
+              ...d.filmBible,
+              ...job.result.filmBible,
+            },
+          }
+        : d;
       return importStoryboardShots(
-        d,
+        withFilmBible,
         job.result.shots,
         config.providers,
         system.models,
@@ -1212,7 +1225,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     });
     setView("shots");
     setPanel(null);
-    setNotice(`已导入 ${job.result.shots.length} 个分镜，画布节点和连线已同步建立；检查后可运行画布`);
+    const cardCount = Object.keys(job.result.filmBible?.visual?.cards || {}).length;
+    setNotice(`已导入 ${job.result.shots.length} 个分镜${cardCount ? `和 ${cardCount} 张视觉卡` : ""}，画布节点和连线已同步建立；检查后可运行画布`);
   }
   function shotNodes(shot: Any, _index: number) {
     update((d) =>

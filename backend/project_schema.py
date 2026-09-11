@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import copy
+import json
+import uuid
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
 def empty_film_bible():
     return {
@@ -42,6 +44,18 @@ def _migrate_v0_to_v1(value):
     value['schemaVersion'] = 1
     return value
 
+def _migrate_v1_to_v2(value):
+    for index,shot in enumerate(value.get('shots') or []):
+        if not isinstance(shot,dict):continue
+        if not shot.get('uid'):
+            identity=json.dumps({k:shot.get(k) for k in ('id','scene','characters','action','camera','image_prompt')},ensure_ascii=False,sort_keys=True)+f':{index}'
+            shot['uid']='shot-'+uuid.uuid5(uuid.NAMESPACE_URL,'my-video-creator:'+identity).hex
+        shot.setdefault('order',index+1)
+        shot.setdefault('assetBindings',{'characters':[],'scene':None,'props':[]})
+        shot.setdefault('pipeline',{'imageNodeId':shot.get('imageNode'),'videoNodeId':shot.get('videoNode')})
+    value['schemaVersion']=2
+    return value
+
 def migrate_document(document):
     """Return a migrated copy. Reject future schemas rather than downgrading."""
     source = document if isinstance(document, dict) else {}
@@ -55,6 +69,9 @@ def migrate_document(document):
         if version == 0:
             value = _migrate_v0_to_v1(value)
             version = 1
+        elif version == 1:
+            value = _migrate_v1_to_v2(value)
+            version = 2
         else:
             raise ValueError(f'缺少项目 Schema v{version} 的迁移程序')
     return value
