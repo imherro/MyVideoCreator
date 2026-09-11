@@ -17,7 +17,23 @@ def topological(nodes,edges):
     return result
 
 def execution_plan(document,selected=None,include_descendants=False):
-    nodes=document.get('nodes',[]);edges=document.get('edges',[])
+    # Visual Bible nodes and edges are a managed canvas projection. They are
+    # never execution dependencies; generation reads shot.assetBindings.
+    managed_visual_ids={
+        node.get('id') for node in document.get('nodes',[])
+        if node.get('data',{}).get('managed') is True
+        and node.get('data',{}).get('kind')=='visual_asset'
+    }
+    nodes=[node for node in document.get('nodes',[]) if node.get('id') not in managed_visual_ids]
+    edges=[
+        edge for edge in document.get('edges',[])
+        if edge.get('source') not in managed_visual_ids
+        and edge.get('target') not in managed_visual_ids
+        and not (
+            edge.get('data',{}).get('managed') is True
+            and edge.get('data',{}).get('origin')=='visual_binding'
+        )
+    ]
     order=topological(nodes,edges);mapping={n['id']:n for n in nodes}
     parents={n:[] for n in mapping}
     for edge in edges: parents[edge['target']].append(edge['source'])

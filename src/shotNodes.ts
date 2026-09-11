@@ -72,7 +72,7 @@ export function ensureShotNodes<
       image = {
         id: newId(),
         type: "media",
-        position: { x: 470, y: 80 + index * 320 },
+        position: { x: 1110, y: 80 + index * 320 },
         data: {
           kind: "image",
           label: `${shot.id} · 分镜图`,
@@ -87,7 +87,7 @@ export function ensureShotNodes<
       video = {
         id: newId(),
         type: "media",
-        position: { x: 860, y: 80 + index * 320 },
+        position: { x: 1500, y: 80 + index * 320 },
         data: {
           kind: "video",
           label: `${shot.id} · 视频`,

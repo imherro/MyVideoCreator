@@ -68,6 +68,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import "./style.css";
 import "./timelineControls.css";
+import "./filmBible/filmBible.css";
 import {
   patchNode,
   invalidate,
@@ -82,6 +83,25 @@ import { ModelSelector } from "./ModelSelector";
 import { ArkProviderSettings } from "./ArkProviderSettings";
 import { GenerationPolicyPanel } from "./GenerationPolicyPanel";
 import type { GenerationPolicy } from "./generationPolicy";
+import { FilmBiblePanel } from "./filmBible/FilmBiblePanel";
+import {
+  bindVisualVersion,
+  renameVisualCard,
+  setVisualVersionStatus,
+  unbindVisualVersion,
+  updateDraftVisualVersion,
+} from "./filmBible/commands";
+import {
+  deriveManagedGraph,
+  filterManagedEdgeRemovals,
+  isManagedVisualNode,
+  visualVersionIdFromNode,
+} from "./filmBible/managedGraph";
+import {
+  VisualAssetNode,
+  VisualBibleGraphProvider,
+} from "./filmBible/VisualAssetNode";
+import { visualBibleOf } from "./filmBible/types";
 import { StoryboardGrid } from "./StoryboardGrid";
 import { JobProgress } from "./JobProgress";
 import { RunWorkflow } from "./RunWorkflow";
@@ -357,7 +377,7 @@ function MediaNode({ data, selected }: { data: Any; selected?: boolean }) {
     </div>
   );
 }
-const nodeTypes = { media: MediaNode };
+const nodeTypes = { media: MediaNode, visualAsset: VisualAssetNode };
 
 function Auth({ onLogin }: { onLogin: () => void }) {
   const [status, setStatus] = useState<Any>();
@@ -502,6 +522,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     [cloud, setCloud] = useState(false),
     [preview, setPreview] = useState<Asset | null>(null);
   const [previewTimeline, setPreviewTimeline] = useState(false);
+  const [visualFocus, setVisualFocus] = useState<string | undefined>();
   const [panorama, setPanorama] = useState<Asset | null>(null);
   const [syncFailure, setSyncFailure] = useState<SyncFailure | null>(null);
   const [mediaRetryKey, setMediaRetryKey] = useState(0);
@@ -546,7 +567,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     );
   }, []);
   const update = useCallback((fn: (d: Doc) => Doc) => {
-    setDoc((d) => (d ? fn(d) : d));
+    setDoc((d) => (d ? deriveManagedGraph(fn(d)) : d));
     dirty.current = true;
     setSaved("未保存");
   }, []);
@@ -605,16 +626,17 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       });
       throw e;
     }
+    const projectedDocument = deriveManagedGraph(p.document);
     revision.current = p.revision;
-    dirty.current = false;
+    dirty.current = projectedDocument !== p.document;
     nodeMeasurements.current.clear();
     setLayoutVersion((value) => value + 1);
     setProject(p);
-    setDoc(p.document);
+    setDoc(projectedDocument);
     setAssets(a);
     setJobs(j);
     setSelected(null);
-    setSaved("已保存");
+    setSaved(projectedDocument === p.document ? "已保存" : "未保存");
     setPanel(null);
     setTimeout(() => {
       fitView({ padding: 0.2 });
@@ -1360,6 +1382,13 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       // measurements outside the persisted document so asset/job refreshes do
       // not reset every node to `visibility: hidden`.
       const measured = nodeMeasurements.current.get(n.id);
+      if (isManagedVisualNode(n as Any))
+        return {
+          ...n,
+          width: n.width ?? measured?.width,
+          height: n.height ?? measured?.height,
+          selected: n.id === selected,
+        };
       return {
         ...n,
         width: n.width ?? measured?.width,
@@ -1494,8 +1523,15 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         >
           <FolderOpen />
         </button>
-        <button title="提示词模板" onClick={() => setPanel("prompts")}>
+        <button
+          className={panel === "filmBible" ? "active" : ""}
+          title="视觉圣经"
+          onClick={() => setPanel(panel === "filmBible" ? null : "filmBible")}
+        >
           <BookOpen />
+        </button>
+        <button title="提示词模板" onClick={() => setPanel("prompts")}>
+          <Sparkles />
         </button>
         <button title="历史版本" onClick={() => history().catch(report)}>
           <History />
@@ -1592,6 +1628,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           </Suspense>
         ) : view === "canvas" ? (
           <div className="canvas">
+            <VisualBibleGraphProvider visual={visualBibleOf(doc)}>
             <ReactFlow
               nodes={renderedNodes}
               edges={renderedEdges}
@@ -1621,7 +1658,16 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 }
                 if (measurementsChanged) setLayoutVersion((value) => value + 1);
                 const filtered = changes.filter(
-                  (c) => c.type !== "select" && c.type !== "dimensions",
+                  (c) =>
+                    c.type !== "select" &&
+                    c.type !== "dimensions" &&
+                    !(
+                      c.type === "remove" &&
+                      doc.nodes.some(
+                        (item) =>
+                          item.id === c.id && isManagedVisualNode(item as Any),
+                      )
+                    ),
                 );
                 if (filtered.length)
                   update((d) => ({
@@ -1631,12 +1677,21 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               }}
               onEdgesChange={(changes: EdgeChange[]) => {
                 if (changes.every((c) => c.type === "select")) return;
+                const { allowed, blocked } = filterManagedEdgeRemovals(
+                  changes,
+                  doc.edges as Any[],
+                );
+                if (blocked.length)
+                  setNotice(
+                    "视觉绑定连线由资产关系管理；请在视觉圣经中解除绑定",
+                  );
+                if (!allowed.length) return;
                 update((d) =>
                   invalidate(
-                    { ...d, edges: applyEdgeChanges(changes, d.edges) },
+                    { ...d, edges: applyEdgeChanges(allowed, d.edges) },
                     d.edges
                       .filter((e) =>
-                        changes.some(
+                        allowed.some(
                           (c) => c.type === "remove" && c.id === e.id,
                         ),
                       )
@@ -1646,6 +1701,44 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               }}
               onConnect={(connection: Connection) => {
                 if (connection.source === connection.target) return;
+                const source = doc.nodes.find(
+                  (item) => item.id === connection.source,
+                );
+                const target = doc.nodes.find(
+                  (item) => item.id === connection.target,
+                );
+                if (source && isManagedVisualNode(source as Any)) {
+                  const versionId = visualVersionIdFromNode(source as Any);
+                  const shot = doc.shots.find(
+                    (item) =>
+                      item.imageNode === target?.id ||
+                      item.pipeline?.imageNodeId === target?.id,
+                  );
+                  if (!shot || target?.data.kind !== "image") {
+                    report(new Error("视觉版本只能连接到分镜图节点"));
+                    return;
+                  }
+                  try {
+                    const next = bindVisualVersion(
+                      doc,
+                      String(shot.uid || shot.id),
+                      versionId,
+                    );
+                    update(() => next);
+                    setNotice("已建立视觉绑定，受管连线已同步");
+                  } catch (reason) {
+                    report(reason);
+                  }
+                  return;
+                }
+                if (target && isManagedVisualNode(target as Any)) {
+                  report(
+                    new Error(
+                      "视觉版本节点只接受从自身连向分镜图的绑定操作",
+                    ),
+                  );
+                  return;
+                }
                 update((d) =>
                   invalidate(
                     {
@@ -1657,6 +1750,12 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 );
               }}
               onNodeClick={(_, n) => {
+                if (isManagedVisualNode(n as Any)) {
+                  setSelected(n.id);
+                  setVisualFocus(visualVersionIdFromNode(n as Any));
+                  setPanel("filmBible");
+                  return;
+                }
                 setSelected(n.id);
                 setPanel(null);
               }}
@@ -1677,6 +1776,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               <Controls showInteractive={false} />
               <MiniMap nodeColor="#5b5545" maskColor="rgba(10,12,13,.6)" />
             </ReactFlow>
+            </VisualBibleGraphProvider>
             {!doc.nodes.length && (
               <div className="canvas-welcome">
                 <div className="welcome-mark">
@@ -2073,7 +2173,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           </section>
         )}
       </main>
-      {selected && node && !panel && (
+      {selected && node && !panel && !isManagedVisualNode(node as Any) && (
         <aside className="inspector">
           <div className="inspector-title">
             <span>{titles[data.kind]}设置</span>
@@ -2529,8 +2629,12 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         <div
           className={
             "side-panel " +
-            (["settings", "assets", "jobs", "characters"].includes(panel)
-              ? "wide"
+            (["settings", "assets", "jobs", "characters", "filmBible"].includes(
+              panel,
+            )
+              ? panel === "filmBible"
+                ? "film-bible-wide"
+                : "wide"
               : "")
           }
         >
@@ -2548,6 +2652,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   characters: "角色与场景",
                   export: "导出成片",
                   run: "运行工作流",
+                  filmBible: "视觉圣经",
                 }[panel]
               }
             </h2>
@@ -2560,6 +2665,81 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             </button>
           </div>
           <div className="panel-scroll">
+            {panel === "filmBible" && (
+              <FilmBiblePanel
+                visual={visualBibleOf(doc)}
+                shots={doc.shots}
+                focusVersionId={visualFocus}
+                onFocusVersion={setVisualFocus}
+                onRenameCard={(cardId, name) => {
+                  try {
+                    const next = renameVisualCard(doc, cardId, name);
+                    update(() => next);
+                    setNotice("视觉卡名称已保存");
+                  } catch (reason) {
+                    report(reason);
+                  }
+                }}
+                onSaveVersion={(versionId, draft) => {
+                  try {
+                    const next = updateDraftVisualVersion(doc, versionId, {
+                        spec: {
+                          description: draft.description,
+                          attributes: draft.attributes,
+                        },
+                        invariants: draft.invariants,
+                      });
+                    update(() => next);
+                    setNotice("视觉版本文字已保存");
+                  } catch (reason) {
+                    report(reason);
+                  }
+                }}
+                onStatus={(versionId, status) => {
+                  try {
+                    const next = setVisualVersionStatus(doc, versionId, status);
+                    update(() => next);
+                  } catch (reason) {
+                    report(reason);
+                  }
+                }}
+                onBind={(shotUid, versionId) => {
+                  try {
+                    const next = bindVisualVersion(doc, shotUid, versionId);
+                    update(() => next);
+                    setNotice("视觉版本已绑定到分镜");
+                  } catch (reason) {
+                    report(reason);
+                  }
+                }}
+                onUnbind={(shotUid, versionId) => {
+                  try {
+                    const next = unbindVisualVersion(doc, shotUid, versionId);
+                    update(() => next);
+                    setNotice("视觉版本已从分镜解除");
+                  } catch (reason) {
+                    report(reason);
+                  }
+                }}
+                onLocate={(versionId) => {
+                  const visualNode = doc.nodes.find(
+                    (item) => item.data?.visualVersionId === versionId,
+                  );
+                  if (!visualNode) return;
+                  setView("canvas");
+                  setSelected(visualNode.id);
+                  setPanel(null);
+                  setTimeout(
+                    () =>
+                      fitView({
+                        nodes: [{ id: visualNode.id }],
+                        padding: 0.8,
+                      }),
+                    50,
+                  );
+                }}
+              />
+            )}
             {panel === "run" && (
               <RunWorkflow
                 nodes={doc.nodes}
