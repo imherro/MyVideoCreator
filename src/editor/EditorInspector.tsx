@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   AudioElement,
   CaptionElement,
@@ -33,6 +33,7 @@ const visualTypes = new Set(["video", "image"]);
 export function EditorInspector({ assets }: { assets: EditorAsset[] }) {
   const { editor, selectedItem, changeLog, present } = useTimelineContext();
   const [error, setError] = useState("");
+  const transitionTargetRef = useRef<HTMLSelectElement>(null);
 
   if (!(selectedItem instanceof TrackElement)) {
     return (
@@ -134,6 +135,7 @@ export function EditorInspector({ assets }: { assets: EditorAsset[] }) {
               defaultValue={getVolumeAutomation(element).map((point) => `${point.time}:${Math.round(point.value * 100)}`).join(", ")}
               onBlur={(event) => void commit(() => setVolumeAutomation(editor, element.getId(), parseVolumeAutomation(event.target.value, element.getDuration())))} />
           </label>
+          <small className="mvc-editor-preview-note">静态音量可实时试听；音量关键帧和音频淡化以导出成片为准。</small>
           <div className="mvc-editor-inspector-grid">
             <label>
               音频淡入
@@ -204,9 +206,19 @@ export function EditorInspector({ assets }: { assets: EditorAsset[] }) {
           <select defaultValue={String(element.getProps().mediaFilter || "none")}
             onChange={(event) => void commit(() => setMediaFilter(editor, element.getId(), event.target.value))}>
             <option value="none">无</option>
-            <option value="grayscale">黑白</option>
+            <option value="blackWhite">黑白</option>
             <option value="sepia">复古</option>
-            <option value="contrast">增强对比</option>
+            <option value="cinematic">电影感</option>
+            <option value="saturated">高饱和</option>
+            <option value="bright">明亮</option>
+            <option value="vibrant">鲜艳</option>
+            <option value="cool">冷色</option>
+            <option value="warm">暖色</option>
+            <option value="softGlow">柔光</option>
+            <option value="moody">情绪</option>
+            <option value="dreamy">梦幻</option>
+            <option value="dramatic">戏剧</option>
+            <option value="faded">褪色</option>
           </select>
         </label>
       )}
@@ -216,7 +228,7 @@ export function EditorInspector({ assets }: { assets: EditorAsset[] }) {
           <legend>转场</legend>
           <label>
             目标片段
-            <select id={`transition-target-${element.getId()}`} defaultValue={defaultTarget}>
+            <select ref={transitionTargetRef} defaultValue={defaultTarget}>
               <option value="">请选择</option>
               {candidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name || candidate.id}</option>)}
             </select>
@@ -225,7 +237,7 @@ export function EditorInspector({ assets }: { assets: EditorAsset[] }) {
             <label>
               类型
               <select defaultValue={transition?.kind || "none"} onChange={(event) => {
-                const target = (document.getElementById(`transition-target-${element.getId()}`) as HTMLSelectElement | null)?.value;
+                const target = transitionTargetRef.current?.value;
                 void commit(() => setTransition(editor, element.getId(), target, event.target.value, transition?.duration || 0.4));
               }}>
                 <option value="none">无</option>
@@ -239,6 +251,7 @@ export function EditorInspector({ assets }: { assets: EditorAsset[] }) {
                 onBlur={(event) => transition && void commit(() => setTransition(editor, element.getId(), transition.toElementId, transition.kind, Number(event.target.value)))} />
             </label>
           </div>
+          <small className="mvc-editor-preview-note">Twick 当前不实时显示片段间转场；导出成片会按这里的设置渲染。</small>
         </fieldset>
       )}
 

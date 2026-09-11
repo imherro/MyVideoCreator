@@ -46,6 +46,25 @@ def test_revision_conflict_and_restore(authenticated):
     old=c.get('/api/projects/'+p['id']+'/revisions/'+revisions[0]['id']).json()
     assert old['document']['brief']==''
 
+
+def test_editor_timeline_round_trips_through_project_persistence(authenticated):
+    c=authenticated;p=project(c);doc=p['document']
+    timeline={
+        'version':2,
+        'tracks':[{'id':'v1','name':'V1','type':'video','elements':[{
+            'id':'clip-1','type':'video','s':1.25,'e':4.5,
+            'props':{'src':'/api/assets/a1/file','srcAssetId':'a1','time':.5,'volume':.7,'playbackRate':1.25,'opacity':.8,'mediaFilter':'cinematic','transition':{'toElementId':'clip-2','kind':'crossfade','duration':.4}},
+            'metadata':{'assetId':'a1','mvc':{'fade':{'videoIn':.2,'videoOut':.4,'audioIn':.1,'audioOut':.3},'volumeKeyframes':[{'time':0,'value':.5},{'time':3.25,'value':1}]}},
+            'frame':{'x':20,'y':30,'size':[640,360],'rotation':5},
+        }]}],
+        'assets':{'a1':{'id':'a1','type':'video','url':'/api/assets/a1/file'}},
+    }
+    doc['editor']={'version':1,'timeline':timeline}
+    saved=c.put('/api/projects/'+p['id'],json={'name':p['name'],'revision':p['revision'],'document':doc})
+    assert saved.status_code==200,saved.text
+    restored=c.get('/api/projects/'+p['id']).json()['document']['editor']
+    assert restored=={'version':1,'timeline':timeline}
+
 def test_blank_project_name_uses_default(authenticated):
     c=authenticated
     item=c.post('/api/projects',json={'name':''}).json()

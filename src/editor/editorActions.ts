@@ -1,6 +1,7 @@
 import {
   AudioElement,
   CaptionElement,
+  ElementAnimation,
   ImageElement,
   TextElement,
   VideoElement,
@@ -146,7 +147,8 @@ export function setElementVolume(
 export function getVolumeAutomation(element: TrackElement): VolumePoint[] {
   const { mvc } = mvcMetadata(element);
   if (!Array.isArray(mvc.volumeKeyframes)) return [];
-  return (mvc.volumeKeyframes as Record<string, unknown>[])
+  return mvc.volumeKeyframes
+    .filter((point): point is Record<string, unknown> => Boolean(point) && typeof point === "object")
     .map((point) => ({ time: Number(point.time), value: Number(point.value) }))
     .filter((point) => Number.isFinite(point.time) && Number.isFinite(point.value))
     .sort((a, b) => a.time - b.time);
@@ -217,6 +219,23 @@ export function setElementFade(
   }
   const { metadata, mvc } = mvcMetadata(element);
   element.setMetadata({ ...metadata, mvc: { ...mvc, fade: next } });
+  if (element instanceof VideoElement || element instanceof ImageElement || element instanceof TextElement) {
+    const hasIn = next.videoIn > 0;
+    const hasOut = next.videoOut > 0;
+    if (!hasIn && !hasOut) {
+      if (element.getAnimation()?.getName() === "fade") element.setAnimation(undefined);
+    } else {
+      const previewDuration = hasIn && hasOut
+        ? Math.min(next.videoIn, next.videoOut)
+        : hasIn ? next.videoIn : next.videoOut;
+      element.setAnimation(
+        new ElementAnimation("fade")
+          .setAnimate(hasIn && hasOut ? "both" : hasIn ? "enter" : "exit")
+          .setInterval(previewDuration)
+          .setDuration(element.getDuration()),
+      );
+    }
+  }
   editor.updateElement(element);
 }
 

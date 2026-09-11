@@ -47,4 +47,6 @@ EditorRenderCompiler
 - 视频原声与音频轨按时间延迟后混音；支持 trim、速度、静态音量、关键帧线性插值和淡入淡出。
 - 最终固定输出 24fps H.264/AAC MP4，并由原 worker 登记回项目素材库。
 
+编译器只接受它能够兑现的元素、转场、动画和滤镜；第三方工程中的未知效果会明确报错，不会静默丢失。Twick 0.15.31 的 transition metadata 与音量自动化目前不进入其浏览器实时播放器，对应控件已标注“以导出成片为准”，FFmpeg 输出仍完整实现。
+
 legacy `document.timeline: Clip[]` 和原导出器继续存在。只有工程包含 `editor_timeline` 时才走新编译器，因此旧项目与原 AI 生成链路不需要迁移即可继续工作。

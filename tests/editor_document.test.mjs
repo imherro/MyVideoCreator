@@ -68,6 +68,21 @@ test("persisted asset ids rebind stale media URLs to the current project endpoin
   assert.equal(timeline.assets.a1.id, "a1");
 });
 
+test("legacy filter names migrate to Twick preview-compatible filter ids", () => {
+  const timeline = attachAssetReferences(
+    {
+      version: 2,
+      tracks: [{ id: "t1", name: "V1", elements: [
+        { id: "e1", type: "image", s: 0, e: 1, props: { mediaFilter: "grayscale" } },
+        { id: "e2", type: "image", s: 1, e: 2, props: { mediaFilter: "contrast" } },
+      ] }],
+    },
+    [],
+  );
+  assert.equal(timeline.tracks[0].elements[0].props.mediaFilter, "blackWhite");
+  assert.equal(timeline.tracks[0].elements[1].props.mediaFilter, "cinematic");
+});
+
 test("editor resolution follows the project aspect ratio", () => {
   assert.deepEqual(editorResolution("16:9"), { width: 1280, height: 720 });
   assert.deepEqual(editorResolution("9:16"), { width: 720, height: 1280 });

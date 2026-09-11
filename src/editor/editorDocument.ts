@@ -25,6 +25,11 @@ export const EMPTY_EDITOR_TIMELINE: ProjectJSON = {
   },
 };
 
+const LEGACY_FILTER_ALIASES: Record<string, string> = {
+  grayscale: "blackWhite",
+  contrast: "cinematic",
+};
+
 export function readEditorTimeline(editor?: EditorDocument): ProjectJSON {
   if (!editor || editor.version !== 1 || !Array.isArray(editor.timeline?.tracks)) {
     return structuredClone(EMPTY_EDITOR_TIMELINE);
@@ -55,17 +60,21 @@ export function attachAssetReferences(
   const tracks = timeline.tracks.map((track) => ({
     ...track,
     elements: track.elements.map((element) => {
-      const linkedId = element.metadata?.assetId || element.props?.srcAssetId;
+      const currentFilter = element.props?.mediaFilter;
+      const normalized = typeof currentFilter === "string" && LEGACY_FILTER_ALIASES[currentFilter]
+        ? { ...element, props: { ...element.props, mediaFilter: LEGACY_FILTER_ALIASES[currentFilter] } }
+        : element;
+      const linkedId = normalized.metadata?.assetId || normalized.props?.srcAssetId;
       const asset =
         (typeof linkedId === "string" ? assetsById.get(linkedId) : undefined) ||
-        mediaAssetForElement(element, assetsByUrl);
-      if (!asset) return element;
+        mediaAssetForElement(normalized, assetsByUrl);
+      if (!asset) return normalized;
       referencedAssets.add(asset.id);
       return {
-        ...element,
-        props: { ...element.props, src: asset.url, srcAssetId: asset.id },
+        ...normalized,
+        props: { ...normalized.props, src: asset.url, srcAssetId: asset.id },
         metadata: {
-          ...(element.metadata || {}),
+          ...(normalized.metadata || {}),
           assetId: asset.id,
           assetSource: "my-video-creator",
         },

@@ -11,6 +11,13 @@ from typing import Any, Callable
 MAX_DURATION = 6 * 60 * 60
 VISUAL_TYPES = {'video', 'image'}
 MEDIA_TYPES = {'video', 'image', 'audio'}
+SUPPORTED_TYPES = MEDIA_TYPES | {'text', 'caption'}
+SUPPORTED_TRANSITIONS = {'fade', 'crossfade'}
+SUPPORTED_MEDIA_FILTERS = {
+    'none', 'saturated', 'bright', 'vibrant', 'retro', 'blackWhite',
+    'grayscale', 'sepia', 'cool', 'warm', 'cinematic', 'contrast',
+    'softGlow', 'moody', 'dreamy', 'inverted', 'vintage', 'dramatic', 'faded',
+}
 
 
 @dataclass
@@ -50,7 +57,16 @@ def _fade(element: dict) -> dict[str, float]:
     raw = mvc.get('fade') or {}
     duration = _number(element.get('e')) - _number(element.get('s'))
     limit = max(0, duration / 2)
-    return {key: _clamp(raw.get(key), 0, limit) for key in ('videoIn', 'videoOut', 'audioIn', 'audioOut')}
+    result = {key: _clamp(raw.get(key), 0, limit) for key in ('videoIn', 'videoOut', 'audioIn', 'audioOut')}
+    animation = element.get('animation') or {}
+    if animation.get('name') == 'fade':
+        interval = _clamp(animation.get('interval', animation.get('duration')), 0, limit)
+        animate = animation.get('animate')
+        if animate in {'enter', 'both'}:
+            result['videoIn'] = max(result['videoIn'], interval)
+        if animate in {'exit', 'both'}:
+            result['videoOut'] = max(result['videoOut'], interval)
+    return result
 
 
 def _color(value: Any, default: str = '#000000') -> str:
@@ -90,9 +106,25 @@ def _atempo(rate: float) -> list[str]:
 
 def _media_filter(name: Any) -> list[str]:
     return {
-        'grayscale': ['hue=s=0'],
-        'sepia': ['colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131'],
-        'contrast': ['eq=contrast=1.2:saturation=1.05'],
+        'none': [],
+        'saturated': ['eq=saturation=1.4:contrast=1.1'],
+        'bright': ['eq=brightness=.18:contrast=1.05'],
+        'vibrant': ['eq=saturation=1.6:brightness=.1:contrast=1.1'],
+        'retro': ['colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131', 'eq=contrast=1.3:brightness=-.08:saturation=.8'],
+        'blackWhite': ['hue=s=0', 'eq=contrast=1.25:brightness=.03'],
+        'grayscale': ['hue=s=0', 'eq=contrast=1.25:brightness=.03'],
+        'sepia': ['colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131', 'eq=contrast=1.08'],
+        'cool': ['hue=h=15', 'eq=brightness=.06:saturation=1.3:contrast=1.05'],
+        'warm': ['hue=h=-15', 'eq=brightness=.1:saturation=1.3:contrast=1.05'],
+        'cinematic': ['eq=contrast=1.4:brightness=-.03:saturation=.85'],
+        'contrast': ['eq=contrast=1.4:brightness=-.03:saturation=.85'],
+        'softGlow': ['gblur=sigma=1.2', 'eq=brightness=.12:contrast=.95:saturation=1.1'],
+        'moody': ['eq=brightness=.03:contrast=1.4:saturation=.65'],
+        'dreamy': ['gblur=sigma=2', 'eq=brightness=.18:contrast=.95:saturation=1.4'],
+        'inverted': ['negate', 'hue=h=180'],
+        'vintage': ['colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131', 'eq=saturation=1.4:contrast=1.2:brightness=.06'],
+        'dramatic': ['eq=contrast=1.5:brightness=-.06:saturation=1.2'],
+        'faded': ['eq=brightness=.12:contrast=.9:saturation=.8'],
     }.get(str(name), [])
 
 
@@ -161,6 +193,18 @@ class EditorRenderCompiler:
                 if not isinstance(element_id, str) or not element_id or element_id in element_ids:
                     raise ValueError('编辑工程的元素 ID 缺失或重复')
                 element_ids.add(element_id)
+                element_type = element.get('type')
+                if element_type not in SUPPORTED_TYPES and not track_props.get('hidden'):
+                    raise ValueError(f'剪辑元素 {element_id} 使用了导出器不支持的类型：{element_type or "缺失"}')
+                props = element.get('props') or {}
+                media_filter = props.get('mediaFilter')
+                if element_type in VISUAL_TYPES and media_filter not in (None, '') and media_filter not in SUPPORTED_MEDIA_FILTERS:
+                    raise ValueError(f'剪辑元素 {element_id} 使用了不支持的画面滤镜：{media_filter}')
+                animation = element.get('animation') or {}
+                if animation and (element_type == 'audio' or animation.get('name') != 'fade'):
+                    raise ValueError(f'剪辑元素 {element_id} 使用了导出器不支持的动画')
+                if element.get('frameEffects') or element.get('textEffect'):
+                    raise ValueError(f'剪辑元素 {element_id} 使用了导出器不支持的高级效果')
                 self.elements.append((track_index, track_props, element))
         self.duration = max((_number(item[2]['e']) for item in self.elements), default=0)
         if self.duration <= 0:
@@ -258,12 +302,26 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
         transition_out: dict[str, float] = {}
         for _, _, element in visual:
             transition = element.get('transition') or (element.get('props') or {}).get('transition') or {}
+            if not transition:
+                continue
             target = str(transition.get('toElementId') or '')
             target_element = next((item[2] for item in visual if str(item[2].get('id')) == target), None)
-            if target_element and _number(target_element.get('s')) >= _number(element.get('s')):
-                amount = _clamp(transition.get('duration'), .05, min(10, (_number(element['e']) - _number(element['s'])) / 2), .4)
-                transition_in[target] = (_number(element['e']) - amount, str(transition.get('kind') or 'crossfade'), amount)
-                transition_out[str(element.get('id'))] = amount
+            kind = str(transition.get('kind') or '')
+            amount = _number(transition.get('duration'), -1)
+            if kind not in SUPPORTED_TRANSITIONS:
+                raise ValueError(f'剪辑元素 {element.get("id")} 使用了不支持的转场：{kind or "缺失"}')
+            if not target_element:
+                raise ValueError(f'剪辑元素 {element.get("id")} 的转场目标不存在或不可见')
+            if _number(target_element.get('s')) < _number(element.get('s')):
+                raise ValueError('转场目标必须位于来源片段之后')
+            target_duration = _number(target_element['e']) - _number(target_element['s'])
+            max_amount = min(10, (_number(element['e']) - _number(element['s'])) / 2, target_duration / 2)
+            if amount < .05 or amount > max_amount:
+                raise ValueError(f'剪辑元素 {element.get("id")} 的转场时长无效')
+            if target in transition_in:
+                raise ValueError(f'剪辑元素 {target} 不能同时接收多个转场')
+            transition_in[target] = (_number(element['e']) - amount, kind, amount)
+            transition_out[str(element.get('id'))] = amount
 
         filters = [f'color=c={_color(self.project.get("backgroundColor"))}:s={self.width}x{self.height}:r=24:d={self.duration:.6f}[v0]']
         current_video = 'v0'

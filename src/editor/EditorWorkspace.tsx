@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 import VideoEditor from "@twick/video-editor";
+import "@twick/video-editor/dist/video-editor.css";
 import { LivePlayerProvider } from "@twick/live-player";
 import {
   TimelineProvider,

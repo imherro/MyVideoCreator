@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { AudioElement, VideoElement } from "@twick/timeline";
 import {
   getElementFade,
+  getVolumeAutomation,
   moveElement,
   parseVolumeAutomation,
   setElementDuration,
@@ -78,4 +79,35 @@ test("domain actions validate source bounds and clamp media volume", () => {
     audioIn: 0.5,
     audioOut: 2,
   });
+});
+
+test("visual fades also create a Twick fade animation for live preview", () => {
+  const element = new VideoElement("/video", { width: 1280, height: 720 })
+    .setId("e-video")
+    .setStart(0)
+    .setEnd(4)
+    .setMediaDuration(8);
+  const editor = fakeEditor(element);
+  setElementFade(editor, element.getId(), { videoIn: 0.4, videoOut: 0.6 });
+  assert.deepEqual(element.getAnimation().toJSON(), {
+    name: "fade",
+    interval: 0.4,
+    duration: 4,
+    intensity: undefined,
+    animate: "both",
+    mode: undefined,
+    direction: undefined,
+  });
+  setElementFade(editor, element.getId(), { videoIn: 0, videoOut: 0 });
+  assert.equal(element.getAnimation(), undefined);
+});
+
+test("malformed persisted volume metadata is ignored safely", () => {
+  const element = new AudioElement("/audio")
+    .setId("e-audio")
+    .setStart(0)
+    .setEnd(2)
+    .setMediaDuration(2)
+    .setMetadata({ mvc: { volumeKeyframes: [null, "bad", { time: 1, value: .5 }] } });
+  assert.deepEqual(getVolumeAutomation(element), [{ time: 1, value: .5 }]);
 });

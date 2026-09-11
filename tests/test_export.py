@@ -85,6 +85,7 @@ def test_export_original_audio_music_subtitle_and_mute():
     assert all(a[1]>.01 for a in amplitudes),amplitudes
 
 def test_editor_export_composites_tracks_text_and_audio():
+    import array,math
     from backend.media import ffmpeg_executable,probe
     s.init();ffmpeg=ffmpeg_executable()
     pid=s.uid();jid=s.uid();now=time.time()
@@ -134,6 +135,16 @@ def test_editor_export_composites_tracks_text_and_audio():
     assert pixel(10,10)[0]>pixel(10,10)[2]+120
     assert pixel(145,75)[2]>pixel(145,75)[0]+120
     assert sum(min(frame.stdout[i:i+3])>180 for i in range(0,len(frame.stdout),3))>15
+    automation=[]
+    for offset in (.08,.5,.9):
+        pcm=subprocess.run([ffmpeg,'-v','error','-ss',f'{offset:.2f}','-i',str(path),'-t','0.08','-vn','-ac','1','-ar','8000','-f','f32le','-'],capture_output=True,timeout=30)
+        assert pcm.returncode==0,pcm.stderr
+        samples=array.array('f',pcm.stdout)
+        real=sum(x*math.cos(2*math.pi*880*i/8000) for i,x in enumerate(samples))
+        imag=sum(x*math.sin(2*math.pi*880*i/8000) for i,x in enumerate(samples))
+        automation.append(math.hypot(real,imag)*2/len(samples))
+    assert automation[1]>automation[0]*2,automation
+    assert automation[1]>automation[2]*2,automation
 
 def test_editor_export_crossfades_adjacent_visuals():
     from backend.media import ffmpeg_executable
@@ -170,3 +181,43 @@ def test_editor_export_crossfades_adjacent_visuals():
     assert colors[0][0]>colors[0][2]+120,colors
     assert colors[1][0]>30 and colors[1][2]>30,colors
     assert colors[2][2]>colors[2][0]+120,colors
+
+
+def test_editor_export_honors_source_trim_rate_filter_and_caption():
+    from backend.media import ffmpeg_executable,probe
+    s.init();ffmpeg=ffmpeg_executable()
+    pid=s.uid();jid=s.uid();now=time.time()
+    with s.db() as c:
+        c.execute('INSERT INTO projects VALUES(?,?,1,?,?,?)',(pid,'Trim filter caption','{}',now,now))
+        c.execute('INSERT INTO jobs(id,submission_id,project_id,node_id,kind,status,input,created,updated) VALUES(?,?,?,?,?,?,?,?,?)',(jid,jid,pid,'export','export','running','{}',now,now))
+    job={'id':jid,'project_id':pid,'node_id':'export','kind':'export','input':{}}
+    source=s.DATA/(s.uid()+'.mp4')
+    command=[ffmpeg,'-y','-v','error',
+        '-f','lavfi','-i','color=c=red:s=128x128:r=24:d=1',
+        '-f','lavfi','-i','color=c=blue:s=128x128:r=24:d=1',
+        '-filter_complex','[0:v][1:v]concat=n=2:v=1:a=0[v]',
+        '-map','[v]','-c:v','libx264','-pix_fmt','yuv420p',str(source)]
+    response=subprocess.run(command,capture_output=True,timeout=30)
+    assert response.returncode==0,response.stderr
+    asset=register(job,source);source.unlink()
+    project={'version':2,'tracks':[
+        {'id':'v1','name':'V1','type':'video','elements':[{
+            'id':'video','type':'video','s':0,'e':.5,
+            'props':{'srcAssetId':asset['id'],'time':1,'playbackRate':2,'volume':0,'mediaFilter':'blackWhite'},
+            'metadata':{'assetId':asset['id'],'mvc':{'fade':{'videoIn':.05,'videoOut':.05}}},
+            'frame':{'x':0,'y':0,'size':[128,128]},'objectFit':'fill','mediaDuration':2,
+        }]},
+        {'id':'captions','name':'字幕','type':'caption','props':{
+            'font':{'family':'Arial','size':24,'weight':700},
+            'colors':{'text':'#ffffff','outlineColor':'#000000'},
+        },'elements':[{'id':'caption','type':'caption','s':0,'e':.5,'t':'CAPTION','props':{}}]},
+    ]}
+    job['input']={'editor_timeline':project,'resolution':'128x128'}
+    result=Worker().export(job)
+    with s.db() as c:path=s.ASSETS/c.execute('SELECT path FROM assets WHERE id=?',(result['assets'][0]['id'],)).fetchone()['path']
+    info=probe(path);assert .45<info['duration']<.65
+    frame=subprocess.run([ffmpeg,'-v','error','-ss','0.25','-i',str(path),'-frames:v','1','-f','rawvideo','-pix_fmt','rgb24','-'],capture_output=True,timeout=30)
+    assert frame.returncode==0,frame.stderr
+    background=tuple(frame.stdout[(15*128+15)*3:(15*128+15)*3+3])
+    assert max(background)-min(background)<12,background
+    assert sum(min(frame.stdout[i:i+3])>190 for i in range(0,len(frame.stdout),3))>20
