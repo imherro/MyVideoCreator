@@ -50,16 +50,20 @@ export function attachAssetReferences(
   assets: EditorAsset[],
 ): ProjectJSON {
   const assetsByUrl = new Map(assets.map((asset) => [asset.url, asset]));
+  const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
   const referencedAssets = new Set<string>();
   const tracks = timeline.tracks.map((track) => ({
     ...track,
     elements: track.elements.map((element) => {
-      const asset = mediaAssetForElement(element, assetsByUrl);
+      const linkedId = element.metadata?.assetId || element.props?.srcAssetId;
+      const asset =
+        (typeof linkedId === "string" ? assetsById.get(linkedId) : undefined) ||
+        mediaAssetForElement(element, assetsByUrl);
       if (!asset) return element;
       referencedAssets.add(asset.id);
       return {
         ...element,
-        props: { ...element.props, srcAssetId: asset.id },
+        props: { ...element.props, src: asset.url, srcAssetId: asset.id },
         metadata: {
           ...(element.metadata || {}),
           assetId: asset.id,

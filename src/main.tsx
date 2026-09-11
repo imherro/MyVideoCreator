@@ -1270,9 +1270,13 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setTimelineOpen(true);
     setNotice("已加入时间线");
   }
-  async function exportFilm() {
+  async function exportFilm(editorOverride?: EditorDocument["timeline"]) {
     if (!project || !doc) return;
     try {
+      const editorTimeline = editorOverride || doc.editor?.timeline;
+      const useEditor = Boolean(
+        editorTimeline?.tracks?.some((track) => track.elements?.length),
+      );
       await save();
       if (dirty.current) throw new Error("项目尚未保存，请先解决保存冲突");
       await api(
@@ -1283,6 +1287,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           submission_id: id(),
           input: {
             timeline: doc.timeline,
+            editor_timeline: useEditor ? editorTimeline : undefined,
+            render_mode: useEditor ? "editor" : "legacy",
             resolution: (doc as any).export_resolution || "1280x720",
             audio_id: (doc as any).audio_id,
             subtitle_id: (doc as any).subtitle_id,
@@ -1342,6 +1348,10 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         {error || "正在打开工作室"}
       </div>
     );
+  const persistedEditorTimeline = doc.editor?.timeline;
+  const hasEditorTimeline = Boolean(
+    persistedEditorTimeline?.tracks?.some((track) => track.elements.length),
+  );
   return (
     <div className="studio-shell">
       {previewTimeline && (
@@ -1528,6 +1538,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               onChange={(editor) =>
                 update((currentDoc) => ({ ...currentDoc, editor }))
               }
+              onExport={(timeline) => void exportFilm(timeline)}
             />
           </Suspense>
         ) : view === "canvas" ? (
@@ -2806,11 +2817,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   <Film size={30} />
                   <h3>{project.name}</h3>
                   <p>
-                    {doc.timeline.length} 个镜头 ·{" "}
-                    {doc.timeline
-                      .reduce((sum, t) => sum + Number(t.duration), 0)
-                      .toFixed(2)}{" "}
-                    秒
+                    {hasEditorTimeline
+                      ? `${persistedEditorTimeline!.tracks.length} 条编辑轨 · ${Math.max(0, ...persistedEditorTimeline!.tracks.flatMap((track) => track.elements.map((element) => Number(element.e) || 0))).toFixed(2)} 秒`
+                      : `${doc.timeline.length} 个镜头 · ${doc.timeline.reduce((sum, t) => sum + Number(t.duration), 0).toFixed(2)} 秒`}
                   </p>
                 </div>
                 <label>
@@ -2834,6 +2843,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 <label>
                   转场
                   <select
+                    disabled={hasEditorTimeline}
                     value={(doc as any).transition || "cut"}
                     onChange={(e) =>
                       update((d) => ({ ...d, transition: e.target.value }))
@@ -2846,6 +2856,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 <label>
                   背景配乐
                   <select
+                    disabled={hasEditorTimeline}
                     value={(doc as any).audio_id || ""}
                     onChange={(e) =>
                       update((d) => ({ ...d, audio_id: e.target.value }))
@@ -2865,6 +2876,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   配乐音量 ·{" "}
                   {Math.round(((doc as any).music_volume ?? 0.3) * 100)}%
                   <input
+                    disabled={hasEditorTimeline}
                     type="range"
                     min="0"
                     max="1"
@@ -2881,6 +2893,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 <label>
                   烧录字幕（SRT）
                   <select
+                    disabled={hasEditorTimeline}
                     value={(doc as any).subtitle_id || ""}
                     onChange={(e) =>
                       update((d) => ({ ...d, subtitle_id: e.target.value }))
@@ -2904,13 +2917,14 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   上传配乐或字幕
                 </button>
                 <p className="muted">
-                  MP4 / H.264 /
-                  24fps。保留镜头原声，配乐循环填充时间线。字幕烧录进视频画面。
+                  {hasEditorTimeline
+                    ? "当前导出 Twick 多轨工程。配乐、字幕、转场和音量请在剪辑工作区中调整。输出为 24fps H.264/AAC MP4。"
+                    : "MP4 / H.264 / 24fps。保留镜头原声，配乐循环填充时间线。字幕烧录进视频画面。"}
                 </p>
                 <button
                   className="primary full"
-                  disabled={!doc.timeline.length}
-                  onClick={exportFilm}
+                  disabled={!doc.timeline.length && !hasEditorTimeline}
+                  onClick={() => void exportFilm()}
                 >
                   <Download size={17} />
                   开始导出

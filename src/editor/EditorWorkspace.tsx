@@ -11,6 +11,8 @@ import { attachAssetReferences, editorResolution, readEditorTimeline } from "./e
 import type { EditorAsset, EditorDocument } from "./editorDocument";
 import { ProjectAssetPanel } from "./ProjectAssetPanel";
 import { EditorInspector } from "./EditorInspector";
+import { EditorToolbar } from "./EditorToolbar";
+import { EditorShortcuts } from "./EditorShortcuts";
 import { planInitialTimeline } from "./initialTimeline";
 import "./editorWorkspace.css";
 
@@ -24,6 +26,7 @@ type EditorWorkspaceProps = {
   audioId?: string;
   musicVolume?: number;
   onChange: (editor: EditorDocument) => void;
+  onExport: (timeline: ProjectJSON) => void;
 };
 
 function TimelinePersistence({
@@ -58,6 +61,7 @@ function EditorSurface({
   audioId,
   musicVolume,
   onChange,
+  onExport,
 }: {
   initialTimeline: ProjectJSON;
   assets: EditorAsset[];
@@ -66,6 +70,7 @@ function EditorSurface({
   audioId?: string;
   musicVolume?: number;
   onChange: EditorWorkspaceProps["onChange"];
+  onExport: EditorWorkspaceProps["onExport"];
 }) {
   const { editor, videoResolution } = useTimelineContext();
   const [message, setMessage] = useState("编辑会随当前项目自动保存");
@@ -99,16 +104,18 @@ function EditorSurface({
   return (
     <>
       <TimelinePersistence initialTimeline={initialTimeline} assets={assets} onChange={onChange} />
+      <EditorShortcuts onMessage={setMessage} />
       <div className="mvc-editor-actionbar">
         <button className="primary compact" onClick={generateInitialEdit}>
           <Sparkles size={15} /> 生成初剪
         </button>
         <span>{message}</span>
+        <EditorToolbar assets={assets} onMessage={setMessage} onExport={onExport} />
       </div>
       <div className="mvc-editor-surface">
         <VideoEditor
           leftPanel={<ProjectAssetPanel assets={assets} />}
-          rightPanel={<EditorInspector />}
+          rightPanel={<EditorInspector assets={assets} />}
           editorConfig={{
             canvasMode: true,
             videoProps: { ...videoResolution, backgroundColor: "#000000" },
@@ -131,8 +138,12 @@ export function EditorWorkspace({
   audioId,
   musicVolume,
   onChange,
+  onExport,
 }: EditorWorkspaceProps) {
-  const initialTimeline = useMemo(() => readEditorTimeline(editor), [projectId]);
+  const initialTimeline = useMemo(
+    () => attachAssetReferences(readEditorTimeline(editor), assets),
+    [projectId],
+  );
   const resolution = editorResolution(ratio);
 
   return (
@@ -154,6 +165,7 @@ export function EditorWorkspace({
             audioId={audioId}
             musicVolume={musicVolume}
             onChange={onChange}
+            onExport={onExport}
           />
         </TimelineProvider>
       </LivePlayerProvider>

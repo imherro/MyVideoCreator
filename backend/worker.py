@@ -13,6 +13,7 @@ from . import store as s, runtime
 from .prompts import TEMPLATES, SHOT_SCHEMA, validate_shots
 from .media import ffmpeg_executable,probe
 from .process_lock import ProcessLock
+from .editor_renderer import EditorRenderCompiler
 
 def checked(response):
     if not response.is_success:
@@ -441,7 +442,10 @@ class Worker:
         raise InterruptedError()
 
     def export(self,job):
-        inp=job['input']; items=inp.get('timeline',[])
+        inp=job['input']
+        if inp.get('editor_timeline') is not None:
+            return self.export_editor(job)
+        items=inp.get('timeline',[])
         if not items: raise ValueError('时间线没有镜头')
         executable=ffmpeg_executable()
         work=s.DATA/job['id']; work.mkdir(exist_ok=True)
@@ -492,6 +496,33 @@ class Worker:
         finally:
             # All paths are rooted in this job's private work directory.
             if work.parent==s.DATA and work.name==job['id']: shutil.rmtree(work,ignore_errors=True)
+
+    def export_editor(self,job):
+        inp=job['input']; executable=ffmpeg_executable()
+        work=s.DATA/job['id']; work.mkdir(exist_ok=True)
+        try:
+            width,height=(int(x) for x in inp.get('resolution','1280x720').split('x'))
+            def lookup(asset_id):
+                with s.db() as c:
+                    row=c.execute('SELECT * FROM assets WHERE id=?',(asset_id,)).fetchone()
+                if not row:return None
+                result=dict(row);result['absolute_path']=str(s.ASSETS/result['path'])
+                return result
+            output=work/'成片.mp4'
+            compiler=EditorRenderCompiler(
+                job['project_id'],inp['editor_timeline'],(width,height),work,lookup,probe
+            )
+            plan=compiler.compile(executable,output)
+            self.run_process(
+                job,plan.args,work/'editor-export.log',
+                f'合成高级时间线：{plan.visual_count} 个画面，{plan.audio_count} 路声音，{plan.text_count} 条文字'
+            )
+            return {'assets':[register(job,output,'成片.mp4')], 'render':{
+                'mode':'editor','duration':plan.duration,'visual_count':plan.visual_count,
+                'audio_count':plan.audio_count,'text_count':plan.text_count,
+            }}
+        finally:
+            if work.parent==s.DATA and work.name==job['id']:shutil.rmtree(work,ignore_errors=True)
     def run_process(self,job,args,log_path,phase):
         self.progress(job,phase)
         with log_path.open('w',encoding='utf-8') as log:

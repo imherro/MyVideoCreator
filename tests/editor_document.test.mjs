@@ -52,6 +52,22 @@ test("persisted Twick media keeps the canonical MyVideoCreator asset id", () => 
   assert.equal(timeline.tracks[0].elements[0].metadata, undefined);
 });
 
+test("persisted asset ids rebind stale media URLs to the current project endpoint", () => {
+  const timeline = attachAssetReferences(
+    {
+      version: 2,
+      tracks: [{ id: "t1", name: "V1", elements: [{
+        id: "e1", type: "video", s: 0, e: 1,
+        props: { src: "http://old-host/api/assets/a1/file", srcAssetId: "a1" },
+        metadata: { assetId: "a1" },
+      }] }],
+    },
+    [{ id: "a1", name: "shot", kind: "video", url: "/api/assets/a1/file", metadata: { duration: 1 } }],
+  );
+  assert.equal(timeline.tracks[0].elements[0].props.src, "/api/assets/a1/file");
+  assert.equal(timeline.assets.a1.id, "a1");
+});
+
 test("editor resolution follows the project aspect ratio", () => {
   assert.deepEqual(editorResolution("16:9"), { width: 1280, height: 720 });
   assert.deepEqual(editorResolution("9:16"), { width: 720, height: 1280 });
