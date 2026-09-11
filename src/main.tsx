@@ -1315,6 +1315,17 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         },
       };
     }) || [];
+  const renderedEdges =
+    doc?.edges.map((edge) => ({
+      ...edge,
+      type: edge.type || "smoothstep",
+      zIndex: 1,
+      style: {
+        stroke: "#d4a963",
+        strokeWidth: 2.2,
+        ...edge.style,
+      },
+    })) || [];
   if (!doc || !project)
     return (
       <div className="loading">
@@ -1487,7 +1498,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           <div className="canvas">
             <ReactFlow
               nodes={renderedNodes}
-              edges={doc.edges}
+              edges={renderedEdges}
               nodeTypes={nodeTypes}
               onNodesChange={(changes: NodeChange[]) => {
                 let measurementsChanged = false;
