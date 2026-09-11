@@ -168,6 +168,8 @@ class Worker:
     def _chat_text(self,job,p,system_prompt,user_prompt,schema=None,phase='生成文本'):
         inp=job['input']
         headers={'Authorization':'Bearer '+p['api_key']} if p.get('api_key') else {}
+        if schema and not (inp.get('provider','local')=='local' or p.get('structured')):
+            user_prompt+='\n\n必须严格输出以下 JSON Schema 对应的单个 JSON 值，不要输出 Markdown 或解释：\n'+json.dumps(schema,ensure_ascii=False)
         body={'model':inp.get('model') or p.get('model','local'),'messages':[{'role':'system','content':system_prompt},{'role':'user','content':user_prompt}], 'temperature':0.6,'max_tokens':min(int(inp.get('max_tokens',4096)),12000),'stream':True}
         if inp.get('provider','local')=='local':
             body['chat_template_kwargs']={'enable_thinking':False}

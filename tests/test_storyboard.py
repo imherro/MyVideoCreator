@@ -68,3 +68,22 @@ def test_film_bible_storyboard_is_two_text_passes_with_deterministic_bindings(mo
     assert result['repair_count']==0 and result['shots'][0]['uid'].startswith('shot-')
     binding=result['shots'][0]['assetBindings']['characters'][0]['versionId']
     assert binding in result['filmBible']['visual']['versions']
+
+def test_non_structured_visual_output_gets_one_bounded_repair(monkeypatch):
+    s.init();pid=s.uid();jid=s.uid();now=time.time()
+    with s.db() as c:
+        c.execute('INSERT INTO projects VALUES(?,?,1,?,?,?)',(pid,'visual-repair','{}',now,now))
+        c.execute('INSERT INTO jobs(id,submission_id,project_id,node_id,kind,status,input,created,updated) VALUES(?,?,?,?,?,?,?,?,?)',(jid,jid,pid,'n','storyboard','running','{}',now,now))
+    malformed=[{'key':'hero','kind':'character','parent_key':'','description':'灰色风衣','attributes':{},'invariants':'灰色风衣'}]
+    valid_visual={'cards':[{'key':'hero','kind':'character','name':'林岚','parent_key':'','description':'灰色风衣','attributes':[],'invariants':['灰色风衣']}]}
+    valid_board={'title':'短片','shots':[{'duration':5,'scene':'室内','characters':'林岚','action':'站立','emotion':'平静','camera':'中景','audio':'环境声','image_prompt':'林岚站立','video_prompt':'林岚呼吸','character_keys':['hero'],'scene_key':'','prop_keys':[]}]}
+    payloads=[malformed,valid_visual,valid_board];requests=[]
+    def respond(request):
+        requests.append(json.loads(request.content));content=json.dumps(payloads[len(requests)-1],ensure_ascii=False)
+        return httpx.Response(200,text='data: '+json.dumps({'choices':[{'delta':{'content':content}}]})+'\n\ndata: [DONE]\n\n')
+    original=httpx.Client;monkeypatch.setattr(httpx,'Client',lambda **kw:original(**kw,transport=httpx.MockTransport(respond)))
+    job={'id':jid,'project_id':pid,'node_id':'n','kind':'storyboard','input':{'provider':'ark','model':'doubao','prompt':'短片','target_duration':5,'film_bible':True}}
+    result=Worker().text(job,{'url':'http://test/v1','api_key':'test'})
+    assert len(requests)==3 and result['visual_repair_count']==1 and result['storyboard_repair_count']==0
+    assert '必须严格输出以下 JSON Schema' in requests[0]['messages'][1]['content']
+    assert '上次视觉圣经未通过校验' in requests[1]['messages'][1]['content']
