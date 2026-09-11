@@ -39,7 +39,8 @@ export function EditorInspector({ assets }: { assets: EditorAsset[] }) {
     return (
       <aside className="mvc-editor-inspector mvc-editor-inspector-empty">
         <strong>剪辑属性</strong>
-        <p>选择时间线片段后，可调整裁剪、声音、淡化、转场、文字和画面位置。</p>
+        <p>V 是视频/图片轨，越靠上越覆盖下层；A 是音频轨；T 是标题轨，字幕轨单独显示。</p>
+        <p>点击或双击左侧素材即可追加；拖到轨道可按当前播放头加入。片段可左右拖动，拖两端可裁剪。</p>
         <p>快捷键：S 在播放头切分，Ctrl/Cmd+D 复制，Delete 删除，Ctrl/Cmd+Z 撤销。</p>
       </aside>
     );

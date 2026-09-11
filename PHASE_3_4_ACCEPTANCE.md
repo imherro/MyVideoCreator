@@ -21,6 +21,7 @@
 | keyboard shortcuts | S 切分、Ctrl/Cmd+D 复制；Delete、撤销和重做使用 Twick 原生能力 | `EditorShortcuts.tsx` |
 | save / restore | `document.editor.timeline` 进入项目 revision 和 SQLite，素材 URL 按稳定 assetId 重绑定 | `TimelinePersistence`、API round-trip test、asset rebinding tests |
 | AI initial edit | 分镜视频按 shot 顺序建立 V1，保留 shot/node/asset，加入原声和可选音乐轨 | `initialTimeline.ts` tests |
+| asset insertion | 点 `+`、双击或拖放均直接从项目资产元数据建立可移动片段，不重复请求受保护媒体元数据；轨道显示 V/A/T/字幕/空标签 | asset adapter tests、浏览器实测 |
 
 Twick 0.15.31 的播放器能实时播放媒体、静态音量、变换、颜色滤镜和画面淡化。该版本尚未解释自身的 transition metadata，也不支持音量关键帧实时试听；编辑器在对应控件旁明确标注，原生导出器会完整渲染这些设置。
 

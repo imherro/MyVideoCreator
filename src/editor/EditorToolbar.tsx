@@ -1,4 +1,4 @@
-import { Captions, Download, Plus, Type, Volume2 } from "lucide-react";
+import { Captions, Download, Plus, Trash2, Type, Volume2 } from "lucide-react";
 import { TrackElement, useTimelineContext } from "@twick/timeline";
 import type { ProjectJSON } from "@twick/timeline";
 import { addCaptionElements, addTextElement, addTrack } from "./editorActions";
@@ -15,8 +15,10 @@ export function EditorToolbar({
   onMessage: (message: string) => void;
   onExport: (timeline: ProjectJSON) => void;
 }) {
-  const { editor, selectedItem, videoResolution, totalDuration } = useTimelineContext();
+  const { editor, selectedItem, videoResolution, totalDuration, changeLog } = useTimelineContext();
   const subtitles = assets.filter((asset) => asset.kind === "subtitle");
+  void changeLog;
+  const emptyTracks = (editor.getTimelineData()?.tracks || []).filter((track) => !track.getElements().length);
 
   async function addTitle() {
     try {
@@ -44,11 +46,17 @@ export function EditorToolbar({
 
   return (
     <div className="mvc-editor-tools">
-      <button title="增加一条视频或图片叠加轨" onClick={() => { addTrack(editor, "video"); onMessage("已增加视频轨"); }}>
-        <Plus size={14} /> 视频轨
+      <button title="增加一条空的视频或图片叠加轨" onClick={() => { addTrack(editor, "video"); onMessage("已增加空视频轨；请从左侧拖入素材"); }}>
+        <Plus size={14} /> 空视频轨
       </button>
       <button title="增加一条独立音频轨" onClick={() => { addTrack(editor, "audio"); onMessage("已增加音频轨"); }}>
         <Volume2 size={14} /> 音频轨
+      </button>
+      <button title="删除所有没有片段的轨道" disabled={!emptyTracks.length} onClick={() => {
+        emptyTracks.forEach((track) => editor.removeTrack(track));
+        onMessage(`已清理 ${emptyTracks.length} 条空轨道`);
+      }}>
+        <Trash2 size={14} /> 清理空轨
       </button>
       <button title="在当前片段起点加入标题" onClick={() => void addTitle()}>
         <Type size={14} /> 标题

@@ -1,17 +1,16 @@
 import { useMemo, useState } from "react";
 import { Image, Music, Plus, Search, Video } from "lucide-react";
-import { useEditorManager, TIMELINE_DROP_MEDIA_TYPE } from "@twick/video-editor";
+import { TIMELINE_DROP_MEDIA_TYPE } from "@twick/video-editor";
 import { useTimelineContext } from "@twick/timeline";
-import { assetToTwickElement } from "./assetAdapter";
+import { addAssetToTimeline } from "./assetAdapter";
 import type { EditorAsset } from "./editorDocument";
 
 const supportedKinds = new Set(["video", "image", "audio"]);
 
-export function ProjectAssetPanel({ assets }: { assets: EditorAsset[] }) {
+export function ProjectAssetPanel({ assets, onMessage }: { assets: EditorAsset[]; onMessage: (message: string) => void }) {
   const [kind, setKind] = useState("video");
   const [query, setQuery] = useState("");
-  const { addElement } = useEditorManager();
-  const { videoResolution } = useTimelineContext();
+  const { editor, setSelectedItem, videoResolution } = useTimelineContext();
   const visible = useMemo(
     () =>
       assets.filter(
@@ -24,14 +23,20 @@ export function ProjectAssetPanel({ assets }: { assets: EditorAsset[] }) {
   );
 
   async function add(asset: EditorAsset) {
-    await addElement(assetToTwickElement(asset, videoResolution));
+    try {
+      const element = addAssetToTimeline(editor, asset, videoResolution, { append: true });
+      setSelectedItem(element);
+      onMessage(`已将“${asset.name}”追加到 ${asset.kind === "audio" ? "音频" : "画面"}轨`);
+    } catch (cause: any) {
+      onMessage(`加入失败：${cause?.message || String(cause)}`);
+    }
   }
 
   return (
     <aside className="mvc-editor-assets">
       <div className="mvc-editor-assets-title">
         <strong>项目素材</strong>
-        <small>双击或拖入时间线</small>
+        <small>双击、点 + 或拖入时间线</small>
       </div>
       <div className="mvc-editor-asset-tabs">
         <button className={kind === "video" ? "active" : ""} onClick={() => setKind("video")}>
