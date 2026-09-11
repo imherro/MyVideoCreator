@@ -925,6 +925,16 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   const activeCount = jobs.filter((j) =>
     ["queued", "running"].includes(j.status),
   ).length;
+  const canDeleteCurrentProject =
+    !!doc &&
+    !doc.nodes.length &&
+    !doc.edges.length &&
+    !doc.shots.length &&
+    !doc.timeline.length &&
+    !doc.characters.length &&
+    !String(doc.brief || "").trim() &&
+    !assets.length &&
+    !jobs.length;
   function editNode(patch: Any) {
     if (selected) update((d) => patchNode(d, selected, patch));
   }
@@ -992,9 +1002,59 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setSelected(null);
   }
   async function createProject() {
+    let preservedDraft = false;
+    if (dirty.current || saveFlight.current) await save();
+    if (dirty.current) {
+      if (!conflictRef.current)
+        throw new Error("项目尚未保存，请先解决保存失败后再新建项目。");
+      const snapshot = current.current;
+      if (!snapshot.project || !snapshot.doc)
+        throw new Error("当前项目草稿不可用，无法安全切换项目。");
+      const backup = JSON.stringify(
+        {
+          format: "yingxu-project-draft-v1",
+          project_id: snapshot.project.id,
+          name: snapshot.project.name,
+          revision: revision.current,
+          document: snapshot.doc,
+        },
+        null,
+        2,
+      );
+      sessionStorage.setItem("yingxu-conflict-" + snapshot.project.id, backup);
+      dirty.current = false;
+      conflictRef.current = false;
+      setConflict(false);
+      setSaved("已保存");
+      preservedDraft = true;
+    }
     const p = await api("/projects", send("POST", { name: "未命名短片" }));
     setProjects(await api("/projects"));
     await openProject(p.id);
+    if (preservedDraft)
+      setNotice("已进入新项目；原项目的冲突草稿已保存在本浏览器，可随时返回恢复。");
+  }
+  async function deleteCurrentProject() {
+    if (!project || !canDeleteCurrentProject) return;
+    if (
+      !window.confirm(
+        `删除空项目“${project.name}”？此操作无法恢复。`,
+      )
+    )
+      return;
+    const deletedId = project.id;
+    await api(`/projects/${deletedId}`, send("DELETE"));
+    let list = await api("/projects");
+    if (!list.length) {
+      await api("/projects", send("POST", { name: "我的第一部短片" }));
+      list = await api("/projects");
+    }
+    dirty.current = false;
+    conflictRef.current = false;
+    setConflict(false);
+    setProjects(list);
+    await openProject(list[0].id);
+    setNotice("空项目已删除");
   }
   function sourceAssets(nid: string) {
     const sources =
@@ -2371,11 +2431,27 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 )}
                 <button
                   className="primary full"
-                  onClick={() => createProject().catch(report)}
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        "新建一个空白项目？当前项目会先保存；若存在保存冲突，会在本浏览器保留草稿。",
+                      )
+                    )
+                      createProject().catch(report);
+                  }}
                 >
                   <Plus size={16} />
                   新建项目
                 </button>
+                {canDeleteCurrentProject && (
+                  <button
+                    className="full"
+                    onClick={() => deleteCurrentProject().catch(report)}
+                  >
+                    <Trash2 size={16} />
+                    删除空项目
+                  </button>
+                )}
                 <label>
                   当前项目名称
                   <input

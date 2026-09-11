@@ -146,6 +146,22 @@ def create_project(body:ProjectCreate):
 def read_project(pid:str):
     return project(pid)
 
+@app.delete('/api/projects/{pid}')
+def delete_empty_project(pid:str):
+    with s.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        row=c.execute('SELECT * FROM projects WHERE id=?',(pid,)).fetchone()
+        if not row: raise HTTPException(404,'项目不存在')
+        document=s.unpack(row)['document']
+        has_content=bool(str(document.get('brief','')).strip()) or any(document.get(key) for key in ('nodes','edges','shots','timeline','characters'))
+        has_assets=c.execute('SELECT 1 FROM assets WHERE project_id=? LIMIT 1',(pid,)).fetchone()
+        has_jobs=c.execute('SELECT 1 FROM jobs WHERE project_id=? LIMIT 1',(pid,)).fetchone()
+        if has_content or has_assets or has_jobs:
+            raise HTTPException(400,'只能删除没有内容、素材和任务的空项目。')
+        c.execute('DELETE FROM revisions WHERE project_id=?',(pid,))
+        c.execute('DELETE FROM projects WHERE id=?',(pid,))
+    return {'deleted':pid}
+
 @app.get('/api/projects/{pid}/storyboard-sheet')
 def storyboard_sheet(pid:str,columns:int=3,page:int=1):
     from .contact_sheet import render_sheet

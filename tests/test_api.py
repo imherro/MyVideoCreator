@@ -54,6 +54,15 @@ def test_blank_project_name_uses_default(authenticated):
     assert saved.status_code==200
     assert c.get('/api/projects/'+item['id']).json()['name']=='未命名短片'
 
+def test_only_empty_project_can_be_deleted(authenticated):
+    c=authenticated
+    empty=c.post('/api/projects',json={'name':'待删除'}).json()
+    assert c.delete('/api/projects/'+empty['id']).json()=={'deleted':empty['id']}
+    occupied=project(c)
+    occupied['document']['nodes']=[{'id':'n1','data':{'kind':'text'}}]
+    assert c.put('/api/projects/'+occupied['id'],json={'name':occupied['name'],'revision':occupied['revision'],'document':occupied['document']}).status_code==200
+    assert c.delete('/api/projects/'+occupied['id']).status_code==400
+
 def test_cloud_opt_in_idempotency_and_frozen_provider(authenticated):
     c=authenticated;p=project(c)
     payload={'node_id':'n1','kind':'text','submission_id':'stable-submission-001','input':{'provider':'cloud','prompt':'编写短片'}}
