@@ -27,6 +27,7 @@ import {
   type Connection,
   ReactFlowProvider,
   useReactFlow,
+  useUpdateNodeInternals,
 } from "@xyflow/react";
 import {
   Clapperboard,
@@ -493,7 +494,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       new Map<string, { width?: number; height?: number }>(),
     ),
     fileInput = useRef<HTMLInputElement>(null),
-    { fitView } = useReactFlow();
+    { fitView } = useReactFlow(),
+    updateNodeInternals = useUpdateNodeInternals();
   const [layoutVersion, setLayoutVersion] = useState(0);
   current.current = { project, doc };
   const report = (e: any) => {
@@ -1563,6 +1565,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               onNodeClick={(_, n) => {
                 setSelected(n.id);
                 setPanel(null);
+              }}
+              onNodeDragStop={(_, n) => {
+                requestAnimationFrame(() => updateNodeInternals(n.id));
               }}
               onPaneClick={() => setSelected(null)}
               fitView
