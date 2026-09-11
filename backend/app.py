@@ -129,14 +129,17 @@ def projects():
         return [dict(r) for r in c.execute('SELECT id,name,revision,created,updated FROM projects ORDER BY updated DESC')]
 
 class ProjectCreate(BaseModel):
-    name:str=Field(default='未命名短片',min_length=1,max_length=100)
+    name:str=Field(default='未命名短片',max_length=100)
+
+def normalized_project_name(name:str)->str:
+    return name.strip() or '未命名短片'
 
 @app.post('/api/projects')
 def create_project(body:ProjectCreate):
     pid = s.uid('project-')
     document = {'nodes':[],'edges':[],'shots':[],'timeline':[],'characters':[],'brief':'','style':'电影写实','ratio':'16:9','duration':15}
     with s.db() as c:
-        c.execute('INSERT INTO projects VALUES(?,?,1,?,?,?)',(pid,body.name,s.dumps(document),time.time(),time.time()))
+        c.execute('INSERT INTO projects VALUES(?,?,1,?,?,?)',(pid,normalized_project_name(body.name),s.dumps(document),time.time(),time.time()))
     return project(pid)
 
 @app.get('/api/projects/{pid}')
@@ -149,7 +152,7 @@ def storyboard_sheet(pid:str,columns:int=3,page:int=1):
     return Response(render_sheet(project(pid),columns,page),media_type='image/png',headers={'Content-Disposition':f'attachment; filename="storyboard-{page}.png"'})
 
 class ProjectSave(BaseModel):
-    name:str=Field(min_length=1,max_length=100)
+    name:str=Field(max_length=100)
     revision:int
     document:dict
 
@@ -164,7 +167,7 @@ def save_project(pid:str,body:ProjectSave):
         if not old: raise HTTPException(404,'项目不存在')
         if old['revision']!=body.revision: raise HTTPException(409,'项目已在其他页面更新，请重新加载后编辑。')
         c.execute('INSERT INTO revisions VALUES(?,?,?,?,?)',(s.uid(),pid,old['revision'],old['document'],time.time()))
-        c.execute('UPDATE projects SET name=?,revision=revision+1,document=?,updated=? WHERE id=?',(body.name,encoded,time.time(),pid))
+        c.execute('UPDATE projects SET name=?,revision=revision+1,document=?,updated=? WHERE id=?',(normalized_project_name(body.name),encoded,time.time(),pid))
     s.event(pid,{'type':'project','revision':body.revision+1})
     return {'revision':body.revision+1,'updated':time.time()}
 

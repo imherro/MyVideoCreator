@@ -713,21 +713,34 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       return save();
     }
     const snapshot = current.current;
-    if (!snapshot.project || !snapshot.doc || !dirty.current) return;
+    const projectSnapshot = snapshot.project;
+    if (!projectSnapshot || !snapshot.doc || !dirty.current) return;
     dirty.current = false;
     saving.current = true;
     setSaved("保存中");
+    const name = projectSnapshot.name.trim() || "未命名短片";
     const work = (async () => {
       try {
         const result = await api(
-          "/projects/" + snapshot.project!.id,
+          "/projects/" + projectSnapshot.id,
           send("PUT", {
-            name: snapshot.project!.name,
+            name,
             revision: revision.current,
             document: snapshot.doc,
           }),
         );
         revision.current = result.revision;
+        if (name !== projectSnapshot.name) {
+          setProject((current) =>
+            current?.id === projectSnapshot.id ? { ...current, name } : current,
+          );
+          setProjects((current) =>
+            current.map((item) =>
+              item.id === projectSnapshot.id ? { ...item, name } : item,
+            ),
+          );
+          setNotice("项目名称不能为空，已恢复为“未命名短片”");
+        }
         setSaved(dirty.current ? "未保存" : "已保存");
       } catch (e: any) {
         dirty.current = true;
