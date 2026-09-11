@@ -1211,6 +1211,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           musicVolume={(doc as any).music_volume ?? 0.3}
           transition={(doc as any).transition || "cut"}
           ratio={doc.ratio || "16:9"}
+          autoPlay
           onClose={() => setPreviewTimeline(false)}
         />
       )}
