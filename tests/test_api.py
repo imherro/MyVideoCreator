@@ -61,17 +61,20 @@ def test_project_schema_revision_migration_and_generation_policy_roundtrip(authe
 
 def test_film_bible_and_shot_bindings_round_trip_through_project_document(authenticated):
     c=authenticated;p=project(c);doc=p['document']
-    doc['filmBible']['visual']={
-      'cards':{'vc-1':{'id':'vc-1','kind':'character','name':'林岚','currentVersionId':'vv-1'}},
-      'versions':{'vv-1':{'id':'vv-1','cardId':'vc-1','version':1,'status':'draft','spec':{'description':'灰色风衣'}}},
-    }
+    from backend.film_bible import normalize_visual_bible
+    visual,key_ids=normalize_visual_bible({'cards':[{
+      'key':'hero','kind':'character','name':'林岚','parent_key':'','description':'灰色风衣',
+      'attributes':[],'invariants':['灰色风衣'],
+    }]})
+    doc['filmBible']['visual']=visual;version_id=key_ids['hero'][1]
     doc['shots']=[{'id':'shot-001','uid':'shot-stable-1','order':1,'assetBindings':{
-      'characters':[{'role':'林岚','versionId':'vv-1'}],'scene':None,'props':[]},'pipeline':{}}]
+      'characters':[{'role':'林岚','versionId':version_id}],'scene':None,'props':[]},'pipeline':{}}]
     saved=c.put('/api/projects/'+p['id'],json={'name':p['name'],'revision':p['revision'],'document':doc})
     assert saved.status_code==200,saved.text
     restored=c.get('/api/projects/'+p['id']).json()['document']
     assert restored['filmBible']['visual']==doc['filmBible']['visual']
     assert restored['shots']==doc['shots']
+    assert all(card['source']=={'type':'script_extraction'} for card in restored['filmBible']['visual']['cards'].values())
 
 def test_asset_library_semantic_categories(authenticated):
     import io

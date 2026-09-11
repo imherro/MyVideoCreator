@@ -74,7 +74,7 @@ def test_non_structured_visual_output_gets_one_bounded_repair(monkeypatch):
     with s.db() as c:
         c.execute('INSERT INTO projects VALUES(?,?,1,?,?,?)',(pid,'visual-repair','{}',now,now))
         c.execute('INSERT INTO jobs(id,submission_id,project_id,node_id,kind,status,input,created,updated) VALUES(?,?,?,?,?,?,?,?,?)',(jid,jid,pid,'n','storyboard','running','{}',now,now))
-    malformed=[{'key':'hero','kind':'character','parent_key':'','description':'灰色风衣','attributes':{},'invariants':'灰色风衣'}]
+    malformed=[{'key':'hero','kind':'character','name':'林岚','parent_key':'','description':'灰色风衣','attributes':{},'invariants':'灰色风衣'}]
     valid_visual={'cards':[{'key':'hero','kind':'character','name':'林岚','parent_key':'','description':'灰色风衣','attributes':[],'invariants':['灰色风衣']}]}
     valid_board={'title':'短片','shots':[{'duration':5,'scene':'室内','characters':'林岚','action':'站立','emotion':'平静','camera':'中景','audio':'环境声','image_prompt':'林岚站立','video_prompt':'林岚呼吸','character_keys':['hero'],'scene_key':'','prop_keys':[]}]}
     payloads=[malformed,valid_visual,valid_board];requests=[]

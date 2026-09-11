@@ -31,6 +31,7 @@ def test_visual_cards_create_immutable_draft_versions_and_frozen_state_parent():
     assert bible['versions'][state_version]['status']=='draft'
     assert bible['versions'][state_version]['references']==[]
     assert bible['versions'][state_version]['provenance']['providerId']=='ark'
+    assert all(card['source']=={'type':'script_extraction'} for card in bible['cards'].values())
 
 
 def test_bound_shots_use_system_uids_and_version_bindings_only():
@@ -56,3 +57,13 @@ def test_visual_and_binding_validation_rejects_ambiguous_or_dangling_data():
     wrong=storyboard_input('alley')
     with pytest.raises(ValueError,match='非角色卡'):
         normalize_bound_storyboard(wrong,bible,keys)
+
+@pytest.mark.parametrize(('field','value'),[('attributes',{}),('invariants','灰色风衣')])
+def test_visual_schema_container_types_are_strict(field,value):
+    malformed=visual_input();malformed['cards'][0][field]=value
+    with pytest.raises(ValueError,match=field):normalize_visual_bible(malformed)
+
+@pytest.mark.parametrize(('field','value'),[('character_keys','hero'),('prop_keys',{}),('scene_key',3),('duration','5'),('camera',9)])
+def test_storyboard_schema_field_types_are_strict(field,value):
+    bible,keys=normalize_visual_bible(visual_input());malformed=storyboard_input();malformed['shots'][0][field]=value
+    with pytest.raises(ValueError,match=field):normalize_bound_storyboard(malformed,bible,keys)

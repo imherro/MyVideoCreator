@@ -29,7 +29,7 @@ def extract_storyboard(script,target_duration,provider_id,model_id,request):
         visual_text=request(VISUAL_EXTRACTOR_PROMPT,repair,VISUAL_BIBLE_SCHEMA,'修正视觉圣经')
         try:bible,key_ids=normalize_visual_bible(_visual(_json(visual_text,'视觉圣经')),provider_id,model_id);visual_repair_count=1
         except (ValueError,TypeError) as final:raise ValueError('视觉圣经修正后仍不符合要求：'+str(final)) from final
-    allowed=[{'key':item['source']['key'],'kind':item['kind'],'name':item['name'],'spec':bible['versions'][item['currentVersionId']]['spec']} for item in bible['cards'].values()]
+    allowed=[{'key':key,'kind':bible['cards'][card_id]['kind'],'name':bible['cards'][card_id]['name'],'spec':bible['versions'][version_id]['spec']} for key,(card_id,version_id) in key_ids.items()]
     duration=f'\n镜头总时长必须为 {target_duration} 秒，误差不超过 0.5 秒。' if target_duration else ''
     user='剧本：\n'+script+'\n\n只允许引用以下视觉卡：\n'+json.dumps(allowed,ensure_ascii=False)+duration
     text=request(STORYBOARD_DIRECTOR_PROMPT,user,BOUND_STORYBOARD_SCHEMA,'基于视觉圣经拆解分镜')
