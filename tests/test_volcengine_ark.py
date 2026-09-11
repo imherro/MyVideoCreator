@@ -67,7 +67,7 @@ def test_seedream_downloads_into_existing_asset_library(monkeypatch):
 
 def test_seedance_persists_task_and_resume_only_queries(monkeypatch):
     p=provider();item=stored_job('video',p)
-    calls=[];original=httpx.Client
+    calls=[];downloads=[];original=httpx.Client
     def handle(request):
         calls.append((request.method,request.url.path))
         if request.method=='POST':
@@ -76,7 +76,10 @@ def test_seedance_persists_task_and_resume_only_queries(monkeypatch):
             return httpx.Response(200,json={'id':'ark-task-1','status':'queued'})
         return httpx.Response(200,json={'id':'ark-task-1','status':'succeeded','content':{'video_url':'https://result.example/movie.mp4'}})
     monkeypatch.setattr(ark.httpx,'Client',lambda **kw:original(**kw,transport=httpx.MockTransport(handle)))
-    monkeypatch.setattr(common,'download_result',lambda job,url,ext:{'id':'asset-video','kind':'video'})
+    def download(job,url,ext,recoverable=False):
+        downloads.append((url,ext,recoverable))
+        return {'id':'asset-video','kind':'video'}
+    monkeypatch.setattr(common,'download_result',download)
     worker=Worker();worker.halt=NoWait()
     assert worker.execute(item)['assets'][0]['id']=='asset-video'
     with s.db() as db:
@@ -87,6 +90,10 @@ def test_seedance_persists_task_and_resume_only_queries(monkeypatch):
     calls.clear()
     assert worker.execute(resumed)['assets'][0]['id']=='asset-video'
     assert calls==[('GET','/api/v3/contents/generations/tasks/existing-task')]
+    assert downloads==[
+        ('https://result.example/movie.mp4','.mp4',True),
+        ('https://result.example/movie.mp4','.mp4',True),
+    ]
 
 
 def test_seedance_cancel_requests_remote_delete(monkeypatch):

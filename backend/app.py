@@ -528,6 +528,9 @@ def cancel(jid:str):
     job=read_job(jid)
     if job['status'] in ('queued','running','interrupted'):
         s.job_update(jid,status='cancelled',phase='已请求取消，等待运行引擎释放')
+        # Re-read after cancellation so a provider handle attached between the
+        # initial read and this state change is visible to remote cancellation.
+        job=read_job(jid)
         with s.db() as c:
             snapshot=c.execute('SELECT provider FROM job_private WHERE job_id=?',(jid,)).fetchone()
         if snapshot:

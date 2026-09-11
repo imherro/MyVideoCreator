@@ -135,7 +135,7 @@ def generate_video(worker, job, provider):
                 target = _video_url(value)
                 if not target:
                     raise ValueError('火山方舟任务成功但未返回视频下载地址')
-                return {'assets': [common.download_result(job, target, '.mp4')]}
+                return {'assets': [common.download_result(job, target, '.mp4', recoverable=True)]}
     raise InterruptedError()
 
 

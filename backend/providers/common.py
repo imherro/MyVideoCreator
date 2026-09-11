@@ -69,13 +69,15 @@ def register(job,path,name=None):
     return {'id':aid,'url':f'/api/assets/{aid}/file','name':name or source.name,'kind':kind}
 
 
-def download_result(job,url,ext):
+def download_result(job,url,ext,recoverable=False):
     if urlparse(url).scheme not in ('http','https'): raise ValueError('模型结果不是有效媒体地址')
     path=s.DATA/(s.uid('download-')+ext)
     try:
         # Provider credentials are intentionally never forwarded to result hosts.
         with httpx.stream('GET',url,follow_redirects=True,timeout=120) as response:
-            response.raise_for_status()
+            if not response.is_success:
+                response.read()
+                checked(response,recoverable=recoverable)
             size=0
             with path.open('wb') as out:
                 for chunk in response.iter_bytes():

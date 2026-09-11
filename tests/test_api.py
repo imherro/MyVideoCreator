@@ -84,6 +84,28 @@ def test_volcengine_ark_unified_settings_and_connection(authenticated,monkeypatc
     assert tested.json()['status']=='ready'
     assert calls[0][0:3]==('POST','https://ark.cn-beijing.volces.com/api/v3/chat/completions','Bearer ark-secret')
 
+
+def test_ark_cancel_rereads_handle_attached_after_initial_snapshot(authenticated,monkeypatch):
+    c=authenticated;p=project(c)
+    now=time.time();jid='ark-cancel-reverse-race'
+    provider=next(item for item in s.get_setting('providers',[]) if item['id']=='ark')
+    with s.db() as db:
+        db.execute('INSERT OR REPLACE INTO jobs(id,submission_id,project_id,node_id,kind,status,input,created,updated) VALUES(?,?,?,?,?,?,?,?,?)',
+                   (jid,jid,p['id'],'video-node','video','running',s.dumps({'provider':'ark','allow_cloud':True,'prompt':'test'}),now,now))
+        db.execute('INSERT OR REPLACE INTO job_private VALUES(?,?)',(jid,s.dumps(provider)))
+    original_job_update=s.job_update
+    seen=[]
+    def racing_job_update(job_id,**fields):
+        if job_id==jid and fields.get('status')=='cancelled':
+            s.attach_provider_job_id(jid,'task-attached-during-cancel')
+        return original_job_update(job_id,**fields)
+    monkeypatch.setattr(s,'job_update',racing_job_update)
+    monkeypatch.setattr('backend.providers.volcengine_ark.cancel',lambda job,provider:seen.append(job['provider_job_id']) or True)
+    cancelled=c.post('/api/jobs/'+jid+'/cancel')
+    assert cancelled.status_code==200,cancelled.text
+    assert seen==['task-attached-during-cancel']
+    assert cancelled.json()['phase']=='已取消本地等待，并已请求供应商取消远端任务'
+
 def test_revision_conflict_and_restore(authenticated):
     c=authenticated;p=project(c)
     doc=p['document'];doc['brief']='中文故事，严格保存。'
