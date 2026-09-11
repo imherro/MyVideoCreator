@@ -487,8 +487,13 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     }),
     saving = useRef(false),
     saveFlight = useRef<Promise<void> | null>(null),
+    refreshFlights = useRef(new Map<string, Promise<void>>()),
+    nodeMeasurements = useRef(
+      new Map<string, { width?: number; height?: number }>(),
+    ),
     fileInput = useRef<HTMLInputElement>(null),
     { fitView } = useReactFlow();
+  const [layoutVersion, setLayoutVersion] = useState(0);
   current.current = { project, doc };
   const report = (e: any) => {
     const message = e?.message || String(e);
@@ -512,29 +517,39 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     dirty.current = true;
     setSaved("未保存");
   }, []);
-  const refresh = useCallback(async (pid: string) => {
-    try {
-      // Treat assets and jobs as one snapshot.  A partial response must never
-      // replace the last known-good canvas state with an empty collection.
-      const [a, j] = await Promise.all([
-        api(`/projects/${pid}/assets`),
-        api(`/projects/${pid}/jobs`),
-      ]);
-      if (current.current.project?.id === pid) {
-        setAssets(a);
-        setJobs(j);
+  const refresh = useCallback((pid: string) => {
+    const pending = refreshFlights.current.get(pid);
+    if (pending) return pending;
+    const work = (async () => {
+      try {
+        // Treat assets and jobs as one snapshot. A partial response must never
+        // replace the last known-good canvas state with an empty collection.
+        const [a, j] = await Promise.all([
+          api(`/projects/${pid}/assets`),
+          api(`/projects/${pid}/jobs`),
+        ]);
+        if (current.current.project?.id === pid) {
+          setAssets(a);
+          setJobs(j);
+        }
+        setSyncFailure((previous) =>
+          previous?.kind === "api" ? null : previous,
+        );
+      } catch (e: any) {
+        setSyncFailure({
+          kind: "api",
+          message: "刷新失败，正在重试",
+          url: e?.url || debugUrl(`/api/projects/${pid}/assets`),
+        });
+        throw e;
       }
-      setSyncFailure((previous) =>
-        previous?.kind === "api" ? null : previous,
-      );
-    } catch (e: any) {
-      setSyncFailure({
-        kind: "api",
-        message: "刷新失败，正在重试",
-        url: e?.url || debugUrl(`/api/projects/${pid}/assets`),
-      });
-      throw e;
-    }
+    })();
+    refreshFlights.current.set(pid, work);
+    void work.then(
+      () => refreshFlights.current.delete(pid),
+      () => refreshFlights.current.delete(pid),
+    );
+    return work;
   }, []);
   async function openProject(pid: string) {
     if (dirty.current || saveFlight.current) await save();
@@ -559,6 +574,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     }
     revision.current = p.revision;
     dirty.current = false;
+    nodeMeasurements.current.clear();
+    setLayoutVersion((value) => value + 1);
     setProject(p);
     setDoc(p.document);
     setAssets(a);
@@ -608,8 +625,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       setSyncFailure((previous) =>
         previous?.kind === "sse" ? null : previous,
       );
-      const pid = current.current.project?.id;
-      if (pid) refresh(pid).catch(() => {});
     };
     events.onmessage = (e) => {
       try {
@@ -1150,18 +1165,27 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setPanel("history");
   }
   const renderedNodes =
-    doc?.nodes.map((n) => ({
-      ...n,
-      selected: n.id === selected,
-      data: {
-        ...n.data,
-        asset: assets.find((a) => a.id === n.data.assetId),
-        job: jobs.find((j) => j.node_id === n.id),
-        mediaRetryKey,
-        onMediaFailure: reportMediaFailure,
-        onMediaReady: clearMediaFailure,
-      },
-    })) || [];
+    doc?.nodes.map((n) => {
+      // React Flow hides a node until it knows its dimensions. Keep those
+      // measurements outside the persisted document so asset/job refreshes do
+      // not reset every node to `visibility: hidden`.
+      const measured = nodeMeasurements.current.get(n.id);
+      return {
+        ...n,
+        width: n.width ?? measured?.width,
+        height: n.height ?? measured?.height,
+        selected: n.id === selected,
+        data: {
+          ...n.data,
+          asset: assets.find((a) => a.id === n.data.assetId),
+          job: jobs.find((j) => j.node_id === n.id),
+          mediaRetryKey,
+          layoutVersion,
+          onMediaFailure: reportMediaFailure,
+          onMediaReady: clearMediaFailure,
+        },
+      };
+    }) || [];
   if (!doc || !project)
     return (
       <div className="loading">
@@ -1336,6 +1360,29 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               edges={doc.edges}
               nodeTypes={nodeTypes}
               onNodesChange={(changes: NodeChange[]) => {
+                let measurementsChanged = false;
+                for (const change of changes) {
+                  if (
+                    change.type !== "dimensions" ||
+                    !change.dimensions ||
+                    (change.dimensions.width == null &&
+                      change.dimensions.height == null)
+                  )
+                    continue;
+                  const previous = nodeMeasurements.current.get(change.id);
+                  const next = {
+                    width: change.dimensions.width ?? previous?.width,
+                    height: change.dimensions.height ?? previous?.height,
+                  };
+                  if (
+                    previous?.width !== next.width ||
+                    previous?.height !== next.height
+                  ) {
+                    nodeMeasurements.current.set(change.id, next);
+                    measurementsChanged = true;
+                  }
+                }
+                if (measurementsChanged) setLayoutVersion((value) => value + 1);
                 const filtered = changes.filter(
                   (c) => c.type !== "select" && c.type !== "dimensions",
                 );
