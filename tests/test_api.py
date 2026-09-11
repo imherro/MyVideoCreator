@@ -252,6 +252,7 @@ def test_shot_reference_compiler_is_identical_for_single_and_batch_submission(au
         assert batch_job['asset_ids']==single['asset_ids']
         assert batch_job['image_reference_sources']==single['image_reference_sources']
         assert batch_job['reference_compiler']['bindings']==single['reference_compiler']['bindings']
+        assert batch_job['prompt']==single['prompt']
         for job_id in [accepted.json()['id'],*batch.json()['job_ids']]:
             c.post('/api/jobs/'+job_id+'/cancel')
     finally:

@@ -1,6 +1,8 @@
 """Compile Film Bible shot bindings into immutable image-generation inputs."""
 from __future__ import annotations
 
+import json
+
 from .visual_references import resolve_image_model_capabilities
 
 
@@ -38,23 +40,100 @@ def _binding_rows(shot):
     return rows
 
 
-def _constraint_lines(index, group, card, version):
+def _version_chain(visual, bound_version):
+    cards = visual.get('cards') or {}
+    versions = visual.get('versions') or {}
+    chain = []
+    seen = set()
+    current = bound_version
+    while current:
+        version_id = current.get('id')
+        if not version_id or version_id in seen:
+            raise ValueError('视觉版本 parentVersionId 存在循环，无法编译分镜提示词')
+        seen.add(version_id)
+        card = cards.get(current.get('cardId'))
+        if not card:
+            raise ValueError(f'视觉版本 {version_id} 所属卡片已丢失')
+        chain.append((card, current))
+        parent_id = current.get('parentVersionId')
+        if not parent_id:
+            break
+        parent = versions.get(parent_id)
+        if not parent:
+            raise ValueError(f'视觉版本 {version_id} 的 parentVersionId 已悬空')
+        parent_card = cards.get(parent.get('cardId'))
+        if not parent_card:
+            raise ValueError(f'父视觉版本 {parent_id} 所属卡片已丢失')
+        if parent_card.get('id') not in (card.get('id'), card.get('parentCardId')):
+            raise ValueError(f'视觉版本 {version_id} 的 parentVersionId 属于错误资产链')
+        current = parent
+    chain.reverse()
+    bound_card = cards.get(bound_version.get('cardId')) or {}
+    if bound_card.get('kind') in ('character_state', 'scene_state'):
+        parent_card_id = bound_card.get('parentCardId')
+        if not parent_card_id or not any(card.get('id') == parent_card_id for card, _ in chain[:-1]):
+            raise ValueError(f'状态视觉版本 {bound_version.get("id")} 没有到基础资产的完整 parentVersionId 链')
+    return chain
+
+
+def _constraint_lines(index, group, chain):
     labels = {'character': '角色', 'scene': '场景', 'prop': '道具'}
-    attributes = '；'.join(
-        f"{str(item.get('name') or '').strip()}：{str(item.get('value') or '').strip()}"
-        for item in version.get('spec', {}).get('attributes', [])
-        if isinstance(item, dict) and item.get('name') and item.get('value')
-    )
-    invariants = '；'.join(str(item).strip() for item in version.get('invariants', []) if str(item).strip())
+    bound_card, _ = chain[-1]
     lines = [
-        f"图{index}｜{labels[group]}｜{card.get('name', card['id'])}",
-        f"  可见规格：{str(version.get('spec', {}).get('description') or '').strip() or '按参考图'}",
+        f"图{index}｜{labels[group]}｜{bound_card.get('name', bound_card['id'])}",
+        '  版本链（根版本→当前绑定版本）：',
     ]
-    if attributes:
-        lines.append(f"  固定属性：{attributes}")
-    if invariants:
-        lines.append(f"  不可改变：{invariants}")
+    for layer, (card, version) in enumerate(chain, 1):
+        attributes = '；'.join(
+            f"{str(item.get('name') or '').strip()}：{str(item.get('value') or '').strip()}"
+            for item in version.get('spec', {}).get('attributes', [])
+            if isinstance(item, dict) and item.get('name') and item.get('value')
+        )
+        invariants = '；'.join(
+            str(item).strip() for item in version.get('invariants', []) if str(item).strip()
+        )
+        lines.append(
+            f"    层{layer}｜{card.get('name', card['id'])}｜可见规格："
+            f"{str(version.get('spec', {}).get('description') or '').strip() or '按参考图'}"
+        )
+        if attributes:
+            lines.append(f"      固定属性：{attributes}")
+        if invariants:
+            lines.append(f"      不可改变：{invariants}")
     return lines
+
+
+def _style_text(value):
+    if value in (None, '', {}, []):
+        return ''
+    if isinstance(value, str):
+        return value.strip()
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+
+
+def compile_shot_prompt(document, shot, constraints):
+    """Compile the final provider prompt only from canonical project state."""
+    film_bible = document.get('filmBible') or {}
+    project_style = _style_text(document.get('style'))
+    bible_style = _style_text(film_bible.get('style'))
+    lines = ['[项目视觉风格]']
+    lines.append(f'项目风格：{project_style or "未指定"}')
+    if bible_style:
+        lines.append(f'视觉圣经风格：{bible_style}')
+    lines.extend([
+        '',
+        '[本镜头变量]',
+        f"首帧描述：{str(shot.get('image_prompt') or '').strip() or '按分镜结构生成首帧'}",
+        f"动作：{str(shot.get('action') or '').strip() or '无额外动作说明'}",
+        f"情绪：{str(shot.get('emotion') or '').strip() or '无额外情绪说明'}",
+        f"摄影机：{str(shot.get('camera') or '').strip() or '无额外摄影机说明'}",
+        '',
+        '[视觉圣经一致性约束]',
+        '以下图号对应按角色、场景、道具顺序提交的独立参考图；不要把它们理解为拼贴画。',
+        *constraints,
+        '必须保持上述身份、服装、场景结构和道具外观；只改变本镜头明确要求的动作、表情、构图和光线。',
+    ])
+    return '\n'.join(lines).strip()
 
 
 def compile_shot_image_input(
@@ -98,14 +177,16 @@ def compile_shot_image_input(
         asset_id = reference.get('assetId') if reference else None
         if not asset_id:
             raise ValueError(f'高一致性生成缺少“{card.get("name", version_id)}”的主参考图')
+        chain = _version_chain(visual, version)
         compiled.append({
             'group': group,
             'role': binding.get('role', ''),
             'cardId': card['id'],
             'versionId': version_id,
             'assetId': asset_id,
+            'versionChain': [item['id'] for _, item in chain],
         })
-        constraint_lines.extend(_constraint_lines(index, group, card, version))
+        constraint_lines.extend(_constraint_lines(index, group, chain))
 
     provider_id = str(result.get('provider') or '')
     provider = next((item for item in providers if item.get('id') == provider_id), None)
@@ -131,19 +212,10 @@ def compile_shot_image_input(
             '请调整绑定或模型，系统不会截断参考图'
         )
 
-    original_prompt = str(result.get('prompt') or '').strip()
-    prompt_lines = [
-        original_prompt,
-        '',
-        '[视觉圣经一致性约束]',
-        '以下图号对应按角色、场景、道具顺序提交的独立参考图；不要把它们理解为拼贴画。',
-        *constraint_lines,
-        '必须保持上述身份、服装、场景结构和道具外观；只改变本镜头明确要求的动作、表情、构图和光线。',
-    ]
     asset_ids = [item['assetId'] for item in compiled]
     result.update({
         'model': model_id,
-        'prompt': '\n'.join(prompt_lines).strip(),
+        'prompt': compile_shot_prompt(document, shot, constraint_lines),
         'asset_ids': asset_ids,
         'image_reference_sources': [
             {'type': 'asset', 'asset_id': asset_id} for asset_id in asset_ids

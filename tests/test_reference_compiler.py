@@ -12,7 +12,7 @@ PROVIDERS = [{
 def document():
     cards = {
         'hero': {'id': 'hero', 'kind': 'character', 'name': '林岚'},
-        'friend': {'id': 'friend', 'kind': 'character_state', 'name': '雨中的阿杰'},
+        'friend': {'id': 'friend', 'kind': 'character', 'name': '阿杰'},
         'alley': {'id': 'alley', 'kind': 'scene', 'name': '雨巷'},
         'umbrella': {'id': 'umbrella', 'kind': 'prop', 'name': '红伞'},
     }
@@ -30,9 +30,15 @@ def document():
             'provenance': {'lockedAt': 1},
         }
     return {
-        'filmBible': {'visual': {'cards': cards, 'versions': versions}},
+        'style': '电影写实，冷色雨夜',
+        'filmBible': {
+            'visual': {'cards': cards, 'versions': versions},
+            'style': {'palette': '冷蓝', 'lighting': '路灯侧逆光'},
+        },
         'shots': [{
             'id': 'shot-001', 'uid': 'shot-stable', 'imageNode': 'image-1',
+            'image_prompt': '林岚在雨巷中的动作前首帧',
+            'action': '林岚撑伞向前走', 'emotion': '警觉', 'camera': '中景缓慢推进',
             'assetBindings': {
                 'characters': [
                     {'role': '主角', 'versionId': 'hero-v1'},
@@ -57,7 +63,7 @@ def document():
 def input_value():
     return {
         'provider': 'image-provider', 'model': 'image-model',
-        'prompt': '中景，林岚撑伞走过雨巷',
+        'prompt': '把林岚改成金发并换成红衣服',
         'asset_ids': ['asset-manual'],
     }
 
@@ -91,11 +97,80 @@ def test_compiler_uses_only_asset_bindings_in_character_scene_prop_order():
     assert 'model_capabilities' not in result
     assert 'allow_reference_text_fallback' not in result
     assert '视觉圣经一致性约束' in result['prompt']
+    assert '把林岚改成金发' not in result['prompt']
+    assert '项目风格：电影写实，冷色雨夜' in result['prompt']
+    assert '视觉圣经风格：{"lighting":"路灯侧逆光","palette":"冷蓝"}' in result['prompt']
+    assert '首帧描述：林岚在雨巷中的动作前首帧' in result['prompt']
+    assert '动作：林岚撑伞向前走' in result['prompt']
+    assert '情绪：警觉' in result['prompt']
+    assert '摄影机：中景缓慢推进' in result['prompt']
     assert '可见规格：林岚的固定外观' in result['prompt']
     assert '固定属性：颜色：hero-color' in result['prompt']
     assert '不可改变：林岚不可改变' in result['prompt']
     assert '拼贴画' in result['prompt']
     assert 'composite' not in result['reference_compiler']
+
+
+def state_document():
+    value = document()
+    visual = value['filmBible']['visual']
+    visual['cards']['wet'] = {
+        'id': 'wet', 'kind': 'character_state', 'name': '雨中的林岚',
+        'parentCardId': 'hero',
+    }
+    visual['versions']['wet-v1'] = {
+        'id': 'wet-v1', 'cardId': 'wet', 'parentVersionId': 'hero-v1',
+        'status': 'locked',
+        'spec': {
+            'description': '黑色短发被雨淋湿，灰色风衣湿透',
+            'attributes': [{'name': '湿润状态', 'value': '持续滴水'}],
+        },
+        'invariants': ['仍是林岚', '灰色风衣款式不变'],
+        'references': [{'role': 'primary', 'assetId': 'asset-wet'}],
+        'provenance': {'lockedAt': 2},
+    }
+    value['shots'][0]['assetBindings'] = {
+        'characters': [{'role': '主角', 'versionId': 'wet-v1'}],
+        'scene': None, 'props': [],
+    }
+    return value
+
+
+def test_state_binding_compiles_root_to_bound_version_chain_and_canonical_shot():
+    result = compile_shot_image_input(
+        state_document(), 'image-1', 'image', input_value(), PROVIDERS, supports(),
+    )
+    assert result['asset_ids'] == ['asset-wet']
+    assert result['reference_compiler']['bindings'][0]['versionChain'] == ['hero-v1', 'wet-v1']
+    prompt = result['prompt']
+    assert prompt.index('林岚的固定外观') < prompt.index('黑色短发被雨淋湿')
+    assert '林岚不可改变' in prompt
+    assert '仍是林岚' in prompt
+    assert '项目风格：电影写实，冷色雨夜' in prompt
+    assert '动作：林岚撑伞向前走' in prompt
+    assert '情绪：警觉' in prompt
+    assert '摄影机：中景缓慢推进' in prompt
+    assert '把林岚改成金发' not in prompt
+
+
+@pytest.mark.parametrize('mutation,match', [
+    ('dangling', 'parentVersionId 已悬空'),
+    ('cycle', '存在循环'),
+    ('wrong_card', '属于错误资产链'),
+])
+def test_state_version_chain_rejects_dangling_cycle_and_wrong_card(mutation, match):
+    value = state_document()
+    version = value['filmBible']['visual']['versions']['wet-v1']
+    if mutation == 'dangling':
+        version['parentVersionId'] = 'missing-version'
+    elif mutation == 'cycle':
+        version['parentVersionId'] = 'wet-v1'
+    else:
+        version['parentVersionId'] = 'friend-v1'
+    with pytest.raises(ValueError, match=match):
+        compile_shot_image_input(
+            value, 'image-1', 'image', input_value(), PROVIDERS, supports(),
+        )
 
 
 @pytest.mark.parametrize('capabilities', [
