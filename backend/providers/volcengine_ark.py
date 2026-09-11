@@ -5,6 +5,7 @@ from urllib.parse import quote
 import httpx
 
 from .. import store as s
+from . import common
 
 
 DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
@@ -27,18 +28,17 @@ def _root(provider):
 
 
 def _image_result(worker, job, value):
-    from ..worker import download_result, register
     outputs = []
     for item in value.get('data', []):
         if worker.cancelled(job):
             raise InterruptedError()
         if item.get('url'):
-            outputs.append(download_result(job, item['url'], '.png'))
+            outputs.append(common.download_result(job, item['url'], '.png'))
         elif item.get('b64_json'):
             path = s.DATA / (s.uid('ark-image-') + '.png')
             try:
                 path.write_bytes(base64.b64decode(item['b64_json']))
-                outputs.append(register(job, path, 'Seedream 生成图.png'))
+                outputs.append(common.register(job, path, 'Seedream 生成图.png'))
             finally:
                 path.unlink(missing_ok=True)
     if not outputs:
@@ -47,8 +47,7 @@ def _image_result(worker, job, value):
 
 
 def generate_image(worker, job, provider):
-    from ..worker import assets_for, checked
-    if assets_for(job):
+    if common.assets_for(job):
         raise ValueError('本轮火山方舟仅支持纯文生图，请移除参考素材')
     model = model_for(provider, 'image')
     if not model:
@@ -63,7 +62,7 @@ def generate_image(worker, job, provider):
     }
     worker.progress(job, '火山方舟生成图像')
     with httpx.Client(timeout=600, headers=_headers(provider), trust_env=True) as client:
-        return _image_result(worker, job, checked(client.post(_root(provider) + '/images/generations', json=body)))
+        return _image_result(worker, job, common.checked(client.post(_root(provider) + '/images/generations', json=body)))
 
 
 def _video_url(value):
@@ -78,8 +77,7 @@ def _video_url(value):
 
 
 def generate_video(worker, job, provider):
-    from ..worker import assets_for, checked, download_result
-    if assets_for(job) or job['input'].get('end_asset_id'):
+    if common.assets_for(job) or job['input'].get('end_asset_id'):
         raise ValueError('本轮火山方舟仅支持纯文生视频，请移除首帧、尾帧和参考素材')
     model = model_for(provider, 'video')
     if not model:
@@ -99,20 +97,29 @@ def generate_video(worker, job, provider):
             }
             if worker.cancelled(job):
                 raise InterruptedError()
-            value = checked(client.post(root + '/contents/generations/tasks', json=body))
+            value = common.checked(client.post(root + '/contents/generations/tasks', json=body))
             remote = value.get('id') or value.get('task_id')
             if not remote:
                 raise ValueError('火山方舟未返回 task id，请在控制台核对任务后再提交')
             remote = str(remote)
             # Persist before the first poll so a process restart resumes this task.
-            s.job_update(job['id'], provider_job_id=remote)
+            state=s.attach_provider_job_id(job['id'],remote)
+            if state=='cancelled':
+                try:
+                    response=client.delete(root + '/contents/generations/tasks/' + quote(remote, safe=''))
+                    phase=('已取消本地等待，并已请求供应商取消远端任务' if response.is_success
+                           else '本地已取消；供应商可能继续生成并产生费用')
+                except httpx.HTTPError:
+                    phase='本地已取消；供应商可能继续生成并产生费用'
+                s.cancelled_phase(job['id'],phase)
+                raise InterruptedError()
         interval = max(1, min(int(params.get('poll_interval', 5)), 60))
         while not worker.halt.wait(interval):
             if worker.cancelled(job):
                 raise InterruptedError()
-            value = checked(client.get(root + '/contents/generations/tasks/' + quote(remote, safe='')))
+            value = common.checked(client.get(root + '/contents/generations/tasks/' + quote(remote, safe='')),recoverable=True)
             status = str(value.get('status') or '').lower()
-            if status not in ('queued', 'pending', 'running', 'processing', 'succeeded', 'success', 'failed', 'cancelled', 'canceled'):
+            if status not in ('queued', 'pending', 'running', 'processing', 'succeeded', 'success', 'failed', 'cancelled', 'canceled', 'expired'):
                 raise ValueError('火山方舟返回未知任务状态，请保留任务编号核对：' + str(value.get('status')))
             worker.progress(job, {
                 'queued': '火山方舟排队中', 'pending': '火山方舟排队中',
@@ -122,11 +129,13 @@ def generate_video(worker, job, provider):
             if status in ('failed', 'cancelled', 'canceled'):
                 detail = value.get('error') or value.get('message') or '请在火山方舟控制台核对任务详情'
                 raise ValueError('火山方舟视频任务' + ('生成失败' if status == 'failed' else '已取消') + '：' + str(detail)[:500])
+            if status=='expired':
+                raise ValueError('火山方舟任务已过期，原任务无法继续查询，请重新生成')
             if status in ('succeeded', 'success'):
                 target = _video_url(value)
                 if not target:
                     raise ValueError('火山方舟任务成功但未返回视频下载地址')
-                return {'assets': [download_result(job, target, '.mp4')]}
+                return {'assets': [common.download_result(job, target, '.mp4')]}
     raise InterruptedError()
 
 
@@ -141,10 +150,11 @@ def execute(worker, job, provider):
 def cancel(job, provider):
     remote = job.get('provider_job_id')
     if not remote:
-        return
+        return None
     try:
         with httpx.Client(timeout=20, headers=_headers(provider), trust_env=True) as client:
-            client.delete(_root(provider) + '/contents/generations/tasks/' + quote(str(remote), safe=''))
+            response=client.delete(_root(provider) + '/contents/generations/tasks/' + quote(str(remote), safe=''))
+            return response.is_success
     except (httpx.HTTPError, ValueError):
         # The local cancelled state still prevents polling and asset registration.
-        return
+        return False

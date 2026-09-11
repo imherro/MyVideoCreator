@@ -45,9 +45,34 @@ def test_volcengine_ark_unified_settings_and_connection(authenticated,monkeypatc
     assert c.put('/api/settings',json={'providers':[ *s.get_setting('providers',[]), provider]}).status_code==200
     public=c.get('/api/settings')
     assert 'ark-secret' not in public.text
-    public_ark=next(item for item in public.json()['providers'] if item['id']=='ark')
+    public_body=public.json()
+    public_ark=next(item for item in public_body['providers'] if item['id']=='ark')
     assert public_ark['api_key_set'] is True
+    # A second save of the masked public object must preserve the server key.
+    public_ark['local']=True
+    public_ark['kind']='image'
+    public_ark['api_key']=''
+    assert c.put('/api/settings',json={'providers':public_body['providers']}).status_code==200
+    saved_ark=next(item for item in s.get_setting('providers',[]) if item['id']=='ark')
+    assert saved_ark['api_key']=='ark-secret'
+    assert saved_ark['local'] is False and 'kind' not in saved_ark
     assert c.get('/api/providers/ark/models?kind=image').json()['models']==[{'id':'seedream-image','name':'seedream-image'}]
+    p=project(c)
+    rejected=c.post('/api/projects/'+p['id']+'/jobs',json={
+        'node_id':'ark-image','kind':'image','submission_id':'ark-cloud-gate',
+        'input':{'provider':'ark','prompt':'一只猫'},
+    })
+    assert rejected.status_code==400 and '允许使用此云端服务' in rejected.text
+    queued=c.post('/api/projects/'+p['id']+'/jobs',json={
+        'node_id':'ark-video','kind':'video','submission_id':'ark-cancel-cost-warning',
+        'input':{'provider':'ark','prompt':'一只猫走过窗前','allow_cloud':True},
+    }).json()
+    with s.db() as db:
+        db.execute('UPDATE jobs SET provider_job_id=? WHERE id=?',('remote-ark-task',queued['id']))
+    monkeypatch.setattr('backend.providers.volcengine_ark.cancel',lambda job,provider:False)
+    cancelled=c.post('/api/jobs/'+queued['id']+'/cancel').json()
+    assert cancelled['status']=='cancelled'
+    assert cancelled['phase']=='本地已取消；供应商可能继续生成并产生费用'
     calls=[]
     original=httpx.Client
     def handle(request):

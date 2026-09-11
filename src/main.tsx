@@ -3266,11 +3266,11 @@ function SettingsPanel({
   function clearEnteredApiKeys() {
     setValue((current: Any) => ({
       ...current,
-      providers: current.providers.map((provider: Any) =>
-        provider.api_key
-          ? { ...provider, api_key: "", api_key_set: true }
-          : provider,
-      ),
+      providers: current.providers.map((provider: Any) => {
+        if (!("api_key" in provider)) return provider;
+        const { api_key, ...masked } = provider;
+        return { ...masked, api_key_set: Boolean(api_key || provider.api_key_set) };
+      }),
     }));
   }
   async function save() {

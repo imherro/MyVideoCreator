@@ -268,14 +268,22 @@ async def update_settings(request:Request):
     if 'providers' in body:
         old={p['id']:p for p in s.get_setting('providers',[])}
         for p in body['providers']:
+            masked_key_set=bool(p.pop('api_key_set',False))
             if not p.get('id') or p.get('type') not in ('openai','comfy','maestro','video_api','minimax','replicate','volcengine_ark'): raise ValueError('模型服务配置无效')
             if p.get('type')=='volcengine_ark':
                 from .providers.volcengine_ark import DEFAULT_BASE_URL
                 p['url']=p.get('url') or DEFAULT_BASE_URL
+                # Ark is always a paid remote provider.  Do not trust a client
+                # supplied `local` flag to bypass the cloud confirmation gate.
+                p['local']=False
+                p.pop('kind',None)
                 if not isinstance(p.get('models'),dict):raise ValueError('火山方舟模型配置无效')
             url=p.get('url','')
             if urlparse(url).scheme not in ('http','https') or urlparse(url).username: raise ValueError('请输入 HTTP(S) 服务地址')
-            if 'api_key' not in p: p['api_key']=old.get(p['id'],{}).get('api_key','')
+            # A masked settings round-trip may omit the key or send an empty
+            # field with api_key_set=true.  Both mean "keep the saved key".
+            if 'api_key' not in p or (not p.get('api_key') and masked_key_set):
+                p['api_key']=old.get(p['id'],{}).get('api_key','')
         s.set_setting('providers',body['providers'])
     for key in ('model_directories','llama_context','llama_gpu_layers','ffmpeg'):
         if key in body: s.set_setting(key,body[key])
@@ -397,6 +405,9 @@ def create_job_record(c,pid,body):
         configured={p['id']:p for p in s.get_setting('providers',[])}
         selected=configured.get(body.input['provider'])
         if not selected: raise ValueError('模型服务未配置')
+        if selected.get('type')=='volcengine_ark':
+            # Defend jobs created from settings saved by an older build.
+            selected={**selected,'local':False}
         if selected.get('kind') and selected['kind']!=('text' if body.kind=='storyboard' else body.kind):raise ValueError('模型服务用途与节点不匹配，请选择适用服务')
         if selected.get('type')=='volcengine_ark':
             from .providers.volcengine_ark import model_for
@@ -526,7 +537,11 @@ def cancel(jid:str):
                 cancel_replicate(job,provider)
             elif provider.get('type')=='volcengine_ark':
                 from .providers.volcengine_ark import cancel as cancel_ark
-                cancel_ark(job,provider)
+                remote_cancelled=cancel_ark(job,provider)
+                if remote_cancelled is True:
+                    s.cancelled_phase(jid,'已取消本地等待，并已请求供应商取消远端任务')
+                elif remote_cancelled is False:
+                    s.cancelled_phase(jid,'本地已取消；供应商可能继续生成并产生费用')
     return read_job(jid)
 
 @app.post('/api/jobs/{jid}/resume')

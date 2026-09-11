@@ -7,77 +7,14 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from urllib.parse import quote, urlparse
+from urllib.parse import quote
 import httpx
 from . import store as s, runtime
 from .prompts import TEMPLATES, SHOT_SCHEMA, validate_shots
 from .media import ffmpeg_executable,probe
 from .process_lock import ProcessLock
 from .editor_renderer import EditorRenderCompiler
-
-def checked(response):
-    if not response.is_success:
-        try:
-            body=response.json()
-            error=body.get('error') or body.get('detail') or body
-            if isinstance(error,dict): error=error.get('message') or str(error)
-        except Exception: error=response.text[:400]
-        guidance={401:'鉴权失败，请检查该服务的 API Key。',403:'服务拒绝访问，请检查账号权限和模型授权。',402:'服务额度不足，请核对供应商余额或配额后再提交。',429:'服务限流或配额受限，请查看供应商限制，稍后手动重试。',404:'接口或模型不存在，请检查服务地址和模型 ID。',413:'输入素材过大，请缩小文件后重试。',422:'输入参数不受支持，请检查模型能力、分辨率和参考素材。'}.get(response.status_code,'服务暂时异常，请核对供应商状态后重试。' if response.status_code>=500 else '请核对任务参数。')
-        raise ValueError(f'模型服务返回 {response.status_code}：{guidance} 详情：{str(error)[:500]}')
-    return response.json()
-
-def assets_for(job):
-    with s.db() as c:
-        assets=[]
-        for aid in job['input'].get('asset_ids',[]):
-            row=c.execute('SELECT * FROM assets WHERE id=? AND project_id=?',(aid,job['project_id'])).fetchone()
-            if not row: raise ValueError('引用素材已丢失')
-            assets.append(s.unpack(row))
-    return assets
-
-def register(job,path,name=None):
-    with s.db() as c:
-        row=c.execute('SELECT status FROM jobs WHERE id=?',(job['id'],)).fetchone()
-    if not row or row['status']=='cancelled': raise InterruptedError()
-    aid=s.uid('asset-')
-    source=Path(path)
-    ext=source.suffix.lower()
-    target=s.ASSETS/(aid+ext)
-    try:
-        if source!=target: shutil.copyfile(source,target)
-        mime=mimetypes.guess_type(target.name)[0] or 'application/octet-stream'
-        kind='image' if mime.startswith('image/') else 'audio' if mime.startswith('audio/') else 'video'
-        metadata={'job_id':job['id'],'node_id':job['node_id'],'input':job['input'],'bytes':target.stat().st_size}
-        if kind=='image':
-            from PIL import Image
-            with Image.open(target) as img: metadata.update(width=img.width,height=img.height)
-        elif kind in ('audio','video'):
-            metadata.update(probe(target))
-        with s.db() as c:
-            c.execute('BEGIN IMMEDIATE')
-            state=c.execute('SELECT status FROM jobs WHERE id=?',(job['id'],)).fetchone()
-            if not state or state['status']=='cancelled':raise InterruptedError('结果登记前任务已取消')
-            c.execute('INSERT INTO assets VALUES(?,?,?,?,?,?,?,?)',(aid,job['project_id'],name or source.name,kind,target.name,mime,s.dumps(metadata),time.time()))
-    except BaseException:
-        target.unlink(missing_ok=True)
-        raise
-    return {'id':aid,'url':f'/api/assets/{aid}/file','name':name or source.name,'kind':kind}
-
-def download_result(job,url,ext):
-    if urlparse(url).scheme not in ('http','https'): raise ValueError('模型结果不是有效媒体地址')
-    path=s.DATA/(s.uid('download-')+ext)
-    try:
-        # Provider credentials are intentionally never forwarded to result hosts.
-        with httpx.stream('GET',url,follow_redirects=True,timeout=120) as response:
-            response.raise_for_status()
-            size=0
-            with path.open('wb') as out:
-                for chunk in response.iter_bytes():
-                    size+=len(chunk)
-                    if size>2*1024**3: raise ValueError('输出超过 2GB，请降低分辨率或时长')
-                    out.write(chunk)
-        return register(job,path,'生成结果'+ext)
-    finally: path.unlink(missing_ok=True)
+from .providers.common import RecoverableProviderError,assets_for,checked,download_result,register
 
 class Worker:
     def __init__(self):
@@ -133,6 +70,8 @@ class Worker:
                     s.job_update(job['id'],status='interrupted',phase='服务停止，保留上游任务编号供恢复核对')
                 else:
                     s.job_update(job['id'],status='cancelled',phase='已取消')
+            except RecoverableProviderError as exc:
+                s.job_update(job['id'],status='interrupted',error=str(exc)[:1200],phase='供应商暂时不可用，保留上游任务编号；可恢复查询')
             except Exception as exc:
                 message=str(exc)
                 if isinstance(exc,(httpx.ConnectError,httpx.ConnectTimeout)):

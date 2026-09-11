@@ -92,3 +92,24 @@ def job_update(job_id, **fields):
         c.execute('UPDATE jobs SET '+','.join(f'{k}=?' for k in fields)+' WHERE id=?',(*fields.values(),job_id))
     event(current['project_id'], {'type':'job','id':job_id})
     return True
+
+def attach_provider_job_id(job_id, provider_job_id):
+    """Persist a paid upstream handle even if cancellation raced its response."""
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        current=c.execute('SELECT project_id,status,provider_job_id FROM jobs WHERE id=?',(job_id,)).fetchone()
+        if not current:raise ValueError('任务不存在，无法保存供应商任务编号')
+        existing=current['provider_job_id']
+        if existing and existing!=provider_job_id:raise ValueError('供应商任务编号冲突，请人工核对')
+        if not existing:
+            c.execute('UPDATE jobs SET provider_job_id=?,updated=? WHERE id=?',(provider_job_id,time.time(),job_id))
+    event(current['project_id'],{'type':'job','id':job_id})
+    return current['status']
+
+def cancelled_phase(job_id, phase):
+    with db() as c:
+        current=c.execute("SELECT project_id FROM jobs WHERE id=? AND status='cancelled'",(job_id,)).fetchone()
+        if not current:return False
+        c.execute('UPDATE jobs SET phase=?,updated=? WHERE id=?',(phase,time.time(),job_id))
+    event(current['project_id'],{'type':'job','id':job_id})
+    return True
