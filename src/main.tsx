@@ -66,6 +66,7 @@ import {
 } from "lucide-react";
 import "@xyflow/react/dist/style.css";
 import "./style.css";
+import "./timelineControls.css";
 import {
   patchNode,
   invalidate,
@@ -1781,51 +1782,55 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                           />
                           <small>{Math.round((item.volume ?? 1) * 100)}%</small>
                         </label>
-                        <button
-                          disabled={index === 0}
-                          title="前移"
-                          onClick={() =>
-                            update((d) => {
-                              const timeline = [...d.timeline];
-                              [timeline[index - 1], timeline[index]] = [
-                                timeline[index],
-                                timeline[index - 1],
-                              ];
-                              return { ...d, timeline };
-                            })
-                          }
-                        >
-                          <ChevronLeft size={13} />
-                        </button>
-                        <button
-                          disabled={index === doc.timeline.length - 1}
-                          title="后移"
-                          onClick={() =>
-                            update((d) => {
-                              const timeline = [...d.timeline];
-                              [timeline[index], timeline[index + 1]] = [
-                                timeline[index + 1],
-                                timeline[index],
-                              ];
-                              return { ...d, timeline };
-                            })
-                          }
-                        >
-                          <ChevronRight size={13} />
-                        </button>
-                        <button
-                          title="移除镜头"
-                          onClick={() =>
-                            update((d) => ({
-                              ...d,
-                              timeline: d.timeline.filter(
-                                (t) => t.id !== item.id,
-                              ),
-                            }))
-                          }
-                        >
-                          <X size={13} />
-                        </button>
+                        <div className="timeline-clip-actions">
+                          <button
+                            disabled={index === 0}
+                            title="前移"
+                            onClick={() =>
+                              update((d) => {
+                                const timeline = [...d.timeline];
+                                [timeline[index - 1], timeline[index]] = [
+                                  timeline[index],
+                                  timeline[index - 1],
+                                ];
+                                return { ...d, timeline };
+                              })
+                            }
+                          >
+                            <ChevronLeft size={13} />
+                          </button>
+                          <button
+                            disabled={index === doc.timeline.length - 1}
+                            title="后移"
+                            onClick={() =>
+                              update((d) => {
+                                const timeline = [...d.timeline];
+                                [timeline[index], timeline[index + 1]] = [
+                                  timeline[index + 1],
+                                  timeline[index],
+                                ];
+                                return { ...d, timeline };
+                              })
+                            }
+                          >
+                            <ChevronRight size={13} />
+                          </button>
+                          <span className="timeline-clip-action-spacer" />
+                          <button
+                            className="timeline-clip-remove"
+                            title="移除镜头"
+                            onClick={() =>
+                              update((d) => ({
+                                ...d,
+                                timeline: d.timeline.filter(
+                                  (t) => t.id !== item.id,
+                                ),
+                              }))
+                            }
+                          >
+                            <X size={13} />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );

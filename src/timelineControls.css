@@ -1,0 +1,17 @@
+.timeline-clip-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.timeline-clip-action-spacer {
+  flex: 1;
+  min-width: 14px;
+}
+
+.timeline-clip-actions .timeline-clip-remove {
+  margin-left: 8px;
+  color: #d99a92;
+  border-color: #6b4842;
+}
