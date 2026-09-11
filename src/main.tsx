@@ -954,7 +954,12 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       ),
     );
   }
-  function newNode(kind: string, prompt = "", extra: Any = {}) {
+  function newNode(
+    kind: string,
+    prompt = "",
+    extra: Any = {},
+    sourceNodeId?: string,
+  ) {
     const nid = id();
     const offset = doc?.nodes.length || 0;
     update((d) => ({
@@ -977,6 +982,14 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           },
         },
       ],
+      edges:
+        sourceNodeId &&
+        d.nodes.some((item) => item.id === sourceNodeId) &&
+        !d.edges.some(
+          (edge) => edge.source === sourceNodeId && edge.target === nid,
+        )
+          ? [...d.edges, { id: id(), source: sourceNodeId, target: nid }]
+          : d.edges,
     }));
     setSelected(nid);
     setPanel(null);
@@ -1070,6 +1083,13 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       ]),
     ];
   }
+  function storyboardContextId(document: Doc) {
+    return [...document.nodes]
+      .reverse()
+      .find(
+        (item) => item.data.kind === "storyboard" && Boolean(item.data.text),
+      )?.id;
+  }
   function setMiniMaxFirstFrame(assetId: string) {
     if (!selected) return;
     update((d) => setSingleImageReference(d, selected, assetId));
@@ -1145,14 +1165,32 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   }
   function adoptShots(job: Job) {
     if (!job.result?.shots) return;
-    update((d) => ({ ...d, shots: job.result.shots }));
+    update((d) => {
+      const storyboardNode = d.nodes.find(
+        (item) => item.id === job.node_id && item.data.kind === "storyboard",
+      );
+      return {
+        ...d,
+        shots: job.result.shots.map((shot: Any) => ({
+          ...shot,
+          storyboardNode: storyboardNode?.id || shot.storyboardNode,
+        })),
+      };
+    });
     setView("shots");
     setPanel(null);
     setNotice("分镜已导入，可逐镜修改并建立生成节点");
   }
   function shotNodes(shot: Any, _index: number) {
     update((d) =>
-      ensureShotNodes(d, config.providers, system.models, id, [shot.id]),
+      ensureShotNodes(
+        d,
+        config.providers,
+        system.models,
+        id,
+        [shot.id],
+        shot.storyboardNode || storyboardContextId(d),
+      ),
     );
     setView("canvas");
     setSelected(null);
@@ -1170,7 +1208,16 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setNotice(`已按分镜顺序追加 ${plan.clips.length} 个镜头，保留原时间线`);
   }
   function allShotNodes() {
-    update((d) => ensureShotNodes(d, config.providers, system.models, id));
+    update((d) =>
+      ensureShotNodes(
+        d,
+        config.providers,
+        system.models,
+        id,
+        undefined,
+        storyboardContextId(d),
+      ),
+    );
     setView("canvas");
     setSelected(null);
     setTimeout(() => fitView({ padding: 0.2 }), 80);
@@ -2212,7 +2259,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 {data.kind === "text" && (
                   <button
                     className="secondary"
-                    onClick={() => newNode("storyboard", String(data.text))}
+                    onClick={() =>
+                      newNode("storyboard", String(data.text), {}, node.id)
+                    }
                   >
                     <Layers size={15} />
                     继续拆解分镜

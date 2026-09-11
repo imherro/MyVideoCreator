@@ -11,3 +11,17 @@ test('batch preparation repairs missing nodes without duplicating existing work'
  const again=ensureShotNodes(result,providers,[],id);assert.equal(again.nodes.length,4);assert.equal(again.edges.length,2);
  assert.equal(doc.nodes.length,1);
 });
+test('shot nodes form the script to storyboard to image to video chain',()=>{
+ let i=0;const id=()=>String(++i);const providers=[{id:'v',kind:'video',local:true,model:'minimax_h3'}];
+ const doc={nodes:[
+  {id:'script',data:{kind:'text',text:'故事'}},
+  {id:'plan',data:{kind:'storyboard',text:'分镜规划'}}
+ ],edges:[],shots:[{id:'s1',duration:5,image_prompt:'首帧',video_prompt:'动作'}]};
+ const result=ensureShotNodes(doc,providers,[],id,undefined,'plan');
+ const shot=result.shots[0];
+ assert.deepEqual(result.edges.map(edge=>[edge.source,edge.target]),[
+  ['script','plan'],['plan',shot.imageNode],[shot.imageNode,shot.videoNode]
+ ]);
+ assert.equal(shot.storyboardNode,'plan');
+ assert.equal(ensureShotNodes(result,providers,[],id,undefined,'plan').edges.length,3);
+});
