@@ -1,5 +1,6 @@
 import { planShotTimeline } from "./shotTimeline";
 import { ensureShotNodes, importStoryboardShots } from "./shotNodes";
+import { autoLayoutCanvas } from "./canvasLayout";
 import { nodeDefaults } from "./nodeDefaults";
 import React, {
   lazy,
@@ -1702,6 +1703,23 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             <span>·</span>
             {doc.duration} 秒
           </div>
+          {view === "canvas" && (
+            <button
+              className="quiet"
+              disabled={!doc.nodes.length}
+              onClick={() => {
+                update((document) => autoLayoutCanvas(document));
+                setSelected(null);
+                setLayoutVersion((value) => value + 1);
+                setTimeout(() => fitView({ padding: 0.16 }), 100);
+                setNotice("画布已按创作链路自动排列");
+              }}
+              title="按剧本、分镜、视觉资产、分镜图和视频自动排列"
+            >
+              <LayoutGrid size={15} />
+              自动排列
+            </button>
+          )}
           {view !== "editor" && (
               <button
                 className="quiet"
