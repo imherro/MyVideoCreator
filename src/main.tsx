@@ -649,15 +649,27 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       throw e;
     }
     const projectedDocument = deriveManagedGraph(p.document);
+    const openedProject = { ...p, document: projectedDocument };
     revision.current = p.revision;
     dirty.current = projectedDocument !== p.document;
+    // Update the imperative snapshot before scheduling React state changes.
+    // This prevents an autosave tick from pairing the new project id with the
+    // previous project's document while the project switch is being rendered.
+    current.current = { project: openedProject, doc: projectedDocument };
     nodeMeasurements.current.clear();
     setLayoutVersion((value) => value + 1);
-    setProject(p);
+    setProject(openedProject);
     setDoc(projectedDocument);
     setAssets(a);
     setJobs(j);
     setSelected(null);
+    setHoveredNode(null);
+    setVisualFocus(undefined);
+    setPreview(null);
+    setPreviewTimeline(false);
+    setPanorama(null);
+    setTimelineOpen(false);
+    setView("canvas");
     setSaved(projectedDocument === p.document ? "已保存" : "未保存");
     setPanel(null);
     setTimeout(() => {
@@ -1093,7 +1105,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     });
     setSelected(null);
   }
-  async function createProject() {
+  async function createProject(name: string) {
     let preservedDraft = false;
     if (dirty.current || saveFlight.current) await save();
     if (dirty.current) {
@@ -1120,11 +1132,13 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       setSaved("已保存");
       preservedDraft = true;
     }
-    const p = await api("/projects", send("POST", { name: "未命名短片" }));
+    const projectName = name.trim() || "未命名短片";
+    const p = await api("/projects", send("POST", { name: projectName }));
     setProjects(await api("/projects"));
     await openProject(p.id);
     if (preservedDraft)
       setNotice("已进入新项目；原项目的冲突草稿已保存在本浏览器，可随时返回恢复。");
+    else setNotice(`已新建并进入空白项目“${projectName}”`);
   }
   async function deleteCurrentProject() {
     if (!project || !canDeleteCurrentProject) return;
@@ -3153,12 +3167,11 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 <button
                   className="primary full"
                   onClick={() => {
-                    if (
-                      window.confirm(
-                        "新建一个空白项目？当前项目会先保存；若存在保存冲突，会在本浏览器保留草稿。",
-                      )
-                    )
-                      createProject().catch(report);
+                    const name = window.prompt(
+                      "请输入新项目名称。创建后会直接进入空白画布；当前项目会先保存。",
+                      "未命名短片",
+                    );
+                    if (name !== null) createProject(name).catch(report);
                   }}
                 >
                   <Plus size={16} />
@@ -3174,7 +3187,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   </button>
                 )}
                 <label>
-                  当前项目名称
+                  当前项目名称（修改这里只会重命名）
                   <input
                     value={project.name}
                     onChange={(e) => {
