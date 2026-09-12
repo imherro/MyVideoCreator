@@ -1220,7 +1220,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         ratio: doc?.ratio || "16:9",
         size: n.data.resolution || "1024x1024",
         target_duration:
-          n.data.kind === "storyboard"
+          n.data.kind === "text" || n.data.kind === "storyboard"
             ? n.data.target_duration || doc?.duration
             : undefined,
         film_bible:

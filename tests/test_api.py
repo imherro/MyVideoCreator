@@ -600,6 +600,7 @@ def test_graph_storyboard_defaults_to_two_pass_film_bible(authenticated):
     assert result.status_code==200,result.text
     jobs=c.get('/api/projects/'+p['id']+'/jobs').json()
     assert jobs[0]['input']['film_bible'] is True
+    assert jobs[0]['input']['target_duration']==15
     with s.db() as db:
         db.execute("UPDATE jobs SET status='cancelled' WHERE project_id=?",(p['id'],))
 
@@ -611,6 +612,8 @@ def test_graph_scheduler_consumes_upstream_text(authenticated,monkeypatch):
     assert c.put('/api/projects/'+p['id'],json={'name':p['name'],'revision':1,'document':doc}).status_code==200
     result=c.post('/api/projects/'+p['id']+'/run',json={'submission_id':'graph-run-test-001'}).json()
     assert result['count']==2
+    queued=c.get('/api/projects/'+p['id']+'/jobs').json()
+    assert all(job['input']['target_duration']==15 for job in queued)
     received=[]
     def text(self,job,provider):
         received.append(job['input']['prompt'])

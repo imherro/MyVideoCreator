@@ -439,8 +439,8 @@ def create_job_record(c,pid,body):
         from .state_review import require_video_source_reviews
         saved=c.execute('SELECT document FROM projects WHERE id=?',(pid,)).fetchone()
         if saved: require_video_source_reviews(json.loads(saved['document']),body.node_id)
-    if body.kind=='storyboard' and body.input.get('target_duration') is not None:
-        if not 1<=float(body.input['target_duration'])<=3000:raise ValueError('分镜目标时长应为 1–3000 秒')
+    if body.kind in ('text','storyboard') and body.input.get('target_duration') is not None:
+        if not 1<=float(body.input['target_duration'])<=3000:raise ValueError('剧本或分镜目标时长应为 1–3000 秒')
     if body.input.get('visual_reference') is not None:
         from .visual_references import validate_visual_reference_job
         saved=c.execute('SELECT document FROM projects WHERE id=?',(pid,)).fetchone()
@@ -498,10 +498,13 @@ def create_job_record(c,pid,body):
 def submit(pid:str,body:JobCreate):
     saved_project=project(pid)
     from .reference_compiler import compile_shot_image_input
-    body=body.model_copy(update={'input':compile_shot_image_input(
+    prepared_input=compile_shot_image_input(
         saved_project['document'],body.node_id,body.kind,body.input,
         s.get_setting('providers',[]),
-    )})
+    )
+    if body.kind in ('text','storyboard') and prepared_input.get('target_duration') is None:
+        prepared_input={**prepared_input,'target_duration':saved_project['document'].get('duration',15)}
+    body=body.model_copy(update={'input':prepared_input})
     tracking = None
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
@@ -642,8 +645,9 @@ async def run_workflow(pid:str,request:Request):
         data['allow_cloud']=bool(body.get('allow_cloud'))
         data['project_style']=p['document'].get('style','')
         data['ratio']=p['document'].get('ratio','16:9')
-        if kind=='storyboard':
+        if kind in ('text','storyboard'):
             data['target_duration']=data.get('target_duration') or p['document'].get('duration',15)
+        if kind=='storyboard':
             data['film_bible']=data.get('film_bible') is not False
         prepared.append((node,parents,data,reference_sources))
     jobs_by_node={};created=[]

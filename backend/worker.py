@@ -214,6 +214,16 @@ class Worker:
                 lambda system,user,schema,phase:self._chat_text(job,p,system,user,schema,phase),
             )
         prompt=inp['prompt']
+        if kind=='text' and inp.get('target_duration'):
+            duration=float(inp['target_duration'])
+            duration_label=f'{duration:g}'
+            end_time=f'{int(duration)//60}:{duration%60:04.1f}'
+            prompt+=(
+                f'\n\n成片目标总时长严格为 {duration_label} 秒。'
+                f'剧本必须能在 0:00–{end_time} 内完整拍完，'
+                '从开场、发展到结尾都不得超出该时长；控制人物、场景、对白和动作数量，'
+                '不要扩写成长片、分钟级短片或完整系列故事。请在标题下明确标注目标总时长。'
+            )
         if kind=='storyboard' and inp.get('target_duration'):
             prompt+=f'\n镜头总时长必须为 {inp["target_duration"]} 秒，误差不超过 0.5 秒。'
         text=self._chat_text(
