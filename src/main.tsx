@@ -545,6 +545,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     [preview, setPreview] = useState<Asset | null>(null);
   const [previewTimeline, setPreviewTimeline] = useState(false);
   const [visualFocus, setVisualFocus] = useState<string | undefined>();
+  const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [panorama, setPanorama] = useState<Asset | null>(null);
   const [syncFailure, setSyncFailure] = useState<SyncFailure | null>(null);
   const [mediaRetryKey, setMediaRetryKey] = useState(0);
@@ -1618,14 +1619,25 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       };
     }) || [];
   const renderedEdges =
-    doc?.edges.map((edge) => {
+    doc?.edges.map((edge, edgeIndex) => {
       const managed =
         edge.data?.managed === true && edge.data?.origin === "visual_binding";
-      const stroke = managed ? "#d4a963" : "#a58a60";
+      const stroke = managed ? "#d4a963" : "#718991";
+      const focusedNode = hoveredNode || selected;
+      const related =
+        !focusedNode || edge.source === focusedNode || edge.target === focusedNode;
       return {
         ...edge,
-        type: edge.type || "smoothstep",
-        animated: edge.animated !== false,
+        // Orthogonal smooth-step edges share vertical trunks when one source
+        // fans out to many shots. Bezier wires diverge immediately, matching
+        // the readable socket-to-socket routing used by node editors.
+        type: "default",
+        pathOptions: {
+          curvature: managed
+            ? 0.34 + (edgeIndex % 3) * 0.035
+            : 0.25 + (edgeIndex % 3) * 0.025,
+        },
+        animated: edge.animated !== false && related,
         className: `${edge.className || ""} mvc-flow-edge${managed ? " mvc-flow-edge-managed" : ""}`.trim(),
         zIndex: 0,
         markerEnd:
@@ -1637,7 +1649,14 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           },
         style: {
           stroke,
-          strokeWidth: managed ? 2.2 : 1.8,
+          strokeWidth: focusedNode && related ? 2.6 : managed ? 1.65 : 1.5,
+          opacity: focusedNode
+            ? related
+              ? 0.96
+              : 0.055
+            : managed
+              ? 0.32
+              : 0.38,
           ...edge.style,
         },
       };
@@ -2042,6 +2061,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 setSelected(n.id);
                 setPanel(null);
               }}
+              onNodeMouseEnter={(_, n) => setHoveredNode(n.id)}
+              onNodeMouseLeave={() => setHoveredNode(null)}
               onNodeDragStop={(_, n) => {
                 requestAnimationFrame(() => updateNodeInternals(n.id));
               }}
@@ -2051,7 +2072,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               maxZoom={1.8}
               defaultEdgeOptions={{
                 style: { stroke: "#8f7550", strokeWidth: 1.5 },
-                type: "smoothstep",
+                type: "default",
                 animated: true,
               }}
               deleteKeyCode={null}
