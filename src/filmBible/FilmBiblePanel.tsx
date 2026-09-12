@@ -50,6 +50,7 @@ export function FilmBiblePanel({
   onBind,
   onUnbind,
   onLocate,
+  onPreviewAsset,
   assets,
   jobs,
   generationPolicy,
@@ -80,6 +81,7 @@ export function FilmBiblePanel({
   onBind: (shotUid: string, versionId: string) => void;
   onUnbind: (shotUid: string, versionId: string) => void;
   onLocate: (versionId: string) => void;
+  onPreviewAsset: (asset: Record<string, any>) => void;
   assets: Array<Record<string, any>>;
   jobs: Array<Record<string, any>>;
   generationPolicy: GenerationPolicy | undefined;
@@ -402,7 +404,16 @@ export function FilmBiblePanel({
         {reference ? (
           <div className="primary-reference">
             {referenceAsset ? (
-              <img src={referenceAsset.url} alt={`${card.name} 主参考图`} />
+              <button
+                type="button"
+                className="primary-reference-preview"
+                onClick={() => onPreviewAsset(referenceAsset)}
+                aria-label={`放大预览${card.name}主参考图`}
+                title="点击放大预览"
+              >
+                <img src={referenceAsset.url} alt={`${card.name} 主参考图`} />
+                <span>点击放大</span>
+              </button>
             ) : (
               <div className="missing-reference">参考素材暂未加载：{reference.assetId}</div>
             )}

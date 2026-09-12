@@ -2816,6 +2816,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 providers={config.providers}
                 localModels={system.models}
                 request={api}
+                onPreviewAsset={(asset) => setPreview(asset as Asset)}
                 focusVersionId={visualFocus}
                 onFocusVersion={setVisualFocus}
                 onRenameCard={(cardId, name) => {
