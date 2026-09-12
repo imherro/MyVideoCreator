@@ -62,6 +62,26 @@ def test_batch_carries_static_reference_asset_to_minimax(batch_authenticated):
     assert 'MiniMax-Hailuo-2.3' in frozen
 
 
+def test_exact_video_batch_reuses_completed_image_without_rerunning_it(batch_authenticated):
+    client=batch_authenticated;item=project(client);asset=_image(client,item['id'],'ready-frame.png');_minimax_settings(client)
+    doc=item['document']
+    doc['nodes']=[
+        {'id':'image','data':{'kind':'image','provider':'missing-old-provider','prompt':'已经完成的首帧','assetId':asset['id']}},
+        {'id':'video','data':{'kind':'video','provider':'hailuo','prompt':'镜头缓慢推进'}},
+    ]
+    doc['edges']=[{'id':'frame','source':'image','target':'video'}]
+    assert client.put('/api/projects/'+item['id'],json={'name':item['name'],'revision':item['revision'],'document':doc}).status_code==200
+    result=client.post('/api/projects/'+item['id']+'/run',json={
+        'submission_id':'exact-video-batch-001','node_ids':['video'],'exact':True,'allow_cloud':True,
+    })
+    assert result.status_code==200,result.text
+    assert result.json()['count']==1
+    jobs=client.get('/api/projects/'+item['id']+'/jobs').json()
+    assert [job['node_id'] for job in jobs]==['video']
+    assert jobs[0]['input']['asset_ids']==[asset['id']]
+    assert jobs[0]['input']['image_reference_sources']==[{'type':'asset','asset_id':asset['id']}]
+
+
 def test_batch_rejects_multiple_minimax_frames_before_queueing(batch_authenticated):
     client=batch_authenticated;item=project(client);one=_image(client,item['id'],'one.png');two=_image(client,item['id'],'two.png');_minimax_settings(client)
     doc=item['document']

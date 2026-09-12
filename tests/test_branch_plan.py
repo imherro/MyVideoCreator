@@ -26,3 +26,19 @@ def test_managed_visual_projection_never_becomes_an_execution_dependency():
     plan=execution_plan(doc,['image'],True)
     assert [node['id'] for node,_ in plan]==['story','image','video']
     assert dict((node['id'],parents) for node,parents in plan)['image']==['story']
+
+def test_exact_batch_keeps_incoming_edges_without_rerunning_ancestors():
+    doc={
+        'nodes':[
+            {'id':'story','data':{'kind':'storyboard'}},
+            {'id':'image','data':{'kind':'image'}},
+            {'id':'video','data':{'kind':'video'}},
+        ],
+        'edges':[
+            {'source':'story','target':'image'},
+            {'source':'image','target':'video'},
+        ],
+    }
+    plan=execution_plan(doc,['video'],False,True)
+    assert [node['id'] for node,_ in plan]==['video']
+    assert plan[0][1]==['image']

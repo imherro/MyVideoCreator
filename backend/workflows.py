@@ -16,7 +16,7 @@ def topological(nodes,edges):
     if len(result)!=len(ids): raise ValueError('画布包含循环连线，请先解除循环后执行')
     return result
 
-def execution_plan(document,selected=None,include_descendants=False):
+def execution_plan(document,selected=None,include_descendants=False,exact=False):
     # Visual Bible nodes and edges are a managed canvas projection. They are
     # never execution dependencies; generation reads shot.assetBindings.
     managed_visual_ids={
@@ -39,6 +39,9 @@ def execution_plan(document,selected=None,include_descendants=False):
     for edge in edges: parents[edge['target']].append(edge['source'])
     wanted=set(selected or order)
     if not wanted<=mapping.keys(): raise ValueError('选中的节点不存在')
+    if exact:
+        if not selected: raise ValueError('精确批量执行必须指定节点')
+        return [(mapping[n],parents[n]) for n in order if n in wanted]
     if include_descendants:
         pending=list(wanted)
         while pending:

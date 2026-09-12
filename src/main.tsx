@@ -1,6 +1,10 @@
 import { planShotTimeline } from "./shotTimeline";
 import { ensureShotNodes, importStoryboardShots } from "./shotNodes";
 import { autoLayoutCanvas } from "./canvasLayout";
+import {
+  planBatchGeneration,
+  type BatchGenerationKind,
+} from "./batchGeneration";
 import { nodeDefaults } from "./nodeDefaults";
 import React, {
   lazy,
@@ -1427,15 +1431,98 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     const projectedDocument = deriveManagedGraph(job.project_document);
     revision.current = job.project_revision;
     dirty.current = projectedDocument !== job.project_document;
+    const updatedProject = {
+      ...snapshot.project,
+      revision: job.project_revision,
+      document: projectedDocument,
+    };
+    current.current = { project: updatedProject, doc: projectedDocument };
     setProject((currentProject) =>
       currentProject && currentProject.id === snapshot.project!.id
-        ? { ...currentProject, revision: job.project_revision }
+        ? updatedProject
         : currentProject,
     );
     setDoc(projectedDocument);
     setSaved(dirty.current ? "未保存" : "已保存");
     await refresh(snapshot.project.id);
     setNotice("主参考图任务已进入队列；完成后请人工确认并锁定");
+  }
+  async function runSmartBatch(kind: BatchGenerationKind) {
+    const snapshot = current.current;
+    if (!snapshot.project || !snapshot.doc || busy) return;
+    const plan = planBatchGeneration(
+      snapshot.doc,
+      jobs,
+      config.providers,
+      system.models,
+      kind,
+    );
+    const names = {
+      assets: "资产参考图",
+      shot_images: "分镜图",
+      shot_videos: "视频",
+    };
+    if (!plan.readyIds.length) {
+      const detail = plan.blocked.slice(0, 3).map((item) => `${item.label}：${item.reason}`).join("；");
+      report(new Error(detail || `没有需要生成的${names[kind]}`));
+      return;
+    }
+    const allowCloud =
+      plan.cloudCount === 0 ||
+      window.confirm(
+        `本次将提交 ${plan.readyIds.length} 个${names[kind]}任务，其中 ${plan.cloudCount} 个使用云端模型，可能产生供应商费用。是否继续？`,
+      );
+    if (!allowCloud) return;
+    setBusy(true);
+    setError("");
+    try {
+      let submitted = 0;
+      const failed: string[] = [];
+      if (kind === "assets") {
+        for (const versionId of plan.readyIds) {
+          try {
+            await generateVisualReference(versionId, true);
+            submitted += 1;
+          } catch (reason: any) {
+            failed.push(reason?.message || String(reason));
+          }
+        }
+      } else {
+        await save();
+        if (dirty.current) throw new Error("请先解决保存冲突再批量生成");
+        const result = await api(
+          `/projects/${snapshot.project.id}/run`,
+          send("POST", {
+            submission_id: id(),
+            node_ids: plan.readyIds,
+            exact: true,
+            allow_cloud: plan.cloudCount > 0,
+          }),
+        );
+        submitted = result.count;
+        await refresh(snapshot.project.id);
+      }
+      if (!submitted && failed.length) throw new Error(failed[0]);
+      setPanel("jobs");
+      setNotice(
+        `已提交 ${submitted} 个${names[kind]}任务` +
+          (plan.blocked.length ? `，${plan.blocked.length} 项条件未满足` : "") +
+          (plan.skipped.length ? `，跳过 ${plan.skipped.length} 项` : "") +
+          (failed.length ? `，${failed.length} 项提交失败` : ""),
+      );
+      if (failed.length) setError(`部分任务提交失败：${failed[0]}`);
+      else if (plan.blocked.length) {
+        const details = plan.blocked
+          .slice(0, 3)
+          .map((item) => `${item.label}：${item.reason}`)
+          .join("；");
+        setError(`${plan.blocked.length} 项未提交：${details}`);
+      }
+    } catch (reason) {
+      report(reason);
+    } finally {
+      setBusy(false);
+    }
   }
   async function changeAssetCategory(asset: Asset, category: string) {
     if (!project) return;
@@ -1547,6 +1634,15 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         {error || "正在打开工作室"}
       </div>
     );
+  const assetBatchPlan = planBatchGeneration(
+    doc, jobs, config.providers, system.models, "assets",
+  );
+  const imageBatchPlan = planBatchGeneration(
+    doc, jobs, config.providers, system.models, "shot_images",
+  );
+  const videoBatchPlan = planBatchGeneration(
+    doc, jobs, config.providers, system.models, "shot_videos",
+  );
   const persistedEditorTimeline = doc.editor?.timeline;
   const hasEditorTimeline = Boolean(
     persistedEditorTimeline?.tracks?.some((track) => track.elements.length),
@@ -1720,6 +1816,37 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               自动排列
             </button>
           )}
+          {["canvas", "shots", "grid"].includes(view) && (
+            <div className="batch-generation-actions" aria-label="批量生成">
+              <button
+                className="quiet"
+                disabled={busy}
+                onClick={() => void runSmartBatch("assets")}
+                title={`智能生成缺失的资产参考图；${assetBatchPlan.blocked.length} 项尚未满足条件`}
+              >
+                <BookOpen size={15} />
+                全部资产 <b>{assetBatchPlan.readyIds.length}</b>
+              </button>
+              <button
+                className="quiet"
+                disabled={busy}
+                onClick={() => void runSmartBatch("shot_images")}
+                title={`智能生成缺失或过期的分镜图；${imageBatchPlan.blocked.length} 项尚未满足条件`}
+              >
+                <ImageIcon size={15} />
+                全部分镜图 <b>{imageBatchPlan.readyIds.length}</b>
+              </button>
+              <button
+                className="quiet"
+                disabled={busy}
+                onClick={() => void runSmartBatch("shot_videos")}
+                title={`智能生成已有合格首帧的镜头视频；${videoBatchPlan.blocked.length} 项尚未满足条件`}
+              >
+                <Film size={15} />
+                全部视频 <b>{videoBatchPlan.readyIds.length}</b>
+              </button>
+            </div>
+          )}
           {view !== "editor" && (
               <button
                 className="quiet"
@@ -1727,7 +1854,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 onClick={() => setPanel("run")}
               >
                 <Play size={15} />
-                运行画布
+                高级运行
               </button>
           )}
           <button

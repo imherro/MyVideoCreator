@@ -529,7 +529,10 @@ async def run_workflow(pid:str,request:Request):
     body=await request.json();p=project(pid)
     group=body.get('submission_id')
     if not isinstance(group,str) or len(group)<8 or len(group)>80: raise ValueError('批次提交标识无效')
-    plan=execution_plan(p['document'],body.get('node_ids'),body.get('include_descendants') is True)
+    exact=body.get('exact') is True
+    plan=execution_plan(
+        p['document'],body.get('node_ids'),body.get('include_descendants') is True,exact,
+    )
     providers={x['id']:x for x in s.get_setting('providers',[])}
     # Validate the entire batch before submitting its first runnable node.
     for node,_ in plan:
@@ -547,7 +550,14 @@ async def run_workflow(pid:str,request:Request):
     # single-node submit path does.  Runnable image parents are deliberately
     # left to the worker: it substitutes their freshly generated result when
     # the downstream job becomes runnable.
-    mapping={node['id']:node for node,_ in plan}
+    mapping={
+        node['id']:node for node in p['document'].get('nodes',[])
+        if not (
+            node.get('data',{}).get('managed') is True
+            and node.get('data',{}).get('kind')=='visual_asset'
+        )
+    }
+    planned_ids={node['id'] for node,_ in plan}
     runnable={'text','storyboard','image','video'}
     prepared=[]
     from .reference_compiler import compile_shot_image_input
@@ -573,10 +583,22 @@ async def run_workflow(pid:str,request:Request):
         for parent_id in ([] if film_bible_compiled else parents):
             parent_data=mapping[parent_id].get('data',{})
             if parent_data.get('kind')=='image':
-                generated_image_parents+=1
-                key=('upstream_node',parent_id)
+                dynamic_parent=parent_id in planned_ids
+                parent_asset_id=parent_data.get('assetId')
+                if dynamic_parent:
+                    generated_image_parents+=1
+                elif parent_asset_id:
+                    static_assets.append(parent_asset_id)
+                key=(
+                    ('upstream_node',parent_id)
+                    if dynamic_parent
+                    else ('asset',parent_asset_id)
+                )
                 if key not in seen_reference_sources:
-                    reference_sources.append({'type':'upstream_node','node_id':parent_id})
+                    if dynamic_parent:
+                        reference_sources.append({'type':'upstream_node','node_id':parent_id})
+                    elif parent_asset_id:
+                        reference_sources.append({'type':'asset','asset_id':parent_asset_id})
                     seen_reference_sources.add(key)
             if parent_data.get('kind') not in runnable and parent_data.get('assetId'):
                 asset_id=parent_data['assetId'];static_assets.append(asset_id)
