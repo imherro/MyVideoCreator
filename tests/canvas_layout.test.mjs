@@ -27,6 +27,8 @@ test('auto layout separates dependency lanes and orders shot image/video rows',(
   assert.ok(at('storyboard').x<at('visual-hero').x);
   assert.ok(at('visual-hero').x<at('image-1').x);
   assert.ok(at('image-1').x<at('video-1').x);
+  assert.ok(at('image-1').x-(at('visual-hero').x+260)>=200);
+  assert.ok(at('video-1').x-(at('image-1').x+300)>=150);
   assert.equal(at('image-1').y,at('video-1').y);
   assert.equal(at('image-2').y,at('video-2').y);
   assert.ok(at('image-1').y<at('image-2').y);

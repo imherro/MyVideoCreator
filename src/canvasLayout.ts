@@ -2,15 +2,15 @@ type Value = Record<string, any>;
 
 const X = {
   text: 40,
-  storyboard: 410,
-  visual: 790,
-  image: 1170,
-  video: 1570,
-  other: 410,
+  storyboard: 440,
+  visual: 900,
+  image: 1400,
+  video: 1850,
+  other: 440,
 };
 const TOP = 80;
 const MEDIA_GAP = 330;
-const VISUAL_GAP = 285;
+const VISUAL_GAP = 310;
 
 function shotIdentity(shot: Value) {
   return String(shot.uid || shot.id || "");

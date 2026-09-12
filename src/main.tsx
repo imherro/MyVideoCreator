@@ -30,6 +30,7 @@ import {
   type NodeChange,
   type EdgeChange,
   type Connection,
+  MarkerType,
   ReactFlowProvider,
   useReactFlow,
   useUpdateNodeInternals,
@@ -1617,16 +1618,30 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       };
     }) || [];
   const renderedEdges =
-    doc?.edges.map((edge) => ({
-      ...edge,
-      type: edge.type || "smoothstep",
-      zIndex: 1,
-      style: {
-        stroke: "#d4a963",
-        strokeWidth: 2.2,
-        ...edge.style,
-      },
-    })) || [];
+    doc?.edges.map((edge) => {
+      const managed =
+        edge.data?.managed === true && edge.data?.origin === "visual_binding";
+      const stroke = managed ? "#d4a963" : "#a58a60";
+      return {
+        ...edge,
+        type: edge.type || "smoothstep",
+        animated: edge.animated !== false,
+        className: `${edge.className || ""} mvc-flow-edge${managed ? " mvc-flow-edge-managed" : ""}`.trim(),
+        zIndex: 0,
+        markerEnd:
+          edge.markerEnd || {
+            type: MarkerType.ArrowClosed,
+            color: stroke,
+            width: 13,
+            height: 13,
+          },
+        style: {
+          stroke,
+          strokeWidth: managed ? 2.2 : 1.8,
+          ...edge.style,
+        },
+      };
+    }) || [];
   if (!doc || !project)
     return (
       <div className="loading">
@@ -2037,6 +2052,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               defaultEdgeOptions={{
                 style: { stroke: "#8f7550", strokeWidth: 1.5 },
                 type: "smoothstep",
+                animated: true,
               }}
               deleteKeyCode={null}
             >
