@@ -430,6 +430,16 @@ export function FilmBiblePanel({
         ) : (
           <p className="muted">尚未设置主参考图。提取剧本和分镜不会自动调用图片模型。</p>
         )}
+        {editable && cloudTarget && (
+          <label className="check-label reference-cloud-consent">
+            <input
+              type="checkbox"
+              checked={allowCloud}
+              onChange={(event) => setAllowCloud(event.target.checked)}
+            />
+            允许本次使用云端图片模型，按供应商计费
+          </label>
+        )}
         {editable && (
           <div className="reference-actions">
             <label className="upload-reference-button">
@@ -467,19 +477,13 @@ export function FilmBiblePanel({
               ) : (
                 <Sparkles size={15} />
               )}
-              {reference ? "重新生成参考图" : "生成主参考图"}
+              {cloudTarget && !allowCloud
+                ? "勾选云端授权后生成"
+                : reference
+                  ? "重新生成参考图"
+                  : "生成主参考图"}
             </button>
           </div>
-        )}
-        {editable && cloudTarget && (
-          <label className="check-label">
-            <input
-              type="checkbox"
-              checked={allowCloud}
-              onChange={(event) => setAllowCloud(event.target.checked)}
-            />
-            允许本次使用云端图片模型，按供应商计费
-          </label>
         )}
         {referenceJob?.status === "failed" && (
           <p className="error">参考图生成失败：{referenceJob.error}</p>
