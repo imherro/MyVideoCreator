@@ -70,7 +70,7 @@ export function FilmBiblePanel({
     override: VisualGenerationOverride,
   ) => void;
   onUploadReference: (versionId: string, file: File) => Promise<void>;
-  onGenerateReference: (versionId: string, allowCloud: boolean) => Promise<void>;
+  onGenerateReference: (versionId: string) => Promise<void>;
   onLock: (versionId: string) => void;
   onFork: (versionId: string, draft: VersionDraft) => void;
   onUpgrade: (
@@ -119,7 +119,6 @@ export function FilmBiblePanel({
   });
   const [referenceBusy, setReferenceBusy] = useState(false);
   const [referenceError, setReferenceError] = useState("");
-  const [allowCloud, setAllowCloud] = useState(false);
   useEffect(() => {
     if (focusVersionId && visual.versions[focusVersionId])
       setSelectedId(focusVersionId);
@@ -138,7 +137,6 @@ export function FilmBiblePanel({
   }, [shotUid, shots]);
   useEffect(() => {
     setReferenceError("");
-    setAllowCloud(false);
   }, [selected?.id]);
   if (!versions.length)
     return (
@@ -187,7 +185,6 @@ export function FilmBiblePanel({
   const targetProvider = providers.find(
     (item) => item.id === resolvedTarget?.providerId,
   );
-  const cloudTarget = Boolean(targetProvider && !targetProvider.local);
   const override = card.generation?.image;
   const perform = async (action: () => Promise<void>) => {
     setReferenceBusy(true);
@@ -430,16 +427,6 @@ export function FilmBiblePanel({
         ) : (
           <p className="muted">尚未设置主参考图。提取剧本和分镜不会自动调用图片模型。</p>
         )}
-        {editable && cloudTarget && (
-          <label className="check-label reference-cloud-consent">
-            <input
-              type="checkbox"
-              checked={allowCloud}
-              onChange={(event) => setAllowCloud(event.target.checked)}
-            />
-            允许本次使用云端图片模型，按供应商计费
-          </label>
-        )}
         {editable && (
           <div className="reference-actions">
             <label className="upload-reference-button">
@@ -463,12 +450,11 @@ export function FilmBiblePanel({
                 generationRunning ||
                 Boolean(targetError) ||
                 !resolvedTarget?.providerId ||
-                !resolvedTarget?.modelId ||
-                (cloudTarget && !allowCloud)
+                !resolvedTarget?.modelId
               }
               onClick={() =>
                 void perform(() =>
-                  onGenerateReference(selected.id, allowCloud),
+                  onGenerateReference(selected.id),
                 )
               }
             >
@@ -477,11 +463,7 @@ export function FilmBiblePanel({
               ) : (
                 <Sparkles size={15} />
               )}
-              {cloudTarget && !allowCloud
-                ? "勾选云端授权后生成"
-                : reference
-                  ? "重新生成参考图"
-                  : "生成主参考图"}
+              {reference ? "重新生成参考图" : "生成主参考图"}
             </button>
           </div>
         )}

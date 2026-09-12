@@ -541,7 +541,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     [busy, setBusy] = useState(false),
     [timelineOpen, setTimelineOpen] = useState(false),
     [revisions, setRevisions] = useState<Any[]>([]),
-    [cloud, setCloud] = useState(false),
     [preview, setPreview] = useState<Asset | null>(null);
   const [previewTimeline, setPreviewTimeline] = useState(false);
   const [visualFocus, setVisualFocus] = useState<string | undefined>();
@@ -1195,11 +1194,14 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       }
       await save();
       if (dirty.current) throw new Error("项目尚未保存，请先解决保存冲突");
+      const targetProvider = config.providers.find(
+        (provider: Any) => provider.id === (n.data.provider || "local"),
+      );
       const input = {
         ...n.data,
         provider: n.data.provider || "local",
         asset_ids: sourceAssets(n.id),
-        allow_cloud: cloud,
+        allow_cloud: Boolean(targetProvider && !targetProvider.local),
         prompt: String(n.data.prompt || ""),
         ratio: doc?.ratio || "16:9",
         size: n.data.resolution || "1024x1024",
@@ -1363,10 +1365,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     ]);
     setNotice("主参考图已上传，请检查画面后确认锁定");
   }
-  async function generateVisualReference(
-    versionId: string,
-    allowCloud: boolean,
-  ) {
+  async function generateVisualReference(versionId: string) {
     const snapshot = current.current;
     if (!snapshot.project || !snapshot.doc) return;
     const visual = visualBibleOf(snapshot.doc);
@@ -1383,8 +1382,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       (item: Any) => item.id === target.providerId,
     );
     if (!provider) throw new Error("图片生成服务已不存在，请重新选择");
-    if (!provider.local && !allowCloud)
-      throw new Error("请先明确允许本次使用云端图片模型");
     let capabilities: Any | undefined;
     if (isStateCard(card)) {
       const catalog = await api(
@@ -1416,7 +1413,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           prompt: plan.prompt,
           asset_ids: plan.assetIds,
           asset_category: plan.assetCategory,
-          allow_cloud: !provider.local ? allowCloud : false,
+          allow_cloud: !provider.local,
           ratio: snapshot.doc.ratio || "16:9",
           size: "2K",
           visual_reference: {
@@ -1469,12 +1466,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       report(new Error(detail || `没有需要生成的${names[kind]}`));
       return;
     }
-    const allowCloud =
-      plan.cloudCount === 0 ||
-      window.confirm(
-        `本次将提交 ${plan.readyIds.length} 个${names[kind]}任务，其中 ${plan.cloudCount} 个使用云端模型，可能产生供应商费用。是否继续？`,
-      );
-    if (!allowCloud) return;
     setBusy(true);
     setError("");
     try {
@@ -1483,7 +1474,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       if (kind === "assets") {
         for (const versionId of plan.readyIds) {
           try {
-            await generateVisualReference(versionId, true);
+            await generateVisualReference(versionId);
             submitted += 1;
           } catch (reason: any) {
             failed.push(reason?.message || String(reason));
@@ -2594,23 +2585,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               providers={config.providers}
               localModels={system.models}
               request={api}
-              onChange={(patch) => {
-                changeModel(patch);
-                if ("provider" in patch) setCloud(false);
-              }}
+              onChange={changeModel}
             />
-            {config.providers.find(
-              (p: Any) => p.id === data.provider && !p.local,
-            ) && (
-              <label className="check-label">
-                <input
-                  type="checkbox"
-                  checked={cloud}
-                  onChange={(e) => setCloud(e.target.checked)}
-                />
-                允许本次使用云端服务，按供应商计费
-              </label>
-            )}
             {data.kind === "video" &&
               ["minimax", "volcengine_ark"].includes(
                 config.providers.find((p: Any) => p.id === data.provider)
@@ -2642,7 +2618,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                         ))}
                     </select>
                     <small>
-                      选择素材会清除本节点的图像连线和尾帧，只保留这一张首帧；文字连线不受影响。允许云端任务后该图会发送到供应商。
+                      选择素材会清除本节点的图像连线和尾帧，只保留这一张首帧；文字连线不受影响。生成时该图会发送到当前配置的视频服务。
                     </small>
                     {references.length > 1 && (
                       <small className="error">

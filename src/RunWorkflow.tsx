@@ -16,7 +16,6 @@ export function RunWorkflow({
   onRun: (options: Value) => Promise<void>;
 }) {
   const [scope, setScope] = useState(selected ? "branch" : "all");
-  const [cloud, setCloud] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const workflowNodes = nodes.filter(
@@ -77,10 +76,7 @@ export function RunWorkflow({
         执行范围
         <select
           value={scope}
-          onChange={(event) => {
-            setScope(event.target.value);
-            setCloud(false);
-          }}
+          onChange={(event) => setScope(event.target.value)}
         >
           <option value="all">整个画布</option>
           {selection && (
@@ -101,20 +97,10 @@ export function RunWorkflow({
                 ?.name || "服务未配置"}
         </p>
       ))}
-      {cloudNodes.length > 0 && (
-        <label className="check-label">
-          <input
-            type="checkbox"
-            checked={cloud}
-            onChange={(event) => setCloud(event.target.checked)}
-          />
-          允许本批次的 {cloudNodes.length} 个云端任务，可能产生供应商费用
-        </label>
-      )}
       {error && <p className="error">{error}</p>}
       <button
         className="primary full"
-        disabled={busy || !planned.length || (cloudNodes.length > 0 && !cloud)}
+        disabled={busy || !planned.length}
         onClick={async () => {
           setBusy(true);
           setError("");
@@ -122,7 +108,7 @@ export function RunWorkflow({
             await onRun({
               node_ids: scope === "all" ? undefined : [selection],
               include_descendants: scope === "branch",
-              allow_cloud: cloud,
+              allow_cloud: cloudNodes.length > 0,
             });
           } catch (reason: any) {
             setError(reason.message);
