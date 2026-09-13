@@ -10,6 +10,9 @@ from .adaptation import empty_adaptation_context, normalize_adaptation_context
 
 CONTEXT_SCHEMA_VERSION = 2
 SHARED_DOCUMENT_KEYS = ('filmBible', 'generationPolicy', 'style')
+PRODUCTION_ONLY_KEYS = SHARED_DOCUMENT_KEYS + (
+    'adaptationPlan', 'episodePlans', 'monetizationPlan',
+)
 
 
 def new_production_context(generation_policy=None):
@@ -60,7 +63,7 @@ def production_context_from_document(document, generation_policy=None):
 
 def episode_document_from_document(document):
     value = migrate_document(document)
-    for key in SHARED_DOCUMENT_KEYS:
+    for key in PRODUCTION_ONLY_KEYS:
         value.pop(key, None)
     return value
 

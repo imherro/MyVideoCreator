@@ -386,22 +386,32 @@ def validate_generated_script(value):
 
 def project_script_to_document(connection, project_id, document):
     row = connection.execute('SELECT * FROM episode_scripts WHERE project_id=?',(project_id,)).fetchone()
-    if not row or not row['body'].strip():
+    if not row:
         return document
     value = copy.deepcopy(document)
     metadata = json.loads(row['metadata'])
     node_id = metadata.get('projectionNodeId') or 'script-projection-' + project_id
     nodes = value.setdefault('nodes', [])
-    index = next((i for i, node in enumerate(nodes) if node.get('id') == node_id), None)
+    projections = [node for node in nodes if node.get('id') == node_id or node.get('data', {}).get('canonicalScriptProjection')]
+    existing = next((node for node in projections if node.get('id') == node_id), projections[0] if projections else None)
+    projection_ids = {node.get('id') for node in projections}
+    nodes[:] = [node for node in nodes if node not in projections]
+    if not row['body'].strip():
+        value['edges'] = [edge for edge in value.get('edges', [])
+            if edge.get('source') not in projection_ids and edge.get('target') not in projection_ids]
+        return value
     data = {
         'kind': 'text', 'label': '剧本（剧本工作区投影）', 'text': row['body'],
         'canonicalScriptProjection': True, 'scriptRevision': row['revision'],
         'scriptStatus': row['status'],
     }
-    if index is None:
-        nodes.append({'id': node_id, 'type': 'media', 'position': {'x': 80, 'y': 80}, 'data': data})
-    else:
-        nodes[index] = {**nodes[index], 'data': {**nodes[index].get('data', {}), **data}}
+    node = existing or {'id': node_id, 'type': 'media', 'position': {'x': 80, 'y': 80}, 'data': {}}
+    node = {**node, 'id': node_id, 'data': {**node.get('data', {}), **data}}
+    nodes.append(node)
+    removed_ids = projection_ids - {node_id}
+    if removed_ids:
+        value['edges'] = [edge for edge in value.get('edges', [])
+            if edge.get('source') not in removed_ids and edge.get('target') not in removed_ids]
     return value
 
 

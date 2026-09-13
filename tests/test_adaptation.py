@@ -181,6 +181,39 @@ def test_canonical_script_projects_to_canvas_and_canvas_edit_cannot_replace_it(a
     assert projection["data"]["text"] == payload["body"]
     assert client.get(f'/api/productions/{production["id"]}/episode-scripts/2').json()["body"] == payload["body"]
 
+    current_script = client.get(f'/api/productions/{production["id"]}/episode-scripts/2').json()
+    cleared = client.put(f'/api/productions/{production["id"]}/episode-scripts/2',json={
+        **payload, "revision": current_script["revision"], "body": "",
+    })
+    assert cleared.status_code == 200, cleared.text
+    cleared_project = client.get(f'/api/projects/{project_id}').json()
+    assert not any(item["data"].get("canonicalScriptProjection") for item in cleared_project["document"]["nodes"])
+    assert not any(item["data"].get("text") == payload["body"] for item in cleared_project["document"]["nodes"])
+
+
+def test_project_put_cannot_persist_a_second_copy_of_production_adaptation(adaptation_client):
+    client = adaptation_client
+    production, episode, _, adaptation = setup_production(client, count=2)
+    canonical = save_and_approve(client, production, adaptation)
+    project = client.get(f'/api/projects/{episode["id"]}').json()
+    project["document"]["adaptationPlan"] = {"forged": True}
+    project["document"]["episodePlans"] = [{"forged": True}]
+    project["document"]["monetizationPlan"] = {"forged": True}
+    saved = client.put(f'/api/projects/{episode["id"]}', json={
+        "name": project["name"], "revision": project["revision"],
+        "production_revision": project["production_revision"], "document": project["document"],
+    })
+    assert saved.status_code == 200, saved.text
+    reopened = client.get(f'/api/projects/{episode["id"]}').json()
+    assert all(key not in reopened["document"] for key in ("adaptationPlan", "episodePlans", "monetizationPlan"))
+    with s.db() as connection:
+        stored = json.loads(connection.execute('SELECT document FROM projects WHERE id=?',(episode["id"],)).fetchone()["document"])
+    assert all(key not in stored for key in ("adaptationPlan", "episodePlans", "monetizationPlan"))
+    current = client.get(f'/api/productions/{production["id"]}/adaptation').json()
+    assert current["adaptationPlan"] == canonical["adaptationPlan"]
+    assert current["episodePlans"] == canonical["episodePlans"]
+    assert current["monetizationPlan"] == canonical["monetizationPlan"]
+
 
 def test_source_edit_marks_approved_plan_and_derived_script_stale_without_ai_call(adaptation_client):
     client = adaptation_client
