@@ -1,8 +1,12 @@
 import json
 import sqlite3
+import pytest
 
 from backend import store as s
+from backend.generation_fingerprint import build_generation_fingerprint
+from backend.production_context import merge_migration_contexts
 from backend.project_schema import new_document
+from backend.reference_compiler import compile_shot_image_input
 
 
 def test_legacy_projects_are_wrapped_and_shared_context_is_extracted(monkeypatch, tmp_path):
@@ -89,18 +93,44 @@ def test_phase1a_multi_episode_context_migration_preserves_ids_and_history(monke
     database = data / 'studio.sqlite'
     first = new_document()
     second = new_document()
+    hero_card = {'id': 'hero', 'kind': 'character', 'name': '主角', 'currentVersionId': 'hero-v1'}
+    hero_version = {
+        'id': 'hero-v1', 'cardId': 'hero', 'version': 1, 'status': 'locked',
+        'spec': {'description': '固定蓝衣', 'attributes': []}, 'invariants': ['蓝衣不变'],
+        'references': [{'role': 'primary', 'assetId': 'asset-hero'}],
+    }
     first['filmBible']['visual'] = {
-        'cards': {'hero': {'id': 'hero', 'kind': 'character', 'name': '主角', 'currentVersionId': 'hero-v1'}},
-        'versions': {'hero-v1': {'id': 'hero-v1', 'cardId': 'hero', 'version': 1, 'status': 'locked'}},
+        'cards': {'hero': hero_card}, 'versions': {'hero-v1': hero_version},
+    }
+    station_card = {'id': 'station', 'kind': 'scene', 'name': '车站', 'currentVersionId': 'station-v1'}
+    station_version = {
+        'id': 'station-v1', 'cardId': 'station', 'version': 1, 'status': 'locked',
+        'spec': {'description': '水墨车站', 'attributes': []}, 'invariants': ['站台结构不变'],
+        'references': [{'role': 'primary', 'assetId': 'asset-station'}],
     }
     second['filmBible']['visual'] = {
-        'cards': {'station': {'id': 'station', 'kind': 'scene', 'name': '车站', 'currentVersionId': 'station-v1'}},
-        'versions': {'station-v1': {'id': 'station-v1', 'cardId': 'station', 'version': 1, 'status': 'draft'}},
+        'cards': {'hero': hero_card, 'station': station_card},
+        'versions': {'hero-v1': hero_version, 'station-v1': station_version},
     }
-    second['shots'] = [{'id': 'shot-2', 'uid': 'shot-2', 'assetBindings': {
+    second['style'] = '水墨动画'
+    second['generationPolicy']['image'] = {'providerId': 'image-provider', 'modelId': 'image-model'}
+    second['filmBible'].update({
+        'style': {'palette': '水墨'}, 'styleVersion': 4,
+        'story': {'theme': '归途'}, 'continuity': {'weather': '雨'},
+    })
+    second['shots'] = [{'id': 'shot-2', 'uid': 'shot-2', 'imageNode': 'image-node', 'assetBindings': {
         'characters': [{'role': '主角', 'versionId': 'hero-v1'}],
         'scene': {'versionId': 'station-v1'}, 'props': [],
     }}]
+    provider = [{'id': 'image-provider', 'kind': 'image', 'model': 'image-model', 'local': True}]
+    generation_input = {'provider': 'image-provider', 'model': 'image-model', 'prompt': '主角抵达车站'}
+    capabilities = lambda provider, model: {'image_reference': True, 'max_references': 8}
+    compiled_before = compile_shot_image_input(
+        second, 'image-node', 'image', generation_input, provider, capabilities,
+    )
+    fingerprint_before = build_generation_fingerprint(
+        second, second['shots'][0], 'image-provider', 'image-model', 1,
+    )
     encoded_first = s.dumps(first)
     encoded_second = s.dumps(second)
     historical = s.dumps({'legacySnapshot': True, 'filmBible': first['filmBible']})
@@ -134,7 +164,51 @@ def test_phase1a_multi_episode_context_migration_preserves_ids_and_history(monke
     assert production['revision'] == 1
     assert set(context['filmBible']['visual']['cards']) == {'hero', 'station'}
     assert set(context['filmBible']['visual']['versions']) == {'hero-v1', 'station-v1'}
+    assert context['style'] == '水墨动画'
+    assert context['generationPolicy']['image']['modelId'] == 'image-model'
+    assert context['filmBible']['style'] == {'palette': '水墨'}
+    assert context['filmBible']['styleVersion'] == 4
+    assert context['filmBible']['story'] == {'theme': '归途'}
+    assert context['filmBible']['continuity'] == {'weather': '雨'}
     assert [(row['id'], row['revision']) for row in episodes] == [('episode-1', 4), ('episode-2', 7)]
     assert json.loads(episodes[1]['document'])['shots'][0]['assetBindings']['characters'][0]['versionId'] == 'hero-v1'
     assert all('filmBible' not in json.loads(row['document']) for row in episodes)
     assert snapshot['document'] == historical
+    episode_document = json.loads(episodes[1]['document'])
+    assert compile_shot_image_input(
+        episode_document, 'image-node', 'image', generation_input, provider, capabilities,
+        production_context=context,
+    ) == compiled_before
+    assert build_generation_fingerprint(
+        episode_document, episode_document['shots'][0], 'image-provider', 'image-model', 1,
+        production_context=context,
+    ) == fingerprint_before
+
+
+def test_migration_merges_identical_custom_shared_context_and_rejects_conflicts():
+    custom = new_document()
+    custom['style'] = '定格动画'
+    custom['generationPolicy']['image'] = {'providerId': 'ark', 'modelId': 'seedream'}
+    custom['filmBible'].update({
+        'style': {'palette': '暖色'}, 'styleVersion': 3,
+        'story': {'theme': '成长'}, 'continuity': {'season': '秋'},
+    })
+    merged = merge_migration_contexts([new_document(), custom, json.loads(s.dumps(custom))])
+    assert merged['style'] == custom['style']
+    assert merged['generationPolicy'] == custom['generationPolicy']
+    for key in ('style', 'styleVersion', 'story', 'continuity'):
+        assert merged['filmBible'][key] == custom['filmBible'][key]
+
+    conflict_cases = [
+        ('style', lambda value: value.__setitem__('style', '另一风格')),
+        ('generationPolicy', lambda value: value['generationPolicy'].__setitem__('image', {'providerId': 'other', 'modelId': 'other'})),
+        ('filmBible.style', lambda value: value['filmBible'].__setitem__('style', {'palette': '冷色'})),
+        ('filmBible.styleVersion', lambda value: value['filmBible'].__setitem__('styleVersion', 9)),
+        ('filmBible.story', lambda value: value['filmBible'].__setitem__('story', {'theme': '复仇'})),
+        ('filmBible.continuity', lambda value: value['filmBible'].__setitem__('continuity', {'season': '冬'})),
+    ]
+    for label, mutate in conflict_cases:
+        other = json.loads(s.dumps(custom))
+        mutate(other)
+        with pytest.raises(ValueError, match=label.replace('.', r'\.')):
+            merge_migration_contexts([custom, other])

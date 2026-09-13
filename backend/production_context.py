@@ -69,12 +69,11 @@ def compose_project_document(episode_document, production_context):
 
 
 def merge_migration_contexts(documents, generation_policy=None):
-    """Merge Phase 1A Episode contexts while preserving every visual ID.
+    """Merge Phase 1A Episode contexts without silently choosing one Episode.
 
-    Phase 1A normally has one populated Episode followed by blank Episodes.
-    If separate Episodes contain distinct visual IDs, retain their union. An ID
-    collision with different immutable content aborts migration rather than
-    silently orphaning an existing Shot binding.
+    Blank/default Episodes do not conflict with an explicitly customized value.
+    Distinct Visual IDs are unioned. Every conflicting non-default shared value
+    aborts migration so the source documents remain available for manual repair.
     """
     contexts = [
         production_context_from_document(document, generation_policy)
@@ -82,9 +81,38 @@ def merge_migration_contexts(documents, generation_policy=None):
     ]
     if not contexts:
         return new_production_context(generation_policy)
-    merged = copy.deepcopy(contexts[0])
+    default = new_production_context(generation_policy)
+    merged = copy.deepcopy(default)
+
+    def resolve(label, values, default_value):
+        custom = [value for value in values if value != default_value]
+        if not custom:
+            return copy.deepcopy(default_value)
+        candidate = custom[0]
+        if any(value != candidate for value in custom[1:]):
+            raise ValueError(f'Production 共享资料迁移发现冲突：{label}')
+        return copy.deepcopy(candidate)
+
+    merged['style'] = resolve(
+        'style', [context['style'] for context in contexts], default['style'],
+    )
+    merged['generationPolicy'] = resolve(
+        'generationPolicy',
+        [context['generationPolicy'] for context in contexts],
+        default['generationPolicy'],
+    )
+    film_keys = set(default['filmBible'])
+    for context in contexts:
+        film_keys.update(context['filmBible'])
+    for key in sorted(film_keys - {'visual'}):
+        baseline = default['filmBible'].get(key)
+        merged['filmBible'][key] = resolve(
+            f'filmBible.{key}',
+            [context['filmBible'].get(key, baseline) for context in contexts],
+            baseline,
+        )
     target_visual = merged['filmBible']['visual']
-    for context in contexts[1:]:
+    for context in contexts:
         visual = context['filmBible']['visual']
         for collection in ('cards', 'versions'):
             target = target_visual[collection]

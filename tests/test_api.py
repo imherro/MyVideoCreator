@@ -235,7 +235,10 @@ def test_phase5_roundtrip_preserves_versions_binding_fingerprint_stale_and_media
         'provenance':{'forkedFromVersionId':'hero-v1'},
     }
     doc['filmBible']['visual']['cards']['hero']['currentVersionId']='hero-v2'
-    second=c.put(f'/api/projects/{p["id"]}',json={'name':p['name'],'revision':first.json()['revision'],'document':doc})
+    second=c.put(f'/api/projects/{p["id"]}',json={
+        'name':p['name'],'revision':first.json()['revision'],
+        'production_revision':first.json()['production_revision'],'document':doc,
+    })
     assert second.status_code==200,second.text
     after_fork=c.get(f'/api/projects/{p["id"]}').json()['document']
     assert [shot['assetBindings']['characters'][0]['versionId'] for shot in after_fork['shots']]==['hero-v1','hero-v1']
@@ -244,11 +247,17 @@ def test_phase5_roundtrip_preserves_versions_binding_fingerprint_stale_and_media
     # Confirm v2, then explicitly upgrade only Shot A and mark its old result stale.
     doc=copy.deepcopy(after_fork);v2=doc['filmBible']['visual']['versions']['hero-v2']
     v2['status']='locked';v2['references']=[{'role':'primary','assetId':media['id']}];v2['provenance']['lockedAt']=3
-    third=c.put(f'/api/projects/{p["id"]}',json={'name':p['name'],'revision':second.json()['revision'],'document':doc})
+    third=c.put(f'/api/projects/{p["id"]}',json={
+        'name':p['name'],'revision':second.json()['revision'],
+        'production_revision':second.json()['production_revision'],'document':doc,
+    })
     assert third.status_code==200,third.text
     doc=c.get(f'/api/projects/{p["id"]}').json()['document']
     doc['shots'][0]['assetBindings']['characters'][0]['versionId']='hero-v2'
-    fourth=c.put(f'/api/projects/{p["id"]}',json={'name':p['name'],'revision':third.json()['revision'],'document':doc})
+    fourth=c.put(f'/api/projects/{p["id"]}',json={
+        'name':p['name'],'revision':third.json()['revision'],
+        'production_revision':third.json()['production_revision'],'document':doc,
+    })
     assert fourth.status_code==200,fourth.text
     restored=c.get(f'/api/projects/{p["id"]}').json()['document']
     assert restored['filmBible']['visual']['versions']['hero-v1']['spec']['description']=='灰色风衣'
@@ -263,17 +272,18 @@ def test_phase5_roundtrip_preserves_versions_binding_fingerprint_stale_and_media
 
     # The HTTP save boundary blocks direct tampering and hard deletion.
     mutation=copy.deepcopy(restored);mutation['filmBible']['visual']['versions']['hero-v1']['spec']['description']='覆盖历史'
-    assert c.put(f'/api/projects/{p["id"]}',json={'name':p['name'],'revision':fourth.json()['revision'],'document':mutation}).status_code==400
+    assert c.put(f'/api/projects/{p["id"]}',json={'name':p['name'],'revision':fourth.json()['revision'],'production_revision':fourth.json()['production_revision'],'document':mutation}).status_code==400
     deletion=copy.deepcopy(restored);del deletion['filmBible']['visual']['versions']['hero-v1']
-    assert c.put(f'/api/projects/{p["id"]}',json={'name':p['name'],'revision':fourth.json()['revision'],'document':deletion}).status_code==400
+    assert c.put(f'/api/projects/{p["id"]}',json={'name':p['name'],'revision':fourth.json()['revision'],'production_revision':fourth.json()['production_revision'],'document':deletion}).status_code==400
     deprecated=copy.deepcopy(restored);deprecated['filmBible']['visual']['versions']['hero-v1']['status']='deprecated'
-    archived=c.put(f'/api/projects/{p["id"]}',json={'name':p['name'],'revision':fourth.json()['revision'],'document':deprecated})
+    archived=c.put(f'/api/projects/{p["id"]}',json={'name':p['name'],'revision':fourth.json()['revision'],'production_revision':fourth.json()['production_revision'],'document':deprecated})
     assert archived.status_code==200,archived.text
     assert c.get(f'/api/projects/{p["id"]}').json()['document']['shots'][1]['assetBindings']['characters'][0]['versionId']=='hero-v1'
     assert len(c.get(f'/api/projects/{p["id"]}/jobs').json())==before_jobs
     assert c.get(f'/api/assets/{media["id"]}/file').status_code==200
 
 def test_visual_reference_queue_validates_server_capability_and_persists_ownership(authenticated,monkeypatch):
+    import copy
     import io
     from PIL import Image
     import backend.visual_references as visual_references
@@ -343,6 +353,13 @@ def test_visual_reference_queue_validates_server_capability_and_persists_ownersh
         restored=c.get(f'/api/projects/{p["id"]}').json()
         assert restored['revision']==job['project_revision']
         assert restored['document']['filmBible']['visual']['versions'][state_version]['provenance']['referenceGeneration']==generation
+        stale_without_production_token=copy.deepcopy(doc)
+        stale_without_production_token['style']='不应覆盖的新风格'
+        bypass=c.put(f'/api/projects/{p["id"]}',json={
+            'name':p['name'],'revision':job['project_revision'],
+            'document':stale_without_production_token,
+        })
+        assert bypass.status_code==409
         assert c.get('/api/jobs/'+job['id']).json()['input']['asset_ids']==[parent['id']]
         c.post('/api/jobs/'+job['id']+'/cancel')
     finally:

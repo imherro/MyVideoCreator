@@ -298,7 +298,11 @@ def save_project(pid:str,body:ProjectSave):
         ).fetchone()['count']
         compatible_production_revision = (
             production_row['revision']
-            if body.production_revision is None and episode_count == 1
+            if (
+                body.production_revision is None
+                and episode_count == 1
+                and production_row['revision'] == 1
+            )
             else body.production_revision
         )
         if shared_changed and compatible_production_revision!=production_row['revision']:
