@@ -1,4 +1,4 @@
-# 映序 · MyVideoCreator
+# 安影 · MyVideoCreator
 
 个人 AI 视频创作 Web 工作室。浏览器编辑项目，有显卡的主机运行模型与持久化队列。团队协作不在当前范围内。
 

@@ -8,7 +8,7 @@ New-Item -ItemType Directory -Path $studioLogs -Force | Out-Null
 $studioUrl="http://127.0.0.1:$Port"
 try {
     $studioHealth=Invoke-RestMethod "$studioUrl/api/health" -TimeoutSec 2
-    if($studioHealth.app -eq '映序'){
+    if($studioHealth.app -eq '安影'){
         if(-not $NoBrowser){Start-Process $studioUrl}
         Write-Host "Studio is already running: $studioUrl"
         exit 0

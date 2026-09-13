@@ -29,7 +29,7 @@ async def lifespan(app):
     worker.stop()
     runtime.unload()
 
-app = FastAPI(title='映序 AI 视频工作室',lifespan=lifespan,docs_url=None,redoc_url=None)
+app = FastAPI(title='安影 AI 视频工作室',lifespan=lifespan,docs_url=None,redoc_url=None)
 PUBLIC = {'/api/health','/api/auth/status','/api/auth/setup','/api/auth/login'}
 
 def local(request):
@@ -61,7 +61,7 @@ async def value_error(request, exc):
 
 @app.get('/api/health')
 def health():
-    return {'status':'ok','app':'映序','version':'0.1.0'}
+    return {'status':'ok','app':'安影','version':'0.1.0'}
 
 @app.get('/api/auth/status')
 def auth_status(request: Request):

@@ -46,6 +46,7 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Play,
   Download,
   Upload,
@@ -401,6 +402,22 @@ function MediaNode({ data, selected }: { data: Any; selected?: boolean }) {
 }
 const nodeTypes = { media: MediaNode, visualAsset: VisualAssetNode };
 
+function AnYingMark({ size = 25 }: { size?: number }) {
+  return (
+    <svg
+      className="anying-mark"
+      width={size}
+      height={size}
+      viewBox="0 0 32 32"
+      aria-hidden="true"
+    >
+      <rect x="2.5" y="3.5" width="27" height="25" rx="7" />
+      <path d="M11 10.5v11l10-5.5-10-5.5Z" />
+      <path className="anying-mark-glint" d="M22.5 7.5h3v3" />
+    </svg>
+  );
+}
+
 function Auth({ onLogin }: { onLogin: () => void }) {
   const [status, setStatus] = useState<Any>();
   const [password, setPassword] = useState("");
@@ -431,8 +448,8 @@ function Auth({ onLogin }: { onLogin: () => void }) {
     <div className="auth-page">
       <div className="auth-art">
         <div className="brand">
-          <Clapperboard />
-          映序 <small>STUDIO</small>
+          <AnYingMark size={29} />
+          安影 <small>STUDIO</small>
         </div>
         <div className="auth-lines">
           <span>01 / STORY</span>
@@ -775,7 +792,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       );
       const link = document.createElement("a");
       link.href = url;
-      link.download = `映序-冲突草稿-${Date.now()}.json`;
+      link.download = `安影-冲突草稿-${Date.now()}.json`;
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 10000);
       revision.current = latest.revision;
@@ -1703,16 +1720,32 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       <header className="topbar">
         <button
           className="brand"
-          onClick={() => setPanel(panel === "projects" ? null : "projects")}
+          onClick={() => {
+            setPanel(null);
+            setView("canvas");
+          }}
+          aria-label="返回安影画布"
         >
-          <Clapperboard size={23} />
-          <strong>映序</strong>
+          <AnYingMark />
+          <strong>安影</strong>
           <span>STUDIO</span>
         </button>
         <span className="divider" />
-        <button className="project-picker" onClick={() => setPanel("projects")}>
+        <button
+          className={panel === "projects" ? "project-menu active" : "project-menu"}
+          onClick={() => setPanel(panel === "projects" ? null : "projects")}
+        >
+          <FolderOpen size={15} />
+          项目
+          <ChevronDown size={14} />
+        </button>
+        <button
+          className={panel === "projectInfo" ? "project-picker active" : "project-picker"}
+          onClick={() => setPanel(panel === "projectInfo" ? null : "projectInfo")}
+          title="查看和修改当前项目信息"
+        >
           {project.name}
-          <ChevronRight size={15} />
+          <ChevronDown size={15} />
         </button>
         <span
           className={"save-status " + (saved === "保存失败" ? "danger" : "")}
@@ -2924,7 +2957,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         <div
           className={
             "side-panel " +
-            (["settings", "assets", "jobs", "characters", "filmBible"].includes(
+            (["settings", "assets", "jobs", "characters", "filmBible", "projectInfo"].includes(
               panel,
             )
               ? panel === "filmBible"
@@ -2938,7 +2971,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               {
                 {
                   add: "添加节点",
-                  projects: "我的项目",
+                  projects: "项目",
+                  projectInfo: "当前项目信息",
                   assets: "素材库",
                   jobs: "生成任务",
                   settings: "模型与工作室",
@@ -3139,6 +3173,52 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             )}
             {panel === "projects" && (
               <>
+                <p className="muted">新建项目或切换工作区。当前项目的资料和生成策略请点击顶部项目名称修改。</p>
+                <button
+                  className="primary full"
+                  onClick={() => {
+                    const name = window.prompt(
+                      "请输入新项目名称。创建后会直接进入空白画布；当前项目会先保存。",
+                      "未命名短片",
+                    );
+                    if (name !== null) createProject(name).catch(report);
+                  }}
+                >
+                  <Plus size={16} />
+                  新建项目
+                </button>
+                <hr />
+                <h3>项目列表</h3>
+                {projects.map((p) => (
+                  <button
+                    className={
+                      "project-row " + (p.id === project.id ? "active" : "")
+                    }
+                    key={p.id}
+                    onClick={() => openProject(p.id).catch(report)}
+                  >
+                    <FolderOpen size={18} />
+                    <div>
+                      <b>{p.id === project.id ? project.name : p.name}</b>
+                      <small>
+                        {p.id === project.id ? "当前项目 · " : ""}
+                        {new Date(p.updated * 1000).toLocaleDateString()}
+                      </small>
+                    </div>
+                    <ChevronRight size={16} />
+                  </button>
+                ))}
+              </>
+            )}
+            {panel === "projectInfo" && (
+              <>
+                <div className="current-project-card">
+                  <AnYingMark size={30} />
+                  <div>
+                    <small>当前项目</small>
+                    <b>{project.name}</b>
+                  </div>
+                </div>
                 {sessionStorage.getItem("yingxu-conflict-" + project.id) && (
                   <div className="error">
                     <p>
@@ -3164,30 +3244,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                     </button>
                   </div>
                 )}
-                <button
-                  className="primary full"
-                  onClick={() => {
-                    const name = window.prompt(
-                      "请输入新项目名称。创建后会直接进入空白画布；当前项目会先保存。",
-                      "未命名短片",
-                    );
-                    if (name !== null) createProject(name).catch(report);
-                  }}
-                >
-                  <Plus size={16} />
-                  新建项目
-                </button>
-                {canDeleteCurrentProject && (
-                  <button
-                    className="full"
-                    onClick={() => deleteCurrentProject().catch(report)}
-                  >
-                    <Trash2 size={16} />
-                    删除空项目
-                  </button>
-                )}
                 <label>
-                  当前项目名称（修改这里只会重命名）
+                  项目名称
                   <input
                     value={project.name}
                     onChange={(e) => {
@@ -3226,6 +3284,20 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                     />
                   </label>
                 </div>
+                <div className="project-bible-heading">
+                  <div>
+                    <span className="eyebrow">PROJECT BIBLE</span>
+                    <h3>项目 Bible</h3>
+                  </div>
+                  <button
+                    className="quiet"
+                    onClick={() => setPanel("filmBible")}
+                  >
+                    <BookOpen size={15} />
+                    视觉圣经 {Object.keys(visualBibleOf(doc).cards).length || ""}
+                    <ChevronRight size={14} />
+                  </button>
+                </div>
                 <label>
                   视觉风格
                   <input
@@ -3252,25 +3324,15 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                     update((d) => ({ ...d, generationPolicy }))
                   }
                 />
-                <hr />
-                {projects.map((p) => (
+                {canDeleteCurrentProject && (
                   <button
-                    className={
-                      "project-row " + (p.id === project.id ? "active" : "")
-                    }
-                    key={p.id}
-                    onClick={() => openProject(p.id).catch(report)}
+                    className="full danger-button"
+                    onClick={() => deleteCurrentProject().catch(report)}
                   >
-                    <Clapperboard size={19} />
-                    <div>
-                      <b>{p.id === project.id ? project.name : p.name}</b>
-                      <small>
-                        {new Date(p.updated * 1000).toLocaleDateString()}
-                      </small>
-                    </div>
-                    <ChevronRight size={16} />
+                    <Trash2 size={16} />
+                    删除空项目
                   </button>
-                ))}
+                )}
               </>
             )}
             {panel === "assets" && (
