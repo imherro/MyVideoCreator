@@ -68,7 +68,6 @@ import {
   BookOpen,
   ArrowUpRight,
   GripVertical,
-  Volume2,
   Sparkles,
   History,
 } from "lucide-react";
@@ -126,7 +125,14 @@ import {
   VisualBibleGraphProvider,
 } from "./filmBible/VisualAssetNode";
 import { visualBibleOf } from "./filmBible/types";
-import { StoryboardGrid } from "./StoryboardGrid";
+import { StoryboardWorkspace } from "./pages/StoryboardWorkspace";
+import {
+  createStoryboardShot,
+  moveStoryboardShot,
+  selectedShotImageNodeIds,
+  shotIdentity,
+  updateStoryboardShot,
+} from "./storyboard";
 import { JobProgress } from "./JobProgress";
 import { RunWorkflow } from "./RunWorkflow";
 import { PanoramaViewer } from "./PanoramaViewer";
@@ -134,7 +140,7 @@ import { defaultStage } from "./directorScene";
 const DirectorStage = lazy(() =>
   import("./DirectorStage").then((m) => ({ default: m.DirectorStage })),
 );
-import { updateShot, framesForDuration } from "./shotSync";
+import { framesForDuration } from "./shotSync";
 import { TimelinePreview } from "./TimelinePreview";
 import type { Clip } from "./timeline";
 import type { EditorDocument } from "./editor/editorDocument";
@@ -1509,6 +1515,72 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setTimeout(() => fitView({ padding: 0.2 }), 80);
     setNotice("已补齐分镜生成节点，检查提示词后可运行画布");
   }
+  async function generateStoryboardImages(shotUids: string[]) {
+    const snapshot = current.current;
+    if (!snapshot.project || !snapshot.doc || busy) return;
+    const selected = new Set(shotUids);
+    const targetShots = snapshot.doc.shots.filter((shot) =>
+      selected.has(shotIdentity(shot)),
+    );
+    if (!targetShots.length) throw new Error("请先选择需要生成的镜头");
+    const prepared = deriveManagedGraph(
+      ensureShotNodes(
+        snapshot.doc,
+        config.providers,
+        system.models,
+        id,
+        targetShots.map((shot) => shot.id),
+        storyboardContextId(snapshot.doc),
+      ),
+    ) as Doc;
+    const nodeIds = selectedShotImageNodeIds(prepared, shotUids);
+    if (nodeIds.length !== targetShots.length)
+      throw new Error("部分镜头缺少分镜图生成节点");
+    for (const nodeId of nodeIds) {
+      const imageNode = prepared.nodes.find((item) => item.id === nodeId);
+      if (!String(imageNode?.data?.prompt || "").trim())
+        throw new Error("所选镜头存在空的 Image Prompt，请先填写后再生成");
+      const provider = config.providers.find(
+        (item: Any) => item.id === (imageNode?.data?.provider || "local"),
+      );
+      if (!provider || imageNode?.data?.provider === "local")
+        throw new Error("所选镜头尚未选择可用的图片生成服务");
+    }
+    current.current = { project: snapshot.project, doc: prepared };
+    setDoc(prepared);
+    dirty.current = true;
+    setSaved("未保存");
+    setBusy(true);
+    setError("");
+    try {
+      await save();
+      if (dirty.current) throw new Error("请先解决保存冲突再生成分镜图");
+      const allowCloud = nodeIds.some((nodeId) => {
+        const node = prepared.nodes.find((item) => item.id === nodeId);
+        const provider = config.providers.find(
+          (item: Any) => item.id === node?.data?.provider,
+        );
+        return provider && !provider.local;
+      });
+      const result = await api(
+        `/projects/${snapshot.project.id}/run`,
+        send("POST", {
+          submission_id: id(),
+          node_ids: nodeIds,
+          exact: true,
+          allow_cloud: allowCloud,
+        }),
+      );
+      await refresh(snapshot.project.id);
+      setPanel("jobs");
+      setNotice(`已提交 ${result.count} 个所选分镜图任务`);
+    } catch (reason) {
+      report(reason);
+      throw reason;
+    } finally {
+      setBusy(false);
+    }
+  }
   async function uploadFiles(files: FileList | null, category = uploadCategory) {
     if (!files || !project) return;
     setBusy(true);
@@ -2068,6 +2140,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               <button className={view === "director" ? "active" : ""} onClick={() => setView("director")}>
                 3D 导演台
               </button>
+              <button onClick={() => activateWorkflowStage("canvas")}>
+                高级画布<ArrowUpRight size={13} />
+              </button>
             </div>
           ) : workflowStage === "editor" ? (
             <div className="segmented" aria-label="剪辑视图">
@@ -2229,6 +2304,79 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             {...filmBiblePanelProps}
             productionName={currentProduction?.name || project.name}
             usage={visualUsage}
+          />
+        ) : workflowStage === "storyboard" && (view === "shots" || view === "grid") ? (
+          <StoryboardWorkspace
+            mode={view === "grid" ? "grid" : "table"}
+            document={doc}
+            assets={assets}
+            jobs={jobs}
+            busy={busy}
+            onPatch={(uid, patch) =>
+              update((document) => updateStoryboardShot(document, uid, patch))
+            }
+            onMove={(uid, offset) =>
+              update((document) => moveStoryboardShot(document, uid, offset))
+            }
+            onCreate={() => {
+              update((document) => createStoryboardShot(document, id));
+              setNotice("已新建空镜头；填写内容后再显式生成分镜图");
+            }}
+            onCreatePlan={() => newNode("storyboard", doc.brief)}
+            onEnsureAll={allShotNodes}
+            onAppendTimeline={appendShotTimeline}
+            onBind={(uid, versionId) => {
+              update((document) => {
+                const shot = document.shots.find((item) => shotIdentity(item) === uid);
+                const next = bindVisualVersion(document, uid, versionId);
+                return invalidate(next, [
+                  shot?.imageNode || shot?.pipeline?.imageNodeId,
+                  shot?.videoNode || shot?.pipeline?.videoNodeId,
+                ].filter(Boolean));
+              });
+              setNotice("视觉版本已绑定到镜头");
+            }}
+            onUnbind={(uid, versionId) => {
+              update((document) => {
+                const shot = document.shots.find((item) => shotIdentity(item) === uid);
+                const next = unbindVisualVersion(document, uid, versionId);
+                return invalidate(next, [
+                  shot?.imageNode || shot?.pipeline?.imageNodeId,
+                  shot?.videoNode || shot?.pipeline?.videoNodeId,
+                ].filter(Boolean));
+              });
+              setNotice("视觉版本已从镜头解除");
+            }}
+            onUpgrade={(uid, cardId, versionId) => {
+              update((document) =>
+                upgradeVisualBindings(document, cardId, versionId, {
+                  shotUids: [uid],
+                }),
+              );
+              setNotice("已显式升级当前镜头的视觉版本；旧画面保留并标记待更新");
+            }}
+            onGenerate={generateStoryboardImages}
+            onOpenCanvas={(shot, index) => {
+              if (shot.imageNode || shot.pipeline?.imageNodeId) {
+                setSelected(shot.imageNode || shot.pipeline.imageNodeId);
+                activateWorkflowStage("canvas");
+              } else shotNodes(shot, index);
+            }}
+            onPreview={setPreview}
+            onExport={async (columns, page) => {
+              await save();
+              if (dirty.current) throw new Error("请先解决保存冲突");
+              const response = await fetch(
+                `/api/projects/${project.id}/storyboard-sheet?columns=${columns}&page=${page}`,
+              );
+              if (!response.ok) throw new Error("分镜图板导出失败");
+              const url = URL.createObjectURL(await response.blob());
+              const link = document.createElement("a");
+              link.href = url;
+              link.download = `storyboard-${page}.png`;
+              link.click();
+              setTimeout(() => URL.revokeObjectURL(url), 5000);
+            }}
           />
         ) : view === "editor" ? (
           <Suspense fallback={<div className="loading">加载剪辑工作区…</div>}>
@@ -2457,157 +2605,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               }}
             />
           </Suspense>
-        ) : view === "grid" ? (
-          <StoryboardGrid
-            shots={doc.shots}
-            nodes={doc.nodes}
-            assets={assets}
-            onOpen={(shot, index) => {
-              if (shot.imageNode) {
-                setSelected(shot.imageNode);
-                activateWorkflowStage("canvas");
-              } else shotNodes(shot, index);
-            }}
-            onExport={async (columns, page) => {
-              await save();
-              if (dirty.current) throw new Error("请先解决保存冲突");
-              const response = await fetch(
-                `/api/projects/${project.id}/storyboard-sheet?columns=${columns}&page=${page}`,
-              );
-              if (!response.ok) throw new Error("分镜图板导出失败");
-              const url = URL.createObjectURL(await response.blob());
-              const link = document.createElement("a");
-              link.href = url;
-              link.download = `storyboard-${page}.png`;
-              link.click();
-              setTimeout(() => URL.revokeObjectURL(url), 5000);
-            }}
-          />
-        ) : (
-          <section className="shot-view">
-            <div className="section-title">
-              <div>
-                <span className="eyebrow">STORYBOARD</span>
-                <h2>逐镜构建你的故事</h2>
-              </div>
-              {doc.shots.length > 0 && (
-                <>
-                  <button onClick={allShotNodes}>建立全部生成节点</button>
-                  <button onClick={appendShotTimeline}>
-                    按分镜追加到时间线
-                  </button>
-                </>
-              )}
-              <button onClick={() => newNode("storyboard", doc.brief)}>
-                <Plus size={16} />
-                创建分镜规划
-              </button>
-            </div>
-            {!doc.shots.length ? (
-              <div className="empty-state">
-                <Layers />
-                <h3>还没有分镜</h3>
-                <p>生成剧本后，在分镜规划节点中拆解镜头。</p>
-                <button
-                  className="primary"
-                  onClick={() => newNode("storyboard", doc.brief)}
-                >
-                  开始分镜规划
-                </button>
-              </div>
-            ) : (
-              doc.shots.map((shot, index) => (
-                <article className="shot-card" key={shot.id}>
-                  <div className="shot-number">
-                    {String(index + 1).padStart(2, "0")}
-                    <span>SHOT</span>
-                  </div>
-                  <div className="shot-details">
-                    <div className="shot-top">
-                      <b>{shot.scene || "未命名场景"}</b>
-                      <label>
-                        <input
-                          type="number"
-                          value={shot.duration}
-                          min="1"
-                          max="30"
-                          onChange={(e) =>
-                            update((d) =>
-                              updateShot(d, shot.id, {
-                                duration: Number(e.target.value),
-                              }),
-                            )
-                          }
-                        />{" "}
-                        秒
-                      </label>
-                    </div>
-                    <textarea
-                      value={shot.action}
-                      onChange={(e) =>
-                        update((d) =>
-                          updateShot(d, shot.id, { action: e.target.value }),
-                        )
-                      }
-                    />
-                    <div className="shot-meta">
-                      <span>{shot.camera}</span>
-                      <span>
-                        <Volume2 size={13} />
-                        {shot.audio || "无对白"}
-                      </span>
-                    </div>
-                    {shot.prompts_need_review && (
-                      <p className="danger">
-                        镜头动作已修改，请核对下方图像和视频提示词。
-                        <button
-                          onClick={() =>
-                            update((d) =>
-                              updateShot(d, shot.id, {
-                                prompts_need_review: false,
-                              }),
-                            )
-                          }
-                        >
-                          已核对两项提示词
-                        </button>
-                      </p>
-                    )}
-                    <details>
-                      <summary>编辑生成提示词（同步到已有节点）</summary>
-                      {["image_prompt", "video_prompt"].map((field) => (
-                        <label key={field}>
-                          {field === "image_prompt" ? "图像" : "视频"}提示词
-                          <textarea
-                            value={shot[field]}
-                            onChange={(e) =>
-                              update((d) =>
-                                updateShot(d, shot.id, {
-                                  [field]: e.target.value,
-                                }),
-                              )
-                            }
-                          />
-                        </label>
-                      ))}
-                    </details>
-                  </div>
-                  <button
-                    className="quiet"
-                    onClick={() =>
-                      doc.nodes.some((n) => n.id === shot.imageNode)
-                        ? (setSelected(shot.imageNode), activateWorkflowStage("canvas"))
-                        : shotNodes(shot, index)
-                    }
-                  >
-                    {shot.imageNode ? "前往画布" : "建立生成节点"}
-                    <ArrowUpRight size={15} />
-                  </button>
-                </article>
-              ))
-            )}
-          </section>
-        )}
+        ) : null}
         {view !== "editor" && timelineOpen && (
           <section className="timeline">
             <div className="timeline-header">

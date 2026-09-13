@@ -10,15 +10,25 @@ export function framesForDuration(model:string,duration:number,caps:Value={}){
 }
 export function updateShot<T extends {shots:Value[];nodes:Node[];edges:Edge[]}>(document:T,id:string,patch:Value):T{
  const shot=document.shots.find(s=>s.id===id);if(!shot)return document;
+ const imageNodeId=shot.imageNode||shot.pipeline?.imageNodeId;
+ const videoNodeId=shot.videoNode||shot.pipeline?.videoNodeId;
  let next={...document,shots:document.shots.map(s=>s.id===id?{...s,...patch}:s)};
- if('image_prompt' in patch&&shot.imageNode)next=patchNode(next,shot.imageNode,{prompt:patch.image_prompt});
- if('video_prompt' in patch&&shot.videoNode)next=patchNode(next,shot.videoNode,{prompt:patch.video_prompt});
- if('duration' in patch&&shot.videoNode){
-  const node=next.nodes.find(n=>n.id===shot.videoNode);
+ if('image_prompt' in patch&&imageNodeId)next=patchNode(next,imageNodeId,{prompt:patch.image_prompt});
+ if('video_prompt' in patch&&videoNodeId)next=patchNode(next,videoNodeId,{prompt:patch.video_prompt});
+ if('duration' in patch&&videoNodeId){
+  const node=next.nodes.find(n=>n.id===videoNodeId);
   if(node)next=patchNode(next,node.id,{frames:framesForDuration(String(node.data.model||''),patch.duration,node.data.model_capabilities as Value||{})});
  }
- if('action' in patch&&patch.action!==shot.action){
-  next=invalidate(next,[shot.imageNode,shot.videoNode].filter(Boolean));
+ const semanticChanged=['scene','characters','action','emotion','camera'].some(
+  field=>field in patch&&JSON.stringify(patch[field])!==JSON.stringify(shot[field])
+ );
+ if(semanticChanged){
+  next=invalidate(next,[imageNodeId,videoNodeId].filter(Boolean));
+  next={...next,shots:next.shots.map(s=>s.id===id?{...s,prompts_need_review:true}:s)};
+ }
+ const audioChanged='audio' in patch&&patch.audio!==shot.audio;
+ if(audioChanged){
+  next=invalidate(next,[videoNodeId].filter(Boolean));
   next={...next,shots:next.shots.map(s=>s.id===id?{...s,prompts_need_review:true}:s)};
  }
  return next;
