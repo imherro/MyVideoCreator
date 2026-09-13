@@ -190,6 +190,20 @@ def test_canonical_script_projects_to_canvas_and_canvas_edit_cannot_replace_it(a
     assert not any(item["data"].get("canonicalScriptProjection") for item in cleared_project["document"]["nodes"])
     assert not any(item["data"].get("text") == payload["body"] for item in cleared_project["document"]["nodes"])
 
+    stale_canvas = copy.deepcopy(cleared_project["document"])
+    stale_canvas["nodes"].append({
+        "id": node["id"], "type": "media", "position": {"x": 80, "y": 80},
+        "data": {"kind": "text", "text": payload["body"], "canonicalScriptProjection": True},
+    })
+    stale_put = client.put(f'/api/projects/{project_id}',json={
+        "name": cleared_project["name"], "revision": cleared_project["revision"],
+        "production_revision": cleared_project["production_revision"], "document": stale_canvas,
+    })
+    assert stale_put.status_code == 200, stale_put.text
+    assert client.get(f'/api/productions/{production["id"]}/episode-scripts/2').json()["body"] == ""
+    after_stale_put = client.get(f'/api/projects/{project_id}').json()
+    assert not any(item["data"].get("text") == payload["body"] for item in after_stale_put["document"]["nodes"])
+
 
 def test_project_put_cannot_persist_a_second_copy_of_production_adaptation(adaptation_client):
     client = adaptation_client

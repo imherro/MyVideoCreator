@@ -392,7 +392,9 @@ def project_script_to_document(connection, project_id, document):
     metadata = json.loads(row['metadata'])
     node_id = metadata.get('projectionNodeId') or 'script-projection-' + project_id
     nodes = value.setdefault('nodes', [])
-    projections = [node for node in nodes if node.get('id') == node_id or node.get('data', {}).get('canonicalScriptProjection')]
+    projections = [node for node in nodes if node.get('id') == node_id or (
+        isinstance(node.get('data'), dict) and node['data'].get('canonicalScriptProjection')
+    )]
     existing = next((node for node in projections if node.get('id') == node_id), projections[0] if projections else None)
     projection_ids = {node.get('id') for node in projections}
     nodes[:] = [node for node in nodes if node not in projections]
