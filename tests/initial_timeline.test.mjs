@@ -58,6 +58,22 @@ test("initial edit preserves video original audio and adds configured looping mu
   assert.equal(plan.timeline.tracks[1].elements[0].e, 5);
 });
 
+test("initial edit accepts historical shots that only store pipeline video node ids", () => {
+  const plan = planInitialTimeline(
+    {
+      shots: [{ uid: "shot-pipeline", pipeline: { videoNodeId: "video-pipeline" }, duration: 2 }],
+      nodes: [{ id: "video-pipeline", data: { assetId: "asset-pipeline" } }],
+      assets: [{ id: "asset-pipeline", name: "历史镜头", kind: "video", url: "/history", metadata: { duration: 2 } }],
+      resolution: { width: 1280, height: 720 },
+    },
+    () => "pipeline",
+  );
+  assert.equal(plan.clipCount, 1);
+  assert.deepEqual(plan.issues, []);
+  assert.equal(plan.timeline.tracks[0].elements[0].metadata.nodeId, "video-pipeline");
+  assert.equal(plan.timeline.tracks[0].elements[0].metadata.assetId, "asset-pipeline");
+});
+
 test("initial edit rejects missing, stale, and overlong shot media", () => {
   const assets = [
     { id: "video", name: "镜头", kind: "video", url: "/v", metadata: { duration: 4 } },

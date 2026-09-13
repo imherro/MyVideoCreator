@@ -68,6 +68,28 @@ test("persisted asset ids rebind stale media URLs to the current project endpoin
   assert.equal(timeline.assets.a1.id, "a1");
 });
 
+test("a regenerated shot asset does not replace an existing timeline clip reference", () => {
+  const timeline = attachAssetReferences(
+    {
+      version: 2,
+      tracks: [{ id: "v1", name: "V1", elements: [{
+        id: "clip-1", type: "video", s: 0, e: 2,
+        props: { src: "/api/assets/old/file", srcAssetId: "old" },
+        metadata: { assetId: "old", shotId: "shot-1" },
+      }] }],
+    },
+    [
+      { id: "old", name: "旧版本", kind: "video", url: "/api/assets/old/file", metadata: { duration: 2 } },
+      { id: "new", name: "重新生成版本", kind: "video", url: "/api/assets/new/file", metadata: { duration: 2 } },
+    ],
+  );
+  const clip = timeline.tracks[0].elements[0];
+  assert.equal(clip.metadata.assetId, "old");
+  assert.equal(clip.props.srcAssetId, "old");
+  assert.equal(clip.props.src, "/api/assets/old/file");
+  assert.equal(timeline.assets.new, undefined);
+});
+
 test("legacy filter names migrate to Twick preview-compatible filter ids", () => {
   const timeline = attachAssetReferences(
     {

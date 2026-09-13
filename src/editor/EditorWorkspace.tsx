@@ -22,6 +22,8 @@ import "./editorWorkspace.css";
 
 type EditorWorkspaceProps = {
   projectId: string;
+  productionName: string;
+  episodeLabel: string;
   editor?: EditorDocument;
   assets: EditorAsset[];
   ratio: string;
@@ -58,6 +60,8 @@ function TimelinePersistence({
 }
 
 function EditorSurface({
+  productionName,
+  episodeLabel,
   initialTimeline,
   assets,
   shots,
@@ -67,6 +71,8 @@ function EditorSurface({
   onChange,
   onExport,
 }: {
+  productionName: string;
+  episodeLabel: string;
   initialTimeline: ProjectJSON;
   assets: EditorAsset[];
   shots: Record<string, any>[];
@@ -170,7 +176,7 @@ function EditorSurface({
         <button className="primary compact" onClick={generateInitialEdit}>
           <Sparkles size={15} /> 生成初剪
         </button>
-        <span>{message}</span>
+        <span><b>{productionName} · {episodeLabel}</b>　{message}</span>
         <EditorToolbar assets={assets} onMessage={setMessage} onExport={onExport} />
       </div>
       <div className="mvc-editor-surface" ref={surfaceRef} onDragOverCapture={handleDragOver} onDropCapture={handleDrop}>
@@ -191,6 +197,8 @@ function EditorSurface({
 
 export function EditorWorkspace({
   projectId,
+  productionName,
+  episodeLabel,
   editor,
   assets,
   ratio,
@@ -220,6 +228,8 @@ export function EditorWorkspace({
         >
           <EditorSurface
             initialTimeline={initialTimeline}
+            productionName={productionName}
+            episodeLabel={episodeLabel}
             assets={assets}
             shots={shots}
             nodes={nodes}

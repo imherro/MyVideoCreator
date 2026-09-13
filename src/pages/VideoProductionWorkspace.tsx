@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, ArrowUpRight, CheckSquare2, Film, Image as ImageIcon, Play, RefreshCw } from "lucide-react";
+import { AlertCircle, ArrowUpRight, CheckSquare2, Film, Image as ImageIcon, Play, RefreshCw, Scissors } from "lucide-react";
 import { deriveVideoProductionRows, videoSubmissionSummary, type VideoProductionStatus } from "../videoProduction.ts";
 
 type Value = Record<string, any>;
@@ -15,6 +15,7 @@ type Props = {
   onPatchVideoNode: (nodeId: string, patch: Value) => void;
   onGenerate: (uids: string[]) => Promise<void>;
   onOpenCanvas: (nodeId: string) => void;
+  onOpenEditor: () => void;
   onPreview: (asset: Asset) => void;
 };
 
@@ -79,9 +80,9 @@ export function VideoProductionWorkspace(props: Props) {
   return <section className="video-production-workspace">
     <header className="video-production-header">
       <div><span className="eyebrow">VIDEO PRODUCTION WORKSPACE</span><h2>视频工作区</h2><p>从已核验分镜首帧生成逐镜视频；旧结果会保留，变更后标记为待更新。</p></div>
-      <div className="video-status-filters" aria-label="视频状态筛选">
+      <div className="video-production-header-actions"><button className="primary compact" onClick={props.onOpenEditor}><Scissors size={15}/>进入剪辑</button><div className="video-status-filters" aria-label="视频状态筛选">
         {(["all","ready","generating","failed","stale","complete"] as const).map((value) => <button key={value} className={filter === value ? "active" : ""} onClick={() => setFilter(value)}>{value === "all" ? "全部" : statusLabels[value]} <b>{value === "all" ? rows.length : rows.filter((row) => row.status === value).length}</b></button>)}
-      </div>
+      </div></div>
     </header>
     {!!rows.length && <div className="video-selection-bar">
       <label className="check-label"><input type="checkbox" checked={selected.length === rows.length} onChange={(event) => setSelected(event.target.checked ? identities : [])}/>全选 {rows.length} 镜</label>

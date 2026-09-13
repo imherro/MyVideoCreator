@@ -33,7 +33,8 @@ export function planInitialTimeline(
 
   shots.forEach((shot, index) => {
     const label = `第 ${index + 1} 镜`;
-    const node = nodes.find((candidate) => candidate.id === shot.videoNode);
+    const videoNodeId = shot.videoNode || shot.pipeline?.videoNodeId;
+    const node = nodes.find((candidate) => candidate.id === videoNodeId);
     const asset = assets.find(
       (candidate) => candidate.id === node?.data?.assetId && candidate.kind === "video",
     );

@@ -127,6 +127,7 @@ import {
 import { visualBibleOf } from "./filmBible/types";
 import { StoryboardWorkspace } from "./pages/StoryboardWorkspace";
 import { VideoProductionWorkspace } from "./pages/VideoProductionWorkspace";
+import { TaskCenter } from "./pages/TaskCenter";
 import {
   createStoryboardShot,
   moveStoryboardShot,
@@ -136,7 +137,6 @@ import {
   updateStoryboardShot,
 } from "./storyboard";
 import { deriveVideoProductionRows, validateVideoSubmission } from "./videoProduction";
-import { JobProgress } from "./JobProgress";
 import { RunWorkflow } from "./RunWorkflow";
 import { PanoramaViewer } from "./PanoramaViewer";
 import { defaultStage } from "./directorScene";
@@ -165,6 +165,7 @@ import { ArtDepartmentPage } from "./pages/ArtDepartmentPage";
 import { ProductionAssetCenter } from "./pages/ProductionAssetCenter";
 import { EpisodeSelector } from "./app/EpisodeSelector";
 import {
+  episodeLabel,
   episodesForProduction,
   type EpisodeSummary,
   type ProductionSummary,
@@ -2096,7 +2097,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     }
     setTimelineOpen(!timelineOpen);
   };
-  const openMultitrackEditor = () => setView("editor");
   return (
     <div className="studio-shell">
       {previewTimeline && (
@@ -2159,10 +2159,12 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         <button
           className="primary compact"
           onClick={() => {
-            setTimelineOpen(true);
-            if (!doc.timeline.length)
-              setNotice("从素材库选择视频或图片，加入时间线后导出");
-            else setPanel("export");
+            if (!hasEditorTimeline && !doc.timeline.length) {
+              activateWorkflowStage("editor");
+              setNotice("请先在剪辑工作区加入素材");
+              return;
+            }
+            setPanel("export");
           }}
         >
           <Download size={16} />
@@ -2200,20 +2202,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               </button>
             </div>
           ) : workflowStage === "editor" ? (
-            <div className="segmented" aria-label="剪辑视图">
-              <button
-                className={view !== "editor" && timelineOpen ? "active" : ""}
-                onClick={() => {
-                  setView("canvas");
-                  setTimelineOpen(true);
-                }}
-              >
-                <Layers size={15} />快速编排
-              </button>
-              <button className={view === "editor" ? "active" : ""} onClick={openMultitrackEditor}>
-                <Scissors size={15} />多轨剪辑
-              </button>
-            </div>
+            <strong className="workspace-title"><Scissors size={15} />Twick 多轨剪辑</strong>
           ) : (
             <strong className="workspace-title">
               {{
@@ -2452,12 +2441,15 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               setSelected(nodeId);
               activateWorkflowStage("canvas");
             }}
+            onOpenEditor={() => activateWorkflowStage("editor")}
             onPreview={setPreview}
           />
         ) : view === "editor" ? (
           <Suspense fallback={<div className="loading">加载剪辑工作区…</div>}>
             <EditorWorkspace
               projectId={project.id}
+              productionName={currentProduction?.name || project.name}
+              episodeLabel={episodeLabel(project)}
               editor={doc.editor}
               assets={assets}
               ratio={doc.ratio}
@@ -3620,96 +3612,22 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               />
             )}
             {panel === "jobs" && (
-              <>
-                <p className="muted">
-                  任务在主机持续执行。失败时保留输入和已完成的结果。
-                </p>
-                {jobs.map((j) => (
-                  <article className="job-card" key={j.id}>
-                    <div>
-                      <span className={"job-state " + j.status}>
-                        {j.status === "running" ? (
-                          <LoaderCircle className="spin" size={15} />
-                        ) : j.status === "succeeded" ? (
-                          <Check size={15} />
-                        ) : (
-                          <Clock size={15} />
-                        )}{" "}
-                        {states[j.status]}
-                      </span>
-                      <small>
-                        {new Date(j.created * 1000).toLocaleString()}
-                      </small>
-                    </div>
-                    <b>
-                      {titles[j.kind] || "成片导出"} ·{" "}
-                      {String(j.input.prompt || "时间线合成").slice(0, 70)}
-                    </b>
-                    <p>{j.phase}</p>
-                    <JobProgress job={j} />
-                    {j.error && <div className="error">{j.error}</div>}
-                    {j.result?.assets?.map((a: Any) => (
-                      <a
-                        className="download-link"
-                        href={a.url}
-                        download={a.name}
-                        key={a.id}
-                      >
-                        <Download size={14} />
-                        {a.name}
-                      </a>
-                    ))}
-                    {j.result?.shots && (
-                      <button onClick={() => adoptShots(j)}>导入分镜表</button>
-                    )}
-                    {j.status === "interrupted" && j.provider_job_id && (
-                      <button
-                        onClick={() =>
-                          api(`/jobs/${j.id}/resume`, send("POST"))
-                            .then(() => refresh(project.id))
-                            .catch(report)
-                        }
-                      >
-                        恢复查询已有任务
-                      </button>
-                    )}
-                    {j.status === "interrupted" && !j.provider_job_id && (
-                      <p className="muted">
-                        未取得上游编号，无法确认是否已提交。请先核对服务，再从节点重新生成。
-                      </p>
-                    )}
-                    {["running", "queued", "interrupted"].includes(
-                      j.status,
-                    ) && (
-                      <button
-                        onClick={() =>
-                          api(`/jobs/${j.id}/cancel`, send("POST"))
-                            .then(() => refresh(project.id))
-                            .catch(report)
-                        }
-                      >
-                        取消任务
-                      </button>
-                    )}
-                    <button
-                      className="quiet"
-                      onClick={() => {
-                        setSelected(j.node_id);
-                        setPanel(null);
-                        activateWorkflowStage("canvas");
-                      }}
-                    >
-                      查看节点
-                    </button>
-                  </article>
-                ))}
-                {!jobs.length && (
-                  <div className="empty-state">
-                    <Clock />
-                    <h3>还没有生成任务</h3>
-                  </div>
-                )}
-              </>
+              <TaskCenter
+                productionName={currentProduction?.name || project.name}
+                episodes={currentEpisodes}
+                currentProjectId={project.id}
+                currentDocument={doc}
+                currentJobs={jobs}
+                providers={config.providers}
+                request={api}
+                onRefreshCurrent={() => refresh(project.id)}
+                onOpenNode={async (projectId, nodeId) => {
+                  if (projectId !== project.id) await openProject(projectId);
+                  setSelected(nodeId);
+                  activateWorkflowStage("canvas");
+                }}
+                onAdoptShots={(job) => adoptShots(job as Job)}
+              />
             )}
             {panel === "export" && (
               <>
