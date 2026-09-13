@@ -1703,6 +1703,15 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   const hasEditorTimeline = Boolean(
     persistedEditorTimeline?.tracks?.some((track) => track.elements.length),
   );
+  const toggleTimelineWorkspace = () => {
+    if (view === "editor") {
+      setView("canvas");
+      setTimelineOpen(true);
+      return;
+    }
+    setTimelineOpen(!timelineOpen);
+  };
+  const openMultitrackEditor = () => setView("editor");
   return (
     <div className="studio-shell">
       {previewTimeline && (
@@ -1754,15 +1763,54 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           {saved}
         </span>
         <div className="top-spacer" />
-        <div className="local-badge">
-          <Monitor size={14} /> 本地优先
+        <div className="top-edit-actions" aria-label="剪辑工作区">
+          <button
+            className={view !== "editor" && timelineOpen ? "quiet active" : "quiet"}
+            onClick={toggleTimelineWorkspace}
+            title="打开快速排序、连续预览和成片时间线"
+          >
+            <Layers size={15} />
+            时间线
+          </button>
+          <button
+            className={view === "editor" ? "quiet active" : "quiet"}
+            onClick={openMultitrackEditor}
+            title="打开视频、音频、字幕和叠加轨道编辑器"
+          >
+            <Scissors size={15} />
+            多轨剪辑
+          </button>
         </div>
+        <details className="top-edit-menu">
+          <summary><Scissors size={15} /> 剪辑 <ChevronDown size={13} /></summary>
+          <div>
+            <button
+              className={view !== "editor" && timelineOpen ? "active" : ""}
+              onClick={(event) => {
+                toggleTimelineWorkspace();
+                event.currentTarget.closest("details")?.removeAttribute("open");
+              }}
+            >
+              <Layers size={15} /> 时间线
+            </button>
+            <button
+              className={view === "editor" ? "active" : ""}
+              onClick={(event) => {
+                openMultitrackEditor();
+                event.currentTarget.closest("details")?.removeAttribute("open");
+              }}
+            >
+              <Scissors size={15} /> 多轨剪辑
+            </button>
+          </div>
+        </details>
         <button
           className={"queue-button " + (activeCount ? "active" : "")}
           onClick={() => setPanel("jobs")}
+          aria-label={`任务 ${activeCount || jobs.length}`}
+          title="查看生成任务"
         >
           <Clock size={16} />
-          <span>任务</span>
           <b>{activeCount || jobs.length}</b>
         </button>
         <button
@@ -1929,25 +1977,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 高级运行
               </button>
           )}
-          <button
-            className={view !== "editor" && timelineOpen ? "quiet active" : "quiet"}
-            onClick={() => {
-              if (view === "editor") {
-                setView("canvas");
-                setTimelineOpen(true);
-              } else setTimelineOpen(!timelineOpen);
-            }}
-          >
-            <Layers size={15} />
-            {view !== "editor" && timelineOpen ? "收起快速编排" : "快速编排"}
-          </button>
-          <button
-            className={view === "editor" ? "quiet active" : "quiet"}
-            onClick={() => setView("editor")}
-          >
-            <Scissors size={15} />
-            多轨剪辑
-          </button>
         </div>
         {view === "editor" ? (
           <Suspense fallback={<div className="loading">加载剪辑工作区…</div>}>
