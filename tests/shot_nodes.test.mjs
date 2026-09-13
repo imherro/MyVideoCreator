@@ -11,6 +11,23 @@ test('batch preparation repairs missing nodes without duplicating existing work'
  const again=ensureShotNodes(result,providers,[],id);assert.equal(again.nodes.length,4);assert.equal(again.edges.length,2);
  assert.equal(doc.nodes.length,1);
 });
+test('selected pipeline-only shot reuses its stable image and video nodes',()=>{
+ let i=0;const id=()=>`unexpected-${++i}`;
+ const image={id:'image-a',data:{kind:'image',prompt:'existing frame'}};
+ const video={id:'video-a',data:{kind:'video',prompt:'existing motion'}};
+ const doc={nodes:[image,video],edges:[{id:'existing-edge',source:'image-a',target:'video-a'}],shots:[
+  {id:'shot-a',uid:'stable-a',duration:3,pipeline:{imageNodeId:'image-a',videoNodeId:'video-a'}},
+  {id:'shot-b',uid:'stable-b',duration:3},
+ ]};
+ const result=ensureShotNodes(doc,[],[],id,['shot-a']);
+ assert.equal(result.nodes.length,2);
+ assert.equal(result.shots[0].pipeline.imageNodeId,'image-a');
+ assert.equal(result.shots[0].pipeline.videoNodeId,'video-a');
+ assert.equal(result.shots[0].imageNode,'image-a');
+ assert.equal(result.shots[0].videoNode,'video-a');
+ assert.deepEqual(result.shots[1],doc.shots[1]);
+ assert.deepEqual(result.edges,doc.edges);
+});
 test('shot nodes form the script to storyboard to image to video chain',()=>{
  let i=0;const id=()=>String(++i);const providers=[{id:'v',kind:'video',local:true,model:'minimax_h3'}];
  const doc={nodes:[

@@ -62,11 +62,13 @@ export function ensureShotNodes<
 
   const shots = doc.shots.map((shot, index) => {
     if (selectedIds && !selectedIds.includes(shot.id)) return shot;
+    const imageNodeId = shot.imageNode || shot.pipeline?.imageNodeId;
+    const videoNodeId = shot.videoNode || shot.pipeline?.videoNodeId;
     let image = nodes.find(
-      (node) => node.id === shot.imageNode && node.data.kind === "image",
+      (node) => node.id === imageNodeId && node.data.kind === "image",
     );
     let video = nodes.find(
-      (node) => node.id === shot.videoNode && node.data.kind === "video",
+      (node) => node.id === videoNodeId && node.data.kind === "video",
     );
     if (!image) {
       image = {
