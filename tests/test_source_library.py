@@ -148,12 +148,26 @@ def test_invalid_or_stale_extraction_preserves_existing_events(source_client, mo
         )
     s.job_update(extraction["id"], status="running")
     running = {**extraction, "status": "running"}
-    monkeypatch.setattr(Worker, "_chat_text", lambda *_args, **_kwargs: '{"events":[{"summary":""}]}')
-    with pytest.raises(ValueError, match="校验失败"):
-        Worker().text(running, {"url": "http://unused", "local": True})
-    assert client.get(
-        f'/api/productions/{production["id"]}/source-events?chapter_id={chapter["id"]}'
-    ).json()[0]["summary"] == "旧事件"
+    invalid_outputs = [
+        {"events": [{"characters": ["阿青"], "summary": 123, "importance": "high", "emotion": "紧张", "continuity": {}}]},
+        {"events": [{"characters": ["阿青"], "summary": "新事件", "importance": "high", "continuity": {}}]},
+        {"events": [{"characters": ["阿青"], "summary": "新事件", "importance": "high", "emotion": 123, "continuity": {}}]},
+        {"events": [{"characters": ["阿青"], "summary": "新事件", "importance": "high", "emotion": "紧张", "continuity": {}, "unexpected": "x"}]},
+        {"events": [{"characters": ["阿青"], "summary": "新事件", "importance": "high", "emotion": "紧张", "continuity": {}}], "unexpected": "x"},
+    ]
+    raw_outputs = [json.dumps(value, ensure_ascii=False) for value in invalid_outputs]
+    raw_outputs.append('这是结果：\n' + json.dumps({"events": [{
+        "characters": ["阿青"], "summary": "新事件", "importance": "high",
+        "emotion": "紧张", "continuity": {},
+    }]}, ensure_ascii=False) + '\n谢谢')
+    worker = Worker()
+    for raw in raw_outputs:
+        monkeypatch.setattr(worker, "_chat_text", lambda *_args, _raw=raw, **_kwargs: _raw)
+        with pytest.raises(ValueError, match="校验失败"):
+            worker.text(running, {"url": "http://unused", "local": True})
+        assert client.get(
+            f'/api/productions/{production["id"]}/source-events?chapter_id={chapter["id"]}'
+        ).json()[0]["summary"] == "旧事件"
 
     saved = client.put(
         f'/api/productions/{production["id"]}/chapters/{chapter["id"]}',
@@ -170,7 +184,7 @@ def test_invalid_or_stale_extraction_preserves_existing_events(source_client, mo
     ).json()[0]["summary"] == "旧事件"
 
 
-def test_valid_extraction_atomically_replaces_events_with_chapter_ownership(source_client):
+def test_valid_extraction_atomically_replaces_events_with_chapter_ownership(source_client, monkeypatch):
     client = source_client
     production, episode = new_production(client)
     source = client.post(
@@ -190,10 +204,16 @@ def test_valid_extraction_atomically_replaces_events_with_chapter_ownership(sour
         },
     ).json()["jobs"][0]
     s.job_update(job["id"], status="running")
-    rows = replace_events({**job, "status": "running"}, [{
+    expected = {
         "characters": ["阿青"], "summary": "阿青推开门", "importance": "high",
         "emotion": "警惕", "continuity": {"door": "open"},
-    }])
+    }
+    worker = Worker()
+    monkeypatch.setattr(
+        worker, "_chat_text",
+        lambda *_args, **_kwargs: json.dumps({"events": [expected]}, ensure_ascii=False),
+    )
+    rows = worker.text({**job, "status": "running"}, {"url": "http://unused", "local": True})["events"]
     assert rows[0]["continuity"] == {"door": "open"}
     events = client.get(f'/api/productions/{production["id"]}/source-events').json()
     assert len(events) == 1

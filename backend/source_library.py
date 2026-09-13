@@ -50,24 +50,31 @@ def split_chapters(content: str):
 
 
 def validate_events(value):
-    rows = value.get('events') if isinstance(value, dict) else None
+    if not isinstance(value, dict) or set(value) != {'events'}:
+        raise ValueError('事件提取结果顶层只能包含 events')
+    rows = value['events']
     if not isinstance(rows, list):
         raise ValueError('事件提取结果缺少 events 数组')
     result = []
+    required = {'characters', 'summary', 'importance', 'emotion', 'continuity'}
     for row in rows:
-        if not isinstance(row, dict) or not str(row.get('summary') or '').strip():
+        if not isinstance(row, dict) or set(row) != required:
+            raise ValueError('事件字段必须严格包含 characters、summary、importance、emotion、continuity')
+        if not isinstance(row['summary'], str) or not row['summary'].strip():
             raise ValueError('事件摘要不能为空')
-        characters = row.get('characters')
-        continuity = row.get('continuity')
-        importance = row.get('importance')
+        if not isinstance(row['emotion'], str):
+            raise ValueError('事件情绪必须是字符串')
+        characters = row['characters']
+        continuity = row['continuity']
+        importance = row['importance']
         if not isinstance(characters, list) or not all(isinstance(item, str) for item in characters):
             raise ValueError('事件人物格式无效')
         if not isinstance(continuity, dict) or importance not in ('low', 'medium', 'high'):
             raise ValueError('事件重要性或连续性格式无效')
         result.append({
             'characters': [item.strip() for item in characters if item.strip()],
-            'summary': str(row['summary']).strip(), 'importance': importance,
-            'emotion': str(row.get('emotion') or '').strip(), 'continuity': continuity,
+            'summary': row['summary'].strip(), 'importance': importance,
+            'emotion': row['emotion'].strip(), 'continuity': continuity,
         })
     return result
 

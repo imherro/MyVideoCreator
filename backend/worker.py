@@ -209,9 +209,7 @@ class Worker:
         if kind=='text' and inp.get('source_event_extraction'):
             from .source_library import EVENT_SCHEMA, SYSTEM_PROMPT, replace_events, validate_events
             raw=self._chat_text(job,p,SYSTEM_PROMPT,inp['prompt'],EVENT_SCHEMA,'提取原著事件')
-            start=raw.find('{');end=raw.rfind('}')
-            if start<0 or end<start:raise ValueError('事件提取结果不是有效 JSON')
-            try:rows=validate_events(json.loads(raw[start:end+1]))
+            try:rows=validate_events(json.loads(raw.strip()))
             except (ValueError,TypeError,json.JSONDecodeError) as exc:
                 raise ValueError('事件提取结果校验失败：'+str(exc)) from exc
             rows=replace_events(job,rows)
