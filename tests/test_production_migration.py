@@ -74,6 +74,7 @@ def test_legacy_projects_are_wrapped_and_shared_context_is_extracted(monkeypatch
     assert project['episode_no'] == 1 and project['episode_title'] == '旧单片'
     assert revision['project_id'] == project['id'] and revision['document'] == document
     assert asset['project_id'] == project['id'] and asset['metadata'] == '{"kept":true}'
+    assert asset['production_id'] == production[0]['id']
     assert job['project_id'] == project['id'] and job['status'] == 'succeeded'
     assert media.read_bytes() == b'unchanged-media'
 

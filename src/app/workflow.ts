@@ -28,6 +28,6 @@ export function workflowStageUrl(href: string, stage: WorkflowStage) {
 export function defaultViewForStage(stage: WorkflowStage) {
   if (stage === "storyboard") return "shots";
   if (stage === "editor") return "editor";
-  if (["overview", "source", "adaptation", "script"].includes(stage)) return "stage";
+  if (["overview", "source", "adaptation", "script", "art"].includes(stage)) return "stage";
   return "canvas";
 }

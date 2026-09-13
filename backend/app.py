@@ -205,6 +205,37 @@ def production_episodes(production_id:str):
                 SELECT 1 FROM deleted_items WHERE kind='project' AND item_id=projects.id
             ) ORDER BY episode_no,id''',(production_id,))]
 
+@app.get('/api/productions/{production_id}/visual-usage')
+def production_visual_usage(production_id:str):
+    """Derive VisualVersion usage from canonical Episode shot bindings."""
+    production(production_id)
+    usage={}
+    with s.db() as c:
+        episodes=c.execute('''SELECT id,episode_no,episode_title,document FROM projects
+            WHERE production_id=? AND NOT EXISTS(
+                SELECT 1 FROM deleted_items d WHERE d.kind='project' AND d.item_id=projects.id
+            ) ORDER BY episode_no,id''',(production_id,)).fetchall()
+    for episode in episodes:
+        document=json.loads(episode['document'])
+        for shot in document.get('shots') or []:
+            bindings=shot.get('assetBindings') or {}
+            values=[*(bindings.get('characters') or []),*(bindings.get('props') or [])]
+            if isinstance(bindings.get('scene'),dict):values.append(bindings['scene'])
+            for binding in values:
+                version_id=binding.get('versionId') if isinstance(binding,dict) else None
+                if not version_id:continue
+                item=usage.setdefault(version_id,{'version_id':version_id,'episodes':{},'shots':[]})
+                item['episodes'][episode['id']]={
+                    'project_id':episode['id'],'episode_no':episode['episode_no'],
+                    'episode_title':episode['episode_title'],
+                }
+                item['shots'].append({
+                    'project_id':episode['id'],'episode_no':episode['episode_no'],
+                    'shot_uid':str(shot.get('uid') or shot.get('id') or ''),
+                    'shot_id':str(shot.get('id') or shot.get('uid') or ''),
+                })
+    return [{**item,'episodes':list(item['episodes'].values())} for item in usage.values()]
+
 class EpisodeCreate(BaseModel):
     title:str=Field(default='',max_length=100)
 
@@ -381,7 +412,17 @@ def asset_row(aid):
     return s.unpack(row)
 
 def asset_public(row):
-    return {**{k:v for k,v in row.items() if k!='path'},'url':f'/api/assets/{row["id"]}/file'}
+    public={**{k:v for k,v in row.items() if k!='path'},'url':f'/api/assets/{row["id"]}/file'}
+    public['status']='active'
+    metadata=public.get('metadata') or {}
+    job_input=metadata.get('input') if isinstance(metadata,dict) else {}
+    if isinstance(job_input,dict):
+        public['provider_id']=job_input.get('provider')
+        public['model_id']=job_input.get('model')
+        public['generation_fingerprint']=metadata.get('generationFingerprint')
+        visual=job_input.get('visual_reference') or {}
+        if isinstance(visual,dict):public['visual_version_id']=visual.get('versionId')
+    return public
 
 ASSET_CATEGORIES={'character','scene','prop','shot','music','sfx','voice','reference','other'}
 ASSET_KINDS={'image','video','audio','subtitle'}
@@ -391,19 +432,43 @@ def asset_category(value):
     return value
 
 @app.get('/api/projects/{pid}/assets')
-def assets(pid:str,category:str|None=None,kind:str|None=None):
-    project(pid)
+def assets(pid:str,category:str|None=None,kind:str|None=None,scope:str='episode'):
+    owner=project(pid)
     if category is not None:asset_category(category)
     if kind is not None and kind not in ASSET_KINDS:raise ValueError('媒体类型无效')
-    clauses=['project_id=?',"NOT EXISTS(SELECT 1 FROM deleted_items WHERE kind='asset' AND item_id=assets.id)"];params=[pid]
+    if scope not in ('episode','production'):raise ValueError('素材范围无效')
+    clauses=["NOT EXISTS(SELECT 1 FROM deleted_items WHERE kind='asset' AND item_id=assets.id)"]
+    params=[]
+    if scope=='production':clauses.append('assets.production_id=?');params.append(owner['production_id'])
+    else:clauses.append('assets.project_id=?');params.append(pid)
     if category is not None:clauses.append('category=?');params.append(category)
     if kind is not None:clauses.append('kind=?');params.append(kind)
     with s.db() as c:
-        return [asset_public(s.unpack(r)) for r in c.execute('SELECT * FROM assets WHERE '+' AND '.join(clauses)+' ORDER BY created DESC',params)]
+        rows=c.execute('''SELECT assets.*,origin.name origin_project_name,
+            origin.episode_no origin_episode_no FROM assets
+            JOIN projects origin ON origin.id=assets.project_id WHERE '''+
+            ' AND '.join(clauses)+' ORDER BY assets.created DESC',params)
+        return [asset_public(s.unpack(r)) for r in rows]
+
+@app.get('/api/productions/{production_id}/assets')
+def production_assets(production_id:str,category:str|None=None,kind:str|None=None):
+    production(production_id)
+    if category is not None:asset_category(category)
+    if kind is not None and kind not in ASSET_KINDS:raise ValueError('媒体类型无效')
+    clauses=['assets.production_id=?',"NOT EXISTS(SELECT 1 FROM deleted_items WHERE kind='asset' AND item_id=assets.id)"]
+    params=[production_id]
+    if category is not None:clauses.append('category=?');params.append(category)
+    if kind is not None:clauses.append('kind=?');params.append(kind)
+    with s.db() as c:
+        rows=c.execute('''SELECT assets.*,origin.name origin_project_name,
+            origin.episode_no origin_episode_no FROM assets
+            JOIN projects origin ON origin.id=assets.project_id WHERE '''+
+            ' AND '.join(clauses)+' ORDER BY assets.created DESC',params)
+        return [asset_public(s.unpack(row)) for row in rows]
 
 @app.post('/api/projects/{pid}/assets')
 async def upload(pid:str,file:UploadFile=File(...),category:str='other'):
-    project(pid)
+    owner=project(pid)
     category=asset_category(category)
     name=Path(file.filename or 'asset').name
     ext=Path(name).suffix.lower()
@@ -427,7 +492,7 @@ async def upload(pid:str,file:UploadFile=File(...),category:str='other'):
             from .media import probe
             metadata.update(await asyncio.to_thread(probe,path))
         with s.db() as c:
-            c.execute('INSERT INTO assets(id,project_id,name,kind,path,mime,metadata,created,category,source) VALUES(?,?,?,?,?,?,?,?,?,?)',(aid,pid,name,allowed[ext],path.name,mimetypes.guess_type(name)[0] or 'application/octet-stream',s.dumps(metadata),time.time(),category,'uploaded'))
+            c.execute('INSERT INTO assets(id,project_id,name,kind,path,mime,metadata,created,category,source,production_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)',(aid,pid,name,allowed[ext],path.name,mimetypes.guess_type(name)[0] or 'application/octet-stream',s.dumps(metadata),time.time(),category,'uploaded',owner['production_id']))
         return asset_public(asset_row(aid))
     except Exception:
         path.unlink(missing_ok=True)
@@ -439,27 +504,27 @@ class AssetUpdate(BaseModel):
 @app.patch('/api/projects/{pid}/assets/{aid}')
 def update_asset(pid:str,aid:str,body:AssetUpdate):
     category=asset_category(body.category)
+    reference_asset(pid,aid)
     with s.db() as c:
-        row=c.execute("SELECT * FROM assets WHERE id=? AND project_id=? AND NOT EXISTS(SELECT 1 FROM deleted_items WHERE kind='asset' AND item_id=assets.id)",(aid,pid)).fetchone()
-        if not row:raise HTTPException(404,'素材不存在')
         c.execute('UPDATE assets SET category=? WHERE id=?',(category,aid))
     return asset_public(asset_row(aid))
 
 @app.delete('/api/projects/{pid}/assets/{aid}')
 def delete_asset(pid:str,aid:str):
     project(pid)
+    row=reference_asset(pid,aid)
     with s.db() as c:
-        row=c.execute("SELECT id FROM assets WHERE id=? AND project_id=? AND NOT EXISTS(SELECT 1 FROM deleted_items WHERE kind='asset' AND item_id=assets.id)",(aid,pid)).fetchone()
-        if not row:raise HTTPException(404,'素材不存在')
-        c.execute("INSERT INTO deleted_items(kind,item_id,project_id,deleted_at) VALUES('asset',?,?,?)",(aid,pid,time.time()))
-    s.event(pid,{'type':'asset_deleted','id':aid})
+        c.execute("INSERT INTO deleted_items(kind,item_id,project_id,deleted_at) VALUES('asset',?,?,?)",(aid,row['project_id'],time.time()))
+    with s.db() as c:
+        episode_ids=[item['id'] for item in c.execute('SELECT id FROM projects WHERE production_id=?',(row['production_id'],))]
+    for episode_id in episode_ids:s.event(episode_id,{'type':'asset_deleted','id':aid})
     return {'deleted':aid,'soft':True}
 
 @app.get('/api/trash')
 def trash():
     with s.db() as c:
         deleted_projects=[dict(row) for row in c.execute("SELECT p.id,p.name,d.deleted_at FROM deleted_items d JOIN projects p ON p.id=d.item_id WHERE d.kind='project' ORDER BY d.deleted_at DESC")]
-        deleted_assets=[dict(row) for row in c.execute("SELECT a.id,a.name,a.kind,a.category,a.project_id,p.name project_name,d.deleted_at FROM deleted_items d JOIN assets a ON a.id=d.item_id JOIN projects p ON p.id=a.project_id WHERE d.kind='asset' ORDER BY d.deleted_at DESC")]
+        deleted_assets=[dict(row) for row in c.execute("SELECT a.id,a.name,a.kind,a.category,a.project_id,a.production_id,p.name project_name,d.deleted_at FROM deleted_items d JOIN assets a ON a.id=d.item_id JOIN projects p ON p.id=a.project_id WHERE d.kind='asset' ORDER BY d.deleted_at DESC")]
     return {'projects':deleted_projects,'assets':deleted_assets}
 
 @app.post('/api/trash/{kind}/{item_id}/restore')
@@ -473,7 +538,11 @@ def restore_deleted_item(kind:str,item_id:str):
             hidden_project=c.execute("SELECT 1 FROM deleted_items WHERE kind='project' AND item_id=?",(row['project_id'],)).fetchone()
             if hidden_project:raise HTTPException(409,'请先恢复素材所属项目。')
         c.execute('DELETE FROM deleted_items WHERE kind=? AND item_id=?',(kind,item_id))
-    if row['project_id']:s.event(row['project_id'],{'type':'restored','kind':kind,'id':item_id})
+        if kind=='asset':
+            asset=c.execute('SELECT production_id FROM assets WHERE id=?',(item_id,)).fetchone()
+            episode_ids=[item['id'] for item in c.execute('SELECT id FROM projects WHERE production_id=?',(asset['production_id'],))] if asset and asset['production_id'] else [row['project_id']]
+        else:episode_ids=[row['project_id']] if row['project_id'] else []
+    for episode_id in episode_ids:s.event(episode_id,{'type':'restored','kind':kind,'id':item_id})
     return {'restored':item_id,'kind':kind}
 
 @app.get('/api/assets/{aid}/file')
@@ -595,8 +664,9 @@ class PromptTemplateSave(BaseModel):
 
 def reference_asset(pid,aid):
     with s.db() as c:
-        row=c.execute('''SELECT a.*,origin.production_id origin_production_id,
-            target.production_id target_production_id
+        row=c.execute('''SELECT a.*,origin.id origin_project_id,
+            origin.production_id origin_production_id,
+            target.id target_project_id,target.production_id target_production_id
             FROM assets a
             JOIN projects origin ON origin.id=a.project_id
             JOIN projects target ON target.id=?
@@ -604,7 +674,9 @@ def reference_asset(pid,aid):
                 SELECT 1 FROM deleted_items d WHERE d.kind='asset' AND d.item_id=a.id
             )''',(pid,aid)).fetchone()
     if not row:raise HTTPException(404,'素材不存在')
-    if row['origin_production_id']!=row['target_production_id']:
+    asset_production_id=row['production_id'] or row['origin_production_id'] or row['origin_project_id']
+    target_production_id=row['target_production_id'] or row['target_project_id']
+    if asset_production_id!=target_production_id:
         raise ValueError('不能引用其他 Production 的素材')
     return s.unpack(row)
 

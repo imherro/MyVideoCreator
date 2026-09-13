@@ -17,3 +17,4 @@ def test_legacy_asset_rows_gain_classification_without_file_or_data_changes(monk
     assert row['path']=='asset-old.png' and row['metadata']=='{"kept":true}'
     assert media.read_bytes()==b'unchanged-media'
     assert 'assets_project_category_created' in index_names
+    assert 'production_id' in row.keys()

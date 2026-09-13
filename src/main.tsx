@@ -152,6 +152,8 @@ import { WorkflowOverview } from "./pages/WorkflowOverview";
 import { SourceLibraryPage } from "./pages/SourceLibraryPage";
 import { AdaptationPage } from "./pages/AdaptationPage";
 import { ScriptRoomPage } from "./pages/ScriptRoomPage";
+import { ArtDepartmentPage } from "./pages/ArtDepartmentPage";
+import { ProductionAssetCenter } from "./pages/ProductionAssetCenter";
 import { EpisodeSelector } from "./app/EpisodeSelector";
 import {
   episodesForProduction,
@@ -188,6 +190,11 @@ type Job = {
   result: Any;
   created: number;
   provider_job_id?: string;
+};
+type VisualUsage = {
+  version_id: string;
+  episodes: Array<{ project_id: string; episode_no: number; episode_title: string }>;
+  shots: Array<{ project_id: string; episode_no: number; shot_uid: string; shot_id: string }>;
 };
 type Doc = {
   schemaVersion: number;
@@ -549,6 +556,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     [doc, setDoc] = useState<Doc | null>(null),
     [assets, setAssets] = useState<Asset[]>([]),
     [jobs, setJobs] = useState<Job[]>([]),
+    [visualUsage, setVisualUsage] = useState<VisualUsage[]>([]),
     [system, setSystem] = useState<Any>({
       models: [],
       templates: {},
@@ -577,8 +585,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   const [syncFailure, setSyncFailure] = useState<SyncFailure | null>(null);
   const [mediaRetryKey, setMediaRetryKey] = useState(0);
   const [uploadCategory, setUploadCategory] = useState("other");
-  const [assetCategoryFilter, setAssetCategoryFilter] = useState("all");
-  const [assetKindFilter, setAssetKindFilter] = useState("all");
   const [conflict, setConflict] = useState(false),
     [recoveryBusy, setRecoveryBusy] = useState(false);
   const conflictRef = useRef(false);
@@ -616,7 +622,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         nextUrl,
       );
     }
-    setPanel(next === "art" ? "filmBible" : null);
+    setPanel(null);
     if (
       next === "storyboard" &&
       ["shots", "grid", "director"].includes(view)
@@ -653,13 +659,18 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       try {
         // Treat assets and jobs as one snapshot. A partial response must never
         // replace the last known-good canvas state with an empty collection.
-        const [a, j] = await Promise.all([
-          api(`/projects/${pid}/assets`),
+        const productionId = current.current.project?.id === pid
+          ? current.current.project.production_id
+          : undefined;
+        const [a, j, usages] = await Promise.all([
+          api(`/projects/${pid}/assets?scope=production`),
           api(`/projects/${pid}/jobs`),
+          productionId ? api(`/productions/${productionId}/visual-usage`) : Promise.resolve([]),
         ]);
         if (current.current.project?.id === pid) {
           setAssets(a);
           setJobs(j);
+          setVisualUsage(usages);
         }
         setSyncFailure((previous) =>
           previous?.kind === "api" ? null : previous,
@@ -686,12 +697,13 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       throw new Error("项目尚未保存，已保留当前编辑。请先解决保存冲突。");
     // Only switch views after every part of the new project snapshot arrives.
     // This leaves the current canvas visible if a refresh fails mid-request.
-    let p: Project, a: Asset[], j: Job[];
+    let p: Project, a: Asset[], j: Job[], usages: VisualUsage[];
     try {
-      [p, a, j] = await Promise.all([
-        api("/projects/" + pid),
-        api(`/projects/${pid}/assets`),
+      p = await api("/projects/" + pid);
+      [a, j, usages] = await Promise.all([
+        api(`/projects/${pid}/assets?scope=production`),
         api(`/projects/${pid}/jobs`),
+        api(`/productions/${p.production_id}/visual-usage`),
       ]);
     } catch (e: any) {
       setSyncFailure({
@@ -716,6 +728,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setDoc(projectedDocument);
     setAssets(a);
     setJobs(j);
+    setVisualUsage(usages);
     setSelected(null);
     setHoveredNode(null);
     setVisualFocus(undefined);
@@ -725,7 +738,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setTimelineOpen(false);
     setView(defaultViewForStage(workflowStageRef.current));
     setSaved(projectedDocument === p.document ? "已保存" : "未保存");
-    setPanel(workflowStageRef.current === "art" ? "filmBible" : null);
+    setPanel(null);
     setTimeout(() => {
       fitView({ padding: 0.2 });
     }, 100);
@@ -1319,7 +1332,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     await api(`/trash/${kind}/${item.id}/restore`, send("POST"));
     setProjects(await api("/projects"));
     setProductions(await api("/productions"));
-    if (kind === "asset" && currentProjectId && item.project_id === currentProjectId)
+    if (kind === "asset" && currentProjectId && item.production_id === project?.production_id)
       await refresh(currentProjectId);
     await loadTrash();
     setNotice(`${kind === "project" ? "项目" : "素材"}“${item.name}”已恢复`);
@@ -1856,6 +1869,98 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   const currentProduction =
     productions.find((item) => item.id === project.production_id) || null;
   const currentEpisodes = episodesForProduction(projects, project.production_id);
+  const filmBiblePanelProps: React.ComponentProps<typeof FilmBiblePanel> = {
+    visual: visualBibleOf(doc),
+    shots: doc.shots,
+    assets,
+    jobs,
+    generationPolicy: doc.generationPolicy,
+    providers: config.providers,
+    localModels: system.models,
+    request: api,
+    onPreviewAsset: (asset) => setPreview(asset as Asset),
+    focusVersionId: visualFocus,
+    onFocusVersion: setVisualFocus,
+    onRenameCard: (cardId, name) => {
+      try {
+        update(() => renameVisualCard(doc, cardId, name));
+        setNotice("视觉卡名称已保存");
+      } catch (reason) { report(reason); }
+    },
+    onDeleteCard: (cardId) => {
+      const card = visualBibleOf(doc).cards[cardId];
+      if (!card || !window.confirm(`将视觉资产卡“${card.name}”移入回收站？恢复后原分镜绑定会重新生效。`)) return;
+      try {
+        update((currentDoc) => softDeleteVisualCard(currentDoc, cardId));
+        setNotice(`视觉资产卡“${card.name}”已移入回收站`);
+      } catch (reason) { report(reason); }
+    },
+    onSaveVersion: (versionId, draft) => {
+      try {
+        update(() => updateDraftVisualVersion(doc, versionId, {
+          spec: { description: draft.description, attributes: draft.attributes },
+          invariants: draft.invariants,
+        }));
+        setNotice("视觉版本文字已保存");
+      } catch (reason) { report(reason); }
+    },
+    onStatus: (versionId, status) => {
+      try { update(() => setVisualVersionStatus(doc, versionId, status)); }
+      catch (reason) { report(reason); }
+    },
+    onSetImageOverride: (cardId, override) => {
+      try {
+        update((document) => setVisualCardImageOverride(document, cardId, override));
+        setNotice(override.mode === "override" ? "此资产将使用自定义图片模型" : "此资产将继承项目默认图片模型");
+      } catch (reason) { report(reason); }
+    },
+    onUploadReference: uploadVisualReference,
+    onGenerateReference: generateVisualReference,
+    onLock: (versionId) => {
+      try {
+        update((document) => lockVisualVersion(document, versionId));
+        setNotice("视觉版本已确认锁定");
+      } catch (reason) { report(reason); }
+    },
+    onFork: (versionId, draft) => {
+      try {
+        const next = forkLockedVisualVersion(doc, versionId, {
+          spec: { description: draft.description, attributes: draft.attributes },
+          invariants: draft.invariants,
+        });
+        update(() => next);
+        const source = visualBibleOf(doc).versions[versionId];
+        setVisualFocus(visualBibleOf(next).cards[source.cardId].currentVersionId);
+        setNotice("已派生新草稿版本；旧版本和分镜绑定保持不变");
+      } catch (reason) { report(reason); }
+    },
+    onUpgrade: (cardId, targetVersionId, scope) => {
+      try {
+        update(() => upgradeVisualBindings(doc, cardId, targetVersionId, scope));
+        setNotice("已升级明确范围内的分镜；旧生成素材已保留并标记待更新");
+      } catch (reason) { report(reason); }
+    },
+    onBind: (shotUid, versionId) => {
+      try {
+        update(() => bindVisualVersion(doc, shotUid, versionId));
+        setNotice("视觉版本已绑定到分镜");
+      } catch (reason) { report(reason); }
+    },
+    onUnbind: (shotUid, versionId) => {
+      try {
+        update(() => unbindVisualVersion(doc, shotUid, versionId));
+        setNotice("视觉版本已从分镜解除");
+      } catch (reason) { report(reason); }
+    },
+    onLocate: (versionId) => {
+      const visualNode = doc.nodes.find((item) => item.data?.visualVersionId === versionId);
+      if (!visualNode) return;
+      activateWorkflowStage("canvas");
+      setSelected(visualNode.id);
+      setPanel(null);
+      setTimeout(() => fitView({ nodes: [{ id: visualNode.id }], padding: 0.8 }), 50);
+    },
+  };
   const toggleTimelineWorkspace = () => {
     if (view === "editor") {
       setView("canvas");
@@ -2118,6 +2223,12 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               await refreshProductionHierarchy();
               if (changedProjectId === project.id) await openProject(project.id);
             }}
+          />
+        ) : workflowStage === "art" ? (
+          <ArtDepartmentPage
+            {...filmBiblePanelProps}
+            productionName={currentProduction?.name || project.name}
+            usage={visualUsage}
           />
         ) : view === "editor" ? (
           <Suspense fallback={<div className="loading">加载剪辑工作区…</div>}>
@@ -3165,151 +3276,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             </button>
           </div>
           <div className="panel-scroll">
-            {panel === "filmBible" && (
-              <FilmBiblePanel
-                visual={visualBibleOf(doc)}
-                shots={doc.shots}
-                assets={assets}
-                jobs={jobs}
-                generationPolicy={doc.generationPolicy}
-                providers={config.providers}
-                localModels={system.models}
-                request={api}
-                onPreviewAsset={(asset) => setPreview(asset as Asset)}
-                focusVersionId={visualFocus}
-                onFocusVersion={setVisualFocus}
-                onRenameCard={(cardId, name) => {
-                  try {
-                    const next = renameVisualCard(doc, cardId, name);
-                    update(() => next);
-                    setNotice("视觉卡名称已保存");
-                  } catch (reason) {
-                    report(reason);
-                  }
-                }}
-                onDeleteCard={(cardId) => {
-                  const card = visualBibleOf(doc).cards[cardId];
-                  if (!card || !window.confirm(`将视觉资产卡“${card.name}”移入回收站？恢复后原分镜绑定会重新生效。`)) return;
-                  try {
-                    update((currentDoc) => softDeleteVisualCard(currentDoc, cardId));
-                    setNotice(`视觉资产卡“${card.name}”已移入回收站`);
-                  } catch (reason) {
-                    report(reason);
-                  }
-                }}
-                onSaveVersion={(versionId, draft) => {
-                  try {
-                    const next = updateDraftVisualVersion(doc, versionId, {
-                        spec: {
-                          description: draft.description,
-                          attributes: draft.attributes,
-                        },
-                        invariants: draft.invariants,
-                      });
-                    update(() => next);
-                    setNotice("视觉版本文字已保存");
-                  } catch (reason) {
-                    report(reason);
-                  }
-                }}
-                onStatus={(versionId, status) => {
-                  try {
-                    const next = setVisualVersionStatus(doc, versionId, status);
-                    update(() => next);
-                  } catch (reason) {
-                    report(reason);
-                  }
-                }}
-                onSetImageOverride={(cardId, override) => {
-                  try {
-                    update((document) =>
-                      setVisualCardImageOverride(document, cardId, override),
-                    );
-                    setNotice(
-                      override.mode === "override"
-                        ? "此资产将使用自定义图片模型"
-                        : "此资产将继承项目默认图片模型",
-                    );
-                  } catch (reason) {
-                    report(reason);
-                  }
-                }}
-                onUploadReference={uploadVisualReference}
-                onGenerateReference={generateVisualReference}
-                onLock={(versionId) => {
-                  try {
-                    update((document) =>
-                      lockVisualVersion(document, versionId),
-                    );
-                    setNotice("视觉版本已确认锁定");
-                  } catch (reason) {
-                    report(reason);
-                  }
-                }}
-                onFork={(versionId, draft) => {
-                  try {
-                    const next = forkLockedVisualVersion(doc, versionId, {
-                      spec: {
-                        description: draft.description,
-                        attributes: draft.attributes,
-                      },
-                      invariants: draft.invariants,
-                    });
-                    update(() => next);
-                    const source = visualBibleOf(doc).versions[versionId];
-                    const created = visualBibleOf(next).cards[source.cardId].currentVersionId;
-                    setVisualFocus(created);
-                    setNotice("已派生新草稿版本；旧版本和分镜绑定保持不变");
-                  } catch (reason) {
-                    report(reason);
-                  }
-                }}
-                onUpgrade={(cardId, targetVersionId, scope) => {
-                  try {
-                    const next = upgradeVisualBindings(doc, cardId, targetVersionId, scope);
-                    update(() => next);
-                    setNotice("已升级明确范围内的分镜；旧生成素材已保留并标记待更新");
-                  } catch (reason) {
-                    report(reason);
-                  }
-                }}
-                onBind={(shotUid, versionId) => {
-                  try {
-                    const next = bindVisualVersion(doc, shotUid, versionId);
-                    update(() => next);
-                    setNotice("视觉版本已绑定到分镜");
-                  } catch (reason) {
-                    report(reason);
-                  }
-                }}
-                onUnbind={(shotUid, versionId) => {
-                  try {
-                    const next = unbindVisualVersion(doc, shotUid, versionId);
-                    update(() => next);
-                    setNotice("视觉版本已从分镜解除");
-                  } catch (reason) {
-                    report(reason);
-                  }
-                }}
-                onLocate={(versionId) => {
-                  const visualNode = doc.nodes.find(
-                    (item) => item.data?.visualVersionId === versionId,
-                  );
-                  if (!visualNode) return;
-                  activateWorkflowStage("canvas");
-                  setSelected(visualNode.id);
-                  setPanel(null);
-                  setTimeout(
-                    () =>
-                      fitView({
-                        nodes: [{ id: visualNode.id }],
-                        padding: 0.8,
-                      }),
-                    50,
-                  );
-                }}
-              />
-            )}
+            {panel === "filmBible" && <FilmBiblePanel {...filmBiblePanelProps} />}
             {panel === "run" && (
               <RunWorkflow
                 nodes={doc.nodes}
@@ -3548,101 +3515,35 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               </>
             )}
             {panel === "assets" && (
-              <>
-                <div className="asset-center-links">
-                  <button onClick={() => setPanel("characters")}><FolderOpen size={15} />角色与场景</button>
-                  <button onClick={() => activateWorkflowStage("art")}><BookOpen size={15} />视觉圣经</button>
-                </div>
-                <button
-                  className="secondary full"
-                  onClick={() =>
-                    newNode(
-                      "image",
-                      "生成 360 度等距柱状全景环境图，2:1 画幅，完整覆盖四周环境，上下分别为天空与地面，左右边缘连续，地平线位于画面中线，无文字。场景：",
-                      { resolution: "1024x512" },
-                    )
-                  }
-                >
-                  创建全景图节点
-                </button>
-                <button
-                  className="secondary full"
-                  onClick={() => fileInput.current?.click()}
-                >
-                  <Upload size={16} />
-                  上传素材
-                </button>
-                <div className="asset-filters">
-                  <label>上传到<select value={uploadCategory} onChange={(e) => setUploadCategory(e.target.value)}>{Object.entries(assetCategories).map(([key,label]) => <option key={key} value={key}>{String(label)}</option>)}</select></label>
-                  <label>业务分类<select value={assetCategoryFilter} onChange={(e) => setAssetCategoryFilter(e.target.value)}><option value="all">全部分类</option>{Object.entries(assetCategories).map(([key,label]) => <option key={key} value={key}>{String(label)}</option>)}</select></label>
-                  <label>媒体类型<select value={assetKindFilter} onChange={(e) => setAssetKindFilter(e.target.value)}><option value="all">全部媒体</option>{Object.entries(assetKinds).map(([key,label]) => <option key={key} value={key}>{String(label)}</option>)}</select></label>
-                </div>
-                <div className="asset-grid">
-                  {assets.filter((a) => (assetCategoryFilter === "all" || a.category === assetCategoryFilter) && (assetKindFilter === "all" || a.kind === assetKindFilter)).map((a) => (
-                    <article className="asset-card" key={a.id}>
-                      <button
-                        className="asset-visual"
-                        onClick={() => setPreview(a)}
-                      >
-                        <Media
-                          asset={a}
-                          controls={false}
-                          retryKey={mediaRetryKey}
-                          onFailure={reportMediaFailure}
-                          onReady={clearMediaFailure}
-                        />
-                      </button>
-                      <b title={a.name}>{a.name}</b>
-                      <select aria-label={`${a.name} 分类`} value={a.category || "other"} onChange={(e) => void changeAssetCategory(a, e.target.value)}>{Object.entries(assetCategories).map(([key,label]) => <option key={key} value={key}>{String(label)}</option>)}</select>
-                      <small>{assetKinds[a.kind] || a.kind} · {a.source === "generated" ? "系统生成" : a.source === "imported" ? "导入" : "上传"}</small>
-                      <div>
-                        {a.kind === "image" && (
-                          <button onClick={() => setPanorama(a)}>
-                            全景构图
-                          </button>
-                        )}
-                        {selected && a.kind === "image" && (
-                          <button
-                            onClick={() => {
-                              editNode({
-                                asset_ids: [
-                                  ...new Set([...(data.asset_ids || []), a.id]),
-                                ],
-                              });
-                              setPanel(null);
-                            }}
-                          >
-                            引用
-                          </button>
-                        )}
-                        {["image", "video"].includes(a.kind) && (
-                          <button onClick={() => addTimeline(a)}>
-                            入时间线
-                          </button>
-                        )}
-                        <a href={a.url} download={a.name} title="下载">
-                          <Download size={14} />
-                        </a>
-                        <button
-                          className="icon-button danger asset-delete-button"
-                          onClick={() => deleteAsset(a).catch(report)}
-                          aria-label={`删除素材 ${a.name}`}
-                          title="移入回收站"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-                {!assets.length && (
-                  <div className="empty-state">
-                    <FolderOpen />
-                    <h3>你的素材将保存在这里</h3>
-                    <p>上传参考图，或生成第一个镜头。</p>
-                  </div>
+              <ProductionAssetCenter
+                document={doc}
+                assets={assets}
+                projects={currentEpisodes}
+                currentProjectId={project.id}
+                usage={visualUsage}
+                uploadCategory={uploadCategory}
+                onUploadCategory={setUploadCategory}
+                onUpload={() => fileInput.current?.click()}
+                onCreatePanorama={() => newNode(
+                  "image",
+                  "生成 360 度等距柱状全景环境图，2:1 画幅，完整覆盖四周环境，上下分别为天空与地面，左右边缘连续，地平线位于画面中线，无文字。场景：",
+                  { resolution: "1024x512" },
                 )}
-              </>
+                onOpenArt={(versionId) => {
+                  setVisualFocus(versionId);
+                  activateWorkflowStage("art");
+                }}
+                onPreview={(asset) => setPreview(asset as Asset)}
+                renderMedia={(asset) => <Media asset={asset as Asset} controls={false} retryKey={mediaRetryKey} onFailure={reportMediaFailure} onReady={clearMediaFailure} />}
+                onCategory={(asset, category) => void changeAssetCategory(asset as Asset, category)}
+                onDelete={(asset) => void deleteAsset(asset as Asset)}
+                onTimeline={(asset) => addTimeline(asset as Asset)}
+                onPanorama={(asset) => setPanorama(asset as Asset)}
+                onReference={selected ? (asset) => {
+                  editNode({ asset_ids: [...new Set([...(data.asset_ids || []), asset.id])] });
+                  setPanel(null);
+                } : undefined}
+              />
             )}
             {panel === "jobs" && (
               <>

@@ -45,7 +45,7 @@ def init():
         CREATE TABLE IF NOT EXISTS source_documents(id TEXT PRIMARY KEY,production_id TEXT NOT NULL REFERENCES productions(id),type TEXT NOT NULL,title TEXT NOT NULL,metadata TEXT NOT NULL,created REAL NOT NULL,updated REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS source_chapters(id TEXT PRIMARY KEY,source_id TEXT NOT NULL REFERENCES source_documents(id),chapter_no INTEGER NOT NULL,title TEXT NOT NULL,content TEXT NOT NULL,sort_order INTEGER NOT NULL,revision INTEGER NOT NULL DEFAULT 1,created REAL NOT NULL,updated REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS revisions(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),revision INTEGER NOT NULL,document TEXT NOT NULL,created REAL NOT NULL);
-        CREATE TABLE IF NOT EXISTS assets(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),name TEXT NOT NULL,kind TEXT NOT NULL,path TEXT NOT NULL,mime TEXT NOT NULL,metadata TEXT NOT NULL,created REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS assets(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),name TEXT NOT NULL,kind TEXT NOT NULL,path TEXT NOT NULL,mime TEXT NOT NULL,metadata TEXT NOT NULL,created REAL NOT NULL,production_id TEXT REFERENCES productions(id));
         CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,submission_id TEXT UNIQUE NOT NULL,project_id TEXT NOT NULL REFERENCES projects(id),node_id TEXT NOT NULL,kind TEXT NOT NULL,status TEXT NOT NULL,input TEXT NOT NULL,result TEXT,provider_job_id TEXT,error TEXT,phase TEXT NOT NULL DEFAULT '',progress REAL,created REAL NOT NULL,updated REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS episode_scripts(project_id TEXT PRIMARY KEY REFERENCES projects(id),revision INTEGER NOT NULL DEFAULT 1,status TEXT NOT NULL,title TEXT NOT NULL,synopsis TEXT NOT NULL,source_chapter_refs TEXT NOT NULL,story_goal TEXT NOT NULL,paywall_beat TEXT NOT NULL,body TEXT NOT NULL,estimated_duration REAL NOT NULL,characters TEXT NOT NULL,scenes TEXT NOT NULL,props TEXT NOT NULL,generation_job_id TEXT REFERENCES jobs(id),metadata TEXT NOT NULL,created REAL NOT NULL,updated REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS episode_script_revisions(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),revision INTEGER NOT NULL,snapshot TEXT NOT NULL,created REAL NOT NULL);
@@ -65,7 +65,7 @@ def init():
         asset_columns={row['name'] for row in c.execute('PRAGMA table_info(assets)')}
         if 'category' not in asset_columns:c.execute("ALTER TABLE assets ADD COLUMN category TEXT NOT NULL DEFAULT 'other'")
         if 'source' not in asset_columns:c.execute("ALTER TABLE assets ADD COLUMN source TEXT NOT NULL DEFAULT 'uploaded'")
-        c.execute('CREATE INDEX IF NOT EXISTS assets_project_category_created ON assets(project_id,category,created)')
+        if 'production_id' not in asset_columns:c.execute('ALTER TABLE assets ADD COLUMN production_id TEXT')
         project_columns={row['name'] for row in c.execute('PRAGMA table_info(projects)')}
         for column,definition in (
             ('production_id','TEXT'),
@@ -90,6 +90,14 @@ def init():
             )
         c.execute("UPDATE projects SET episode_no=1 WHERE episode_no IS NULL")
         c.execute("UPDATE projects SET episode_title=name WHERE episode_title IS NULL OR trim(episode_title)='' ")
+        # Physical files stay in place.  Production ownership is added as an
+        # indexable sharing boundary while project_id remains the origin Episode.
+        c.execute('''UPDATE assets SET production_id=(
+            SELECT production_id FROM projects WHERE projects.id=assets.project_id
+        ) WHERE production_id IS NULL''')
+        c.execute('CREATE INDEX IF NOT EXISTS assets_project_category_created ON assets(project_id,category,created)')
+        c.execute('CREATE INDEX IF NOT EXISTS assets_production_created ON assets(production_id,created)')
+        c.execute('CREATE INDEX IF NOT EXISTS assets_production_category_created ON assets(production_id,category,created)')
         c.execute('CREATE INDEX IF NOT EXISTS projects_production_updated ON projects(production_id,updated)')
         c.execute('CREATE UNIQUE INDEX IF NOT EXISTS projects_production_episode ON projects(production_id,episode_no) WHERE production_id IS NOT NULL')
         production_columns={row['name'] for row in c.execute('PRAGMA table_info(productions)')}

@@ -464,11 +464,19 @@ class Worker:
         executable=ffmpeg_executable()
         work=s.DATA/job['id']; work.mkdir(exist_ok=True)
         try:
+            def production_asset(asset_id):
+                with s.db() as c:
+                    return c.execute('''SELECT a.* FROM assets a
+                        JOIN projects origin ON origin.id=a.project_id
+                        JOIN projects target ON target.id=?
+                        WHERE a.id=? AND COALESCE(a.production_id,origin.production_id,origin.id)=COALESCE(target.production_id,target.id)
+                        AND NOT EXISTS(SELECT 1 FROM deleted_items d WHERE d.kind='asset' AND d.item_id=a.id)
+                    ''',(job['project_id'],asset_id)).fetchone()
             files=[]
             width,height=(int(x) for x in inp.get('resolution','1280x720').split('x'))
             if width<64 or height<64 or width>4096 or height>4096: raise ValueError('导出分辨率无效')
             for i,item in enumerate(items):
-                with s.db() as c: row=c.execute('SELECT * FROM assets WHERE id=? AND project_id=?',(item['asset_id'],job['project_id'])).fetchone()
+                row=production_asset(item['asset_id'])
                 if not row or row['kind'] not in ('image','video'): raise ValueError('时间线引用了无效的图像或视频')
                 duration=max(0.1,min(float(item.get('duration',5)),600)); start=max(0,float(item.get('start',0)))
                 info=probe(s.ASSETS/row['path']) if row['kind']=='video' else {'has_audio':False}
@@ -493,13 +501,13 @@ class Worker:
             audio_id=inp.get('audio_id')
             subtitle_id=inp.get('subtitle_id')
             if audio_id:
-                with s.db() as c: audio=c.execute('SELECT * FROM assets WHERE id=? AND project_id=?',(audio_id,job['project_id'])).fetchone()
+                audio=production_asset(audio_id)
                 if not audio or audio['kind']!='audio': raise ValueError('配乐素材无效')
                 music_volume=max(0,min(float(inp.get('music_volume',.3)),2))
                 args+=['-stream_loop','-1','-i',str(s.ASSETS/audio['path']),'-filter_complex',f'[1:a]volume={music_volume}[music];[0:a][music]amix=inputs=2:duration=first:normalize=0[mix]','-map','0:v:0','-map','[mix]']
             else:args+=['-map','0:v:0','-map','0:a:0']
             if subtitle_id:
-                with s.db() as c: subtitle=c.execute('SELECT * FROM assets WHERE id=? AND project_id=?',(subtitle_id,job['project_id'])).fetchone()
+                subtitle=production_asset(subtitle_id)
                 if not subtitle or subtitle['kind']!='subtitle':raise ValueError('字幕素材无效')
                 shutil.copyfile(s.ASSETS/subtitle['path'],work/'subtitles.srt')
                 args+=['-vf',"subtitles=filename=subtitles.srt:force_style='FontName=Microsoft YaHei,FontSize=24,Outline=2,MarginV=24'",'-c:v','libx264','-preset','fast']
@@ -518,7 +526,12 @@ class Worker:
             width,height=(int(x) for x in inp.get('resolution','1280x720').split('x'))
             def lookup(asset_id):
                 with s.db() as c:
-                    row=c.execute('SELECT * FROM assets WHERE id=?',(asset_id,)).fetchone()
+                    row=c.execute('''SELECT a.* FROM assets a
+                        JOIN projects origin ON origin.id=a.project_id
+                        JOIN projects target ON target.id=?
+                        WHERE a.id=? AND COALESCE(a.production_id,origin.production_id,origin.id)=COALESCE(target.production_id,target.id)
+                        AND NOT EXISTS(SELECT 1 FROM deleted_items d WHERE d.kind='asset' AND d.item_id=a.id)
+                    ''',(job['project_id'],asset_id)).fetchone()
                 if not row:return None
                 result=dict(row);result['absolute_path']=str(s.ASSETS/result['path'])
                 return result

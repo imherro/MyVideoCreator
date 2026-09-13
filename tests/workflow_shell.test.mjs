@@ -26,6 +26,7 @@ test('workflow stage URL survives refresh and rejects unknown stages',()=>{
 
 test('workflow stages mount the existing workspace views',()=>{
   assert.equal(defaultViewForStage('overview'),'stage');
+  assert.equal(defaultViewForStage('art'),'stage');
   assert.equal(defaultViewForStage('storyboard'),'shots');
   assert.equal(defaultViewForStage('editor'),'editor');
   assert.equal(defaultViewForStage('canvas'),'canvas');

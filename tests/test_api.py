@@ -63,6 +63,8 @@ def test_production_context_is_shared_versioned_and_episode_documents_stay_local
         f'/api/projects/{first["id"]}/assets?category=character',
         files={'file':('shared-hero.png',stream.getvalue(),'image/png')},
     ).json()
+    assert reference['production_id']==production['id']
+    assert reference['project_id']==first['id']
     visual,ids=normalize_visual_bible({'cards':[{
         'key':'hero','kind':'character','name':'共享主角','parent_key':'',
         'description':'固定深蓝外套','attributes':[],'invariants':['服装不变'],
@@ -101,6 +103,22 @@ def test_production_context_is_shared_versioned_and_episode_documents_stay_local
     })
     assert episode_save.status_code==200,episode_save.text
     assert episode_save.json()['production_revision']==inherited['production_revision']
+    production_assets=c.get(f'/api/productions/{production["id"]}/assets').json()
+    inherited_assets=c.get(f'/api/projects/{second["id"]}/assets?scope=production').json()
+    assert [item['id'] for item in production_assets]==[reference['id']]
+    assert [item['id'] for item in inherited_assets]==[reference['id']]
+    assert inherited_assets[0]['origin_episode_no']==1
+    with s.db() as db:
+        stored_asset=db.execute('SELECT id,project_id,production_id,path,metadata,category,source FROM assets WHERE id=?',(reference['id'],)).fetchone()
+        assert db.execute('SELECT COUNT(*) FROM assets WHERE id=?',(reference['id'],)).fetchone()[0]==1
+    assert stored_asset['project_id']==first['id'] and stored_asset['production_id']==production['id']
+    assert (s.ASSETS/stored_asset['path']).read_bytes()==stream.getvalue()
+    usage=c.get(f'/api/productions/{production["id"]}/visual-usage').json()
+    assert usage==[{
+        'version_id':version_id,
+        'episodes':[{'project_id':second['id'],'episode_no':2,'episode_title':'第二集'}],
+        'shots':[{'project_id':second['id'],'episode_no':2,'shot_uid':'shared-shot','shot_id':'shared-shot'}],
+    }]
     with s.db() as db:
         rows=db.execute(
             'SELECT id,document FROM projects WHERE production_id=? ORDER BY episode_no',
@@ -118,6 +136,35 @@ def test_production_context_is_shared_versioned_and_episode_documents_stay_local
     assert c.get(f'/api/productions/{production["id"]}').json()['episode_count']==2
     listed={item['id']:item for item in c.get('/api/projects').json()}
     assert listed[first['id']]['production_id']==production['id']
+
+    other=c.post('/api/projects',json={'name':'另一个 Production'}).json()
+    accepted_job=c.post(f'/api/projects/{second["id"]}/jobs',json={
+        'node_id':'same-production-reference','kind':'text','submission_id':'same-production-reference-1',
+        'input':{'prompt':'只验证引用边界','provider':'local','asset_ids':[reference['id']]},
+    })
+    assert accepted_job.status_code==200,accepted_job.text
+    rejected_job=c.post(f'/api/projects/{other["id"]}/jobs',json={
+        'node_id':'cross-production-reference','kind':'text','submission_id':'cross-production-reference-1',
+        'input':{'prompt':'只验证引用边界','provider':'local','asset_ids':[reference['id']]},
+    })
+    assert rejected_job.status_code==400
+    assert '其他 Production' in rejected_job.json()['detail']
+    rejected=c.patch(
+        f'/api/projects/{other["id"]}/assets/{reference["id"]}',
+        json={'category':'reference'},
+    )
+    assert rejected.status_code==400
+    assert '其他 Production' in rejected.json()['detail']
+
+    deleted=c.delete(f'/api/projects/{second["id"]}/assets/{reference["id"]}')
+    assert deleted.status_code==200 and deleted.json()['soft'] is True
+    assert c.get(f'/api/productions/{production["id"]}/assets').json()==[]
+    assert any(item['id']==reference['id'] for item in c.get('/api/trash').json()['assets'])
+    assert (s.ASSETS/stored_asset['path']).read_bytes()==stream.getvalue()
+    restored=c.post(f'/api/trash/asset/{reference["id"]}/restore')
+    assert restored.status_code==200
+    assert [item['id'] for item in c.get(f'/api/productions/{production["id"]}/assets').json()]==[reference['id']]
+    assert (s.ASSETS/stored_asset['path']).read_bytes()==stream.getvalue()
 
 def test_empty_production_remains_visible_until_its_first_episode_is_created(authenticated):
     c=authenticated
