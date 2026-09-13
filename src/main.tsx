@@ -140,6 +140,7 @@ import type { Clip } from "./timeline";
 import type { EditorDocument } from "./editor/editorDocument";
 import { AnYingMark } from "./app/AnYingMark";
 import { GlobalNav, type GlobalPanel } from "./app/GlobalNav";
+import { planGlobalPanelAction } from "./app/globalNavigation";
 import { WorkflowStageNav } from "./app/WorkflowStageNav";
 import {
   defaultViewForStage,
@@ -1189,6 +1190,14 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setPanel("trash");
     await loadTrash();
   }
+  function activateGlobalPanel(next: GlobalPanel) {
+    const action = planGlobalPanelAction(panel, next);
+    if (action.loadTrash) {
+      openTrash().catch(report);
+      return;
+    }
+    setPanel(action.panel);
+  }
   async function deleteProject(target: Any) {
     if (!target) return;
     if (target.id === project?.id && (dirty.current || saveFlight.current))
@@ -1848,7 +1857,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       <GlobalNav
         active={panel}
         taskCount={activeCount || jobs.length}
-        onChange={(next: GlobalPanel) => setPanel(panel === next ? null : next)}
+        onChange={activateGlobalPanel}
       />
       <main className="work-area">
         <WorkflowStageNav active={workflowStage} onChange={activateWorkflowStage} />

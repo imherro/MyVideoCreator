@@ -6,6 +6,7 @@ import {
   parseWorkflowStage,
   workflowStageUrl,
 } from '../src/app/workflow.ts';
+import {planGlobalPanelAction} from '../src/app/globalNavigation.ts';
 
 test('workflow shell exposes the production stages in order',()=>{
   assert.deepEqual(WORKFLOW_STAGES.map(stage=>stage.label),[
@@ -28,4 +29,19 @@ test('workflow stages mount the existing workspace views',()=>{
   assert.equal(defaultViewForStage('storyboard'),'shots');
   assert.equal(defaultViewForStage('editor'),'editor');
   assert.equal(defaultViewForStage('canvas'),'canvas');
+});
+
+test('global trash navigation requests fresh server state before display',()=>{
+  assert.deepEqual(planGlobalPanelAction(null,'trash'),{
+    panel:'trash',
+    loadTrash:true,
+  });
+  assert.deepEqual(planGlobalPanelAction('trash','trash'),{
+    panel:null,
+    loadTrash:false,
+  });
+  assert.deepEqual(planGlobalPanelAction(null,'assets'),{
+    panel:'assets',
+    loadTrash:false,
+  });
 });
