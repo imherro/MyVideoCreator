@@ -5,6 +5,7 @@ import {
   moveStoryboardShot,
   projectShotReferences,
   selectedShotImageNodeIds,
+  selectedShotVideoNodeIds,
   shotIdentity,
   updateStoryboardShot,
 } from '../src/storyboard.ts';
@@ -68,6 +69,7 @@ test('selected generation targets only explicit shots and manual creation perfor
   const document=fixture();
   assert.deepEqual(selectedShotImageNodeIds(document,['stable-b']),['image-b']);
   assert.deepEqual(selectedShotImageNodeIds(document,['stable-a','missing']),['image-a']);
+  assert.deepEqual(selectedShotVideoNodeIds(document,['stable-b']),['video-b']);
   const created=createStoryboardShot(document,()=> 'new-uid');
   assert.equal(created.shots.length,3);
   assert.equal(created.shots[2].uid,'shot-new-uid');

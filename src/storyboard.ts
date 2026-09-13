@@ -108,3 +108,11 @@ export function selectedShotImageNodeIds(document: FilmBibleDocument, uids: stri
     .map((shot) => shot.imageNode || shot.pipeline?.imageNodeId)
     .filter((value): value is string => typeof value === "string" && Boolean(value));
 }
+
+export function selectedShotVideoNodeIds(document: FilmBibleDocument, uids: string[]) {
+  const selected = new Set(uids);
+  return document.shots
+    .filter((shot) => selected.has(shotIdentity(shot)))
+    .map((shot) => shot.videoNode || shot.pipeline?.videoNodeId)
+    .filter((value): value is string => typeof value === "string" && Boolean(value));
+}

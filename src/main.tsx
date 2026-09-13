@@ -126,13 +126,16 @@ import {
 } from "./filmBible/VisualAssetNode";
 import { visualBibleOf } from "./filmBible/types";
 import { StoryboardWorkspace } from "./pages/StoryboardWorkspace";
+import { VideoProductionWorkspace } from "./pages/VideoProductionWorkspace";
 import {
   createStoryboardShot,
   moveStoryboardShot,
   selectedShotImageNodeIds,
+  selectedShotVideoNodeIds,
   shotIdentity,
   updateStoryboardShot,
 } from "./storyboard";
+import { deriveVideoProductionRows, validateVideoSubmission } from "./videoProduction";
 import { JobProgress } from "./JobProgress";
 import { RunWorkflow } from "./RunWorkflow";
 import { PanoramaViewer } from "./PanoramaViewer";
@@ -1581,6 +1584,58 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       setBusy(false);
     }
   }
+  async function generateShotVideos(shotUids: string[]) {
+    const snapshot = current.current;
+    if (!snapshot.project || !snapshot.doc || busy) return;
+    const selectedUids = new Set(shotUids);
+    const targetShots = snapshot.doc.shots.filter((shot) =>
+      selectedUids.has(shotIdentity(shot)),
+    );
+    if (!targetShots.length) throw new Error("请先选择需要生成的视频镜头");
+    const prepared = deriveManagedGraph(
+      ensureShotNodes(
+        snapshot.doc,
+        config.providers,
+        system.models,
+        id,
+        targetShots.map((shot) => shot.id),
+        storyboardContextId(snapshot.doc),
+      ),
+    ) as Doc;
+    const rows = deriveVideoProductionRows(prepared, assets, jobs, config.providers);
+    const targets = validateVideoSubmission(rows, shotUids);
+    const nodeIds = selectedShotVideoNodeIds(prepared, shotUids);
+    if (nodeIds.length !== targets.length)
+      throw new Error("部分镜头缺少视频生成节点");
+    current.current = { project: snapshot.project, doc: prepared };
+    setDoc(prepared);
+    dirty.current = true;
+    setSaved("未保存");
+    setBusy(true);
+    setError("");
+    try {
+      await save();
+      if (dirty.current) throw new Error("请先解决保存冲突再生成视频");
+      const allowCloud = targets.some((row) => row.provider && !row.provider.local);
+      const result = await api(
+        `/projects/${snapshot.project.id}/run`,
+        send("POST", {
+          submission_id: id(),
+          node_ids: nodeIds,
+          exact: true,
+          allow_cloud: allowCloud,
+        }),
+      );
+      await refresh(snapshot.project.id);
+      setPanel("jobs");
+      setNotice(`已提交 ${result.count} 个所选视频任务`);
+    } catch (reason) {
+      report(reason);
+      throw reason;
+    } finally {
+      setBusy(false);
+    }
+  }
   async function uploadFiles(files: FileList | null, category = uploadCategory) {
     if (!files || !project) return;
     setBusy(true);
@@ -2207,7 +2262,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             </button>
             </>
           )}
-          {["art", "storyboard", "video", "canvas"].includes(workflowStage) && (
+          {["art", "storyboard", "canvas"].includes(workflowStage) && (
             <div className="batch-generation-actions" aria-label="批量生成">
               {["art", "canvas"].includes(workflowStage) && <button
                 className="quiet"
@@ -2377,6 +2432,26 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               link.click();
               setTimeout(() => URL.revokeObjectURL(url), 5000);
             }}
+          />
+        ) : workflowStage === "video" ? (
+          <VideoProductionWorkspace
+            document={doc}
+            assets={assets}
+            jobs={jobs}
+            providers={config.providers}
+            busy={busy}
+            onPatchShot={(uid, patch) =>
+              update((document) => updateStoryboardShot(document, uid, patch))
+            }
+            onPatchVideoNode={(nodeId, patch) =>
+              update((document) => patchNode(document, nodeId, patch))
+            }
+            onGenerate={generateShotVideos}
+            onOpenCanvas={(nodeId) => {
+              setSelected(nodeId);
+              activateWorkflowStage("canvas");
+            }}
+            onPreview={setPreview}
           />
         ) : view === "editor" ? (
           <Suspense fallback={<div className="loading">加载剪辑工作区…</div>}>
