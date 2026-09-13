@@ -21,7 +21,7 @@ def _job(compiled):
     if compiled:
         input_value.update(reference_compiler={'version':1},image_reference_sources=[])
     with s.db() as db:
-        db.execute('INSERT INTO projects VALUES(?,?,1,?,?,?)',(pid,'Prompt freeze','{}',now,now))
+        db.execute('INSERT INTO projects(id,name,revision,document,created,updated) VALUES(?,?,1,?,?,?)',(pid,'Prompt freeze','{}',now,now))
         db.execute(
             'INSERT INTO jobs(id,submission_id,project_id,node_id,kind,status,input,result,created,updated) '
             'VALUES(?,?,?,?,?,?,?,?,?,?)',

@@ -150,6 +150,13 @@ import {
 } from "./app/workflow";
 import { WorkflowOverview } from "./pages/WorkflowOverview";
 import { WorkflowEmptyState } from "./pages/WorkflowEmptyState";
+import { EpisodeSelector } from "./app/EpisodeSelector";
+import {
+  episodesForProduction,
+  type EpisodeSummary,
+  type ProductionSummary,
+} from "./app/production";
+import { ProductionLibrary } from "./pages/ProductionLibrary";
 const EditorWorkspace = lazy(() =>
   import("./editor/EditorWorkspace").then((module) => ({
     default: module.EditorWorkspace,
@@ -196,7 +203,7 @@ type Doc = {
   applied?: string[];
   editor?: EditorDocument;
 };
-type Project = { id: string; name: string; revision: number; document: Doc };
+type Project = EpisodeSummary & { document: Doc };
 type SyncFailureKind = "api" | "sse" | "media";
 type SyncFailure = {
   kind: SyncFailureKind;
@@ -534,7 +541,8 @@ function Studio() {
 
 function Workspace({ onLogout }: { onLogout: () => void }) {
   const initialWorkflowStage = parseWorkflowStage(window.location.search);
-  const [projects, setProjects] = useState<Any[]>([]),
+  const [productions, setProductions] = useState<ProductionSummary[]>([]),
+    [projects, setProjects] = useState<EpisodeSummary[]>([]),
     [project, setProject] = useState<Project | null>(null),
     [doc, setDoc] = useState<Doc | null>(null),
     [assets, setAssets] = useState<Asset[]>([]),
@@ -720,11 +728,13 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   }
   async function boot() {
     try {
-      const [list, sys, settings] = await Promise.all([
+      const [productionList, list, sys, settings] = await Promise.all([
+        api("/productions"),
         api("/projects"),
         api("/system"),
         api("/settings"),
       ]);
+      setProductions(productionList);
       setProjects(list);
       setSystem(sys);
       setConfig(settings);
@@ -734,6 +744,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           "/projects",
           send("POST", { name: "我的第一部短片" }),
         );
+        setProductions(await api("/productions"));
         setProjects([p]);
         await openProject(p.id);
       }
@@ -873,11 +884,15 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         revision.current = result.revision;
         if (name !== projectSnapshot.name) {
           setProject((current) =>
-            current?.id === projectSnapshot.id ? { ...current, name } : current,
+            current?.id === projectSnapshot.id
+              ? { ...current, name, episode_title: name }
+              : current,
           );
           setProjects((current) =>
             current.map((item) =>
-              item.id === projectSnapshot.id ? { ...item, name } : item,
+              item.id === projectSnapshot.id
+                ? { ...item, name, episode_title: name }
+                : item,
             ),
           );
           setNotice("项目名称不能为空，已恢复为“未命名短片”");
@@ -1148,7 +1163,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     });
     setSelected(null);
   }
-  async function createProject(name: string) {
+  async function prepareProjectSwitch() {
     let preservedDraft = false;
     if (dirty.current || saveFlight.current) await save();
     if (dirty.current) {
@@ -1175,13 +1190,56 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       setSaved("已保存");
       preservedDraft = true;
     }
+    return preservedDraft;
+  }
+  async function refreshProductionHierarchy() {
+    const [productionList, episodeList] = await Promise.all([
+      api("/productions"),
+      api("/projects"),
+    ]);
+    setProductions(productionList);
+    setProjects(episodeList);
+  }
+  async function createProduction(name: string) {
+    const preservedDraft = await prepareProjectSwitch();
+    const productionName = name.trim() || "未命名剧集";
+    const production = await api(
+      "/productions",
+      send("POST", { name: productionName }),
+    );
+    const episode = await api(
+      `/productions/${production.id}/episodes`,
+      send("POST", { title: "第 01 集" }),
+    );
+    await refreshProductionHierarchy();
+    await openProject(episode.id);
+    setNotice(
+      preservedDraft
+        ? `已新建“${productionName}”；原集冲突草稿已保存在本浏览器`
+        : `已新建 Production“${productionName}”并进入 EP01`,
+    );
+  }
+  async function createEpisode(production: ProductionSummary, title: string) {
+    await prepareProjectSwitch();
+    const episode = await api(
+      `/productions/${production.id}/episodes`,
+      send("POST", { title }),
+    );
+    await refreshProductionHierarchy();
+    await openProject(episode.id);
+    setNotice(`已在“${production.name}”中新建 EP${String(episode.episode_no).padStart(2, "0")}`);
+  }
+  async function createProject(name: string) {
+    const preservedDraft = await prepareProjectSwitch();
     const projectName = name.trim() || "未命名短片";
     const p = await api("/projects", send("POST", { name: projectName }));
-    setProjects(await api("/projects"));
+    await refreshProductionHierarchy();
     await openProject(p.id);
-    if (preservedDraft)
-      setNotice("已进入新项目；原项目的冲突草稿已保存在本浏览器，可随时返回恢复。");
-    else setNotice(`已新建并进入空白项目“${projectName}”`);
+    setNotice(
+      preservedDraft
+        ? "已进入新项目；原项目的冲突草稿已保存在本浏览器，可随时返回恢复。"
+        : `已新建并进入空白项目“${projectName}”`,
+    );
   }
   async function loadTrash() {
     setTrashItems(await api("/trash"));
@@ -1218,6 +1276,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       list = await api("/projects");
     }
     setProjects(list);
+    setProductions(await api("/productions"));
     if (target.id === project?.id) {
       dirty.current = false;
       conflictRef.current = false;
@@ -1239,6 +1298,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     const currentProjectId = project?.id;
     await api(`/trash/${kind}/${item.id}/restore`, send("POST"));
     setProjects(await api("/projects"));
+    setProductions(await api("/productions"));
     if (kind === "asset" && currentProjectId && item.project_id === currentProjectId)
       await refresh(currentProjectId);
     await loadTrash();
@@ -1767,6 +1827,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   const hasEditorTimeline = Boolean(
     persistedEditorTimeline?.tracks?.some((track) => track.elements.length),
   );
+  const currentProduction =
+    productions.find((item) => item.id === project.production_id) || null;
+  const currentEpisodes = episodesForProduction(projects, project.production_id);
   const toggleTimelineWorkspace = () => {
     if (view === "editor") {
       setView("canvas");
@@ -1806,18 +1869,19 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         <button
           className={panel === "projects" ? "project-menu active" : "project-menu"}
           onClick={() => setPanel(panel === "projects" ? null : "projects")}
+          title="打开 Production 与 Episode 列表"
         >
           <FolderOpen size={15} />
-          项目
+          项目 · {currentProduction?.name || project.name}
           <ChevronDown size={14} />
         </button>
-        <button
-          className={panel === "projectInfo" ? "project-picker active" : "project-picker"}
-          onClick={() => setPanel(panel === "projectInfo" ? null : "projectInfo")}
-          title="查看和修改当前项目信息"
-        >
-          {project.name}
-          <ChevronDown size={15} />
+        <EpisodeSelector
+          episode={project}
+          episodes={currentEpisodes}
+          onSelect={(projectId) => openProject(projectId).catch(report)}
+        />
+        <button className="icon-button" onClick={() => setPanel("projectInfo")} title="查看和修改当前集信息">
+          <FileText size={16} />
         </button>
         <span
           className={"save-status " + (saved === "保存失败" ? "danger" : "")}
@@ -3016,8 +3080,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               {
                 {
                   add: "添加节点",
-                  projects: "项目",
-                  projectInfo: "当前项目信息",
+                  projects: "项目库",
+                  projectInfo: "当前集信息",
                   assets: "资产中心",
                   jobs: "生成任务",
                   settings: "设置",
@@ -3228,56 +3292,22 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               </div>
             )}
             {panel === "projects" && (
-              <>
-                <p className="muted">新建项目或切换工作区。当前项目的资料和生成策略请点击顶部项目名称修改。</p>
-                <button
-                  className="primary full"
-                  onClick={() => {
-                    const name = window.prompt(
-                      "请输入新项目名称。创建后会直接进入空白画布；当前项目会先保存。",
-                      "未命名短片",
-                    );
-                    if (name !== null) createProject(name).catch(report);
-                  }}
-                >
-                  <Plus size={16} />
-                  新建项目
-                </button>
-                <button className="secondary full" onClick={() => openTrash().catch(report)}>
-                  <Trash2 size={16} />
-                  回收站
-                </button>
-                <hr />
-                <h3>项目列表</h3>
-                {projects.map((p) => (
-                  <div className="project-row-wrap" key={p.id}>
-                    <button
-                      className={
-                        "project-row " + (p.id === project.id ? "active" : "")
-                      }
-                      onClick={() => openProject(p.id).catch(report)}
-                    >
-                      <FolderOpen size={18} />
-                      <div>
-                        <b>{p.id === project.id ? project.name : p.name}</b>
-                        <small>
-                          {p.id === project.id ? "当前项目 · " : ""}
-                          {new Date(p.updated * 1000).toLocaleDateString()}
-                        </small>
-                      </div>
-                      <ChevronRight size={16} />
-                    </button>
-                    <button
-                      className="icon-button danger project-delete-button"
-                      aria-label={`删除项目 ${p.name}`}
-                      title="移入回收站"
-                      onClick={() => deleteProject(p.id === project.id ? { ...p, name: project.name } : p).catch(report)}
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                ))}
-              </>
+              <ProductionLibrary
+                productions={productions}
+                episodes={projects}
+                currentEpisodeId={project.id}
+                onCreateProduction={() => {
+                  const name = window.prompt("请输入新 Production 名称。系统会同时建立 EP01。", "未命名剧集");
+                  if (name !== null) createProduction(name).catch(report);
+                }}
+                onCreateEpisode={(production) => {
+                  const next = episodesForProduction(projects, production.id).length + 1;
+                  const title = window.prompt(`在“${production.name}”中新增 EP${String(next).padStart(2, "0")}，可填写集名：`, `第 ${String(next).padStart(2, "0")} 集`);
+                  if (title !== null) createEpisode(production, title).catch(report);
+                }}
+                onOpenEpisode={(episode) => openProject(episode.id).catch(report)}
+                onDeleteEpisode={(episode) => deleteProject(episode.id === project.id ? { ...episode, name: project.name } : episode).catch(report)}
+              />
             )}
             {panel === "trash" && (
               <>

@@ -21,7 +21,7 @@ def stored_job(kind, provider, provider_job_id=None):
     now=time.time()
     inp={'provider':provider['id'],'allow_cloud':True,'prompt':'电影感机器人走向窗前'}
     with s.db() as db:
-        db.execute('INSERT INTO projects VALUES(?,?,1,?,?,?)',(pid,'Ark test','{}',now,now))
+        db.execute('INSERT INTO projects(id,name,revision,document,created,updated) VALUES(?,?,1,?,?,?)',(pid,'Ark test','{}',now,now))
         db.execute('INSERT INTO jobs(id,submission_id,project_id,node_id,kind,status,input,provider_job_id,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?)',
                    (jid,'ark-submit-'+uuid.uuid4().hex,pid,'node',kind,'running',s.dumps(inp),provider_job_id,now,now))
         db.execute('INSERT INTO job_private VALUES(?,?)',(jid,s.dumps(provider)))

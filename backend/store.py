@@ -39,7 +39,8 @@ def init():
         c.executescript('''
         CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY,expires REAL NOT NULL);
-        CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY,name TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 1,document TEXT NOT NULL,created REAL NOT NULL,updated REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS productions(id TEXT PRIMARY KEY,name TEXT NOT NULL,created REAL NOT NULL,updated REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY,name TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 1,document TEXT NOT NULL,created REAL NOT NULL,updated REAL NOT NULL,production_id TEXT REFERENCES productions(id),episode_no INTEGER,episode_title TEXT);
         CREATE TABLE IF NOT EXISTS revisions(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),revision INTEGER NOT NULL,document TEXT NOT NULL,created REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS assets(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),name TEXT NOT NULL,kind TEXT NOT NULL,path TEXT NOT NULL,mime TEXT NOT NULL,metadata TEXT NOT NULL,created REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,submission_id TEXT UNIQUE NOT NULL,project_id TEXT NOT NULL REFERENCES projects(id),node_id TEXT NOT NULL,kind TEXT NOT NULL,status TEXT NOT NULL,input TEXT NOT NULL,result TEXT,provider_job_id TEXT,error TEXT,phase TEXT NOT NULL DEFAULT '',progress REAL,created REAL NOT NULL,updated REAL NOT NULL);
@@ -59,6 +60,32 @@ def init():
         if 'category' not in asset_columns:c.execute("ALTER TABLE assets ADD COLUMN category TEXT NOT NULL DEFAULT 'other'")
         if 'source' not in asset_columns:c.execute("ALTER TABLE assets ADD COLUMN source TEXT NOT NULL DEFAULT 'uploaded'")
         c.execute('CREATE INDEX IF NOT EXISTS assets_project_category_created ON assets(project_id,category,created)')
+        project_columns={row['name'] for row in c.execute('PRAGMA table_info(projects)')}
+        for column,definition in (
+            ('production_id','TEXT'),
+            ('episode_no','INTEGER'),
+            ('episode_title','TEXT'),
+        ):
+            if column not in project_columns:c.execute(f'ALTER TABLE projects ADD COLUMN {column} {definition}')
+        # Legacy projects become one-production/one-episode wrappers without
+        # touching their ids, documents, revisions, assets, jobs, or timestamps.
+        legacy_projects=c.execute(
+            'SELECT id,name,created,updated FROM projects WHERE production_id IS NULL'
+        ).fetchall()
+        for project in legacy_projects:
+            production_id='production-'+project['id']
+            c.execute(
+                'INSERT OR IGNORE INTO productions(id,name,created,updated) VALUES(?,?,?,?)',
+                (production_id,project['name'],project['created'],project['updated']),
+            )
+            c.execute(
+                'UPDATE projects SET production_id=?,episode_no=1,episode_title=? WHERE id=?',
+                (production_id,project['name'],project['id']),
+            )
+        c.execute("UPDATE projects SET episode_no=1 WHERE episode_no IS NULL")
+        c.execute("UPDATE projects SET episode_title=name WHERE episode_title IS NULL OR trim(episode_title)='' ")
+        c.execute('CREATE INDEX IF NOT EXISTS projects_production_updated ON projects(production_id,updated)')
+        c.execute('CREATE UNIQUE INDEX IF NOT EXISTS projects_production_episode ON projects(production_id,episode_no) WHERE production_id IS NOT NULL')
 
 def get_setting(key, default=None):
     with db() as c:

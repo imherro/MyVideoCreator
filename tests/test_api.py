@@ -26,6 +26,32 @@ def project(c):
     assert response.status_code==200,response.text
     return response.json()
 
+def test_production_can_own_multiple_episode_projects(authenticated):
+    c=authenticated
+    created=c.post('/api/productions',json={'name':'六十集测试剧'})
+    assert created.status_code==200,created.text
+    production=created.json()
+    first=c.post(f'/api/productions/{production["id"]}/episodes',json={'title':'觉醒'}).json()
+    second=c.post(f'/api/productions/{production["id"]}/episodes',json={}).json()
+    assert first['id']!=second['id']
+    assert first['production_id']==second['production_id']==production['id']
+    assert first['episode_no']==1 and first['episode_title']=='觉醒'
+    assert second['episode_no']==2 and second['episode_title']=='第 02 集'
+    assert first['revision']==second['revision']==1
+    episodes=c.get(f'/api/productions/{production["id"]}/episodes').json()
+    assert [item['id'] for item in episodes]==[first['id'],second['id']]
+    assert c.get(f'/api/productions/{production["id"]}').json()['episode_count']==2
+    listed={item['id']:item for item in c.get('/api/projects').json()}
+    assert listed[first['id']]['production_id']==production['id']
+
+def test_legacy_project_create_api_still_creates_one_episode_wrapper(authenticated):
+    c=authenticated
+    item=project(c)
+    assert item['production_id']
+    assert item['episode_no']==1 and item['episode_title']==item['name']
+    parent=c.get('/api/productions/'+item['production_id']).json()
+    assert parent['name']==item['name'] and parent['episode_count']==1
+
 def test_project_schema_revision_migration_and_generation_policy_roundtrip(authenticated):
     c=authenticated
     old_providers=s.get_setting('providers',[])
@@ -47,7 +73,7 @@ def test_project_schema_revision_migration_and_generation_policy_roundtrip(authe
         legacy={'nodes':[{'id':'old-node'}],'edges':[],'shots':[],'timeline':[],'editor':{'timeline':{'tracks':[]}}}
         encoded=s.dumps(legacy)
         with s.db() as db:
-            db.execute('INSERT INTO projects VALUES(?,?,1,?,?,?)',(pid,'旧项目',encoded,now,now))
+            db.execute('INSERT INTO projects(id,name,revision,document,created,updated) VALUES(?,?,1,?,?,?)',(pid,'旧项目',encoded,now,now))
             db.execute('INSERT INTO revisions VALUES(?,?,?,?,?)',(rid,pid,1,encoded,now))
         current=c.get('/api/projects/'+pid).json()['document']
         historical=c.get(f'/api/projects/{pid}/revisions/{rid}').json()['document']

@@ -134,7 +134,74 @@ def project(pid):
 @app.get('/api/projects')
 def projects():
     with s.db() as c:
-        return [dict(r) for r in c.execute("SELECT id,name,revision,created,updated FROM projects WHERE NOT EXISTS(SELECT 1 FROM deleted_items WHERE kind='project' AND item_id=projects.id) ORDER BY updated DESC")]
+        return [dict(r) for r in c.execute("SELECT id,name,revision,created,updated,production_id,episode_no,episode_title FROM projects WHERE NOT EXISTS(SELECT 1 FROM deleted_items WHERE kind='project' AND item_id=projects.id) ORDER BY updated DESC")]
+
+def production(production_id):
+    with s.db() as c:
+        row=c.execute('''SELECT p.*,
+            (SELECT COUNT(*) FROM projects e WHERE e.production_id=p.id AND NOT EXISTS(
+                SELECT 1 FROM deleted_items d WHERE d.kind='project' AND d.item_id=e.id
+            )) episode_count
+            FROM productions p WHERE p.id=?''',(production_id,)).fetchone()
+    if not row:raise HTTPException(404,'Production 不存在')
+    return dict(row)
+
+@app.get('/api/productions')
+def productions():
+    with s.db() as c:
+        return [dict(row) for row in c.execute('''SELECT p.*,
+            (SELECT COUNT(*) FROM projects e WHERE e.production_id=p.id AND NOT EXISTS(
+                SELECT 1 FROM deleted_items d WHERE d.kind='project' AND d.item_id=e.id
+            )) episode_count
+            FROM productions p ORDER BY p.updated DESC''')]
+
+class ProductionCreate(BaseModel):
+    name:str=Field(default='未命名剧集',max_length=100)
+
+@app.post('/api/productions')
+def create_production(body:ProductionCreate):
+    production_id=s.uid('production-')
+    now=time.time();name=normalized_project_name(body.name)
+    with s.db() as c:
+        c.execute('INSERT INTO productions(id,name,created,updated) VALUES(?,?,?,?)',(production_id,name,now,now))
+    return production(production_id)
+
+@app.get('/api/productions/{production_id}')
+def read_production(production_id:str):
+    return production(production_id)
+
+@app.get('/api/productions/{production_id}/episodes')
+def production_episodes(production_id:str):
+    production(production_id)
+    with s.db() as c:
+        return [dict(row) for row in c.execute('''SELECT id,name,revision,created,updated,production_id,episode_no,episode_title
+            FROM projects WHERE production_id=? AND NOT EXISTS(
+                SELECT 1 FROM deleted_items WHERE kind='project' AND item_id=projects.id
+            ) ORDER BY episode_no,id''',(production_id,))]
+
+class EpisodeCreate(BaseModel):
+    title:str=Field(default='',max_length=100)
+
+@app.post('/api/productions/{production_id}/episodes')
+def create_episode(production_id:str,body:EpisodeCreate):
+    document=new_document(default_ark_policy(s.get_setting('providers',[])))
+    now=time.time();pid=s.uid('project-')
+    with s.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        parent=c.execute('SELECT * FROM productions WHERE id=?',(production_id,)).fetchone()
+        if not parent:raise HTTPException(404,'Production 不存在')
+        episode_no=c.execute(
+            'SELECT COALESCE(MAX(episode_no),0)+1 value FROM projects WHERE production_id=?',
+            (production_id,),
+        ).fetchone()['value']
+        title=body.title.strip() or f'第 {episode_no:02d} 集'
+        c.execute('''INSERT INTO projects(
+            id,name,revision,document,created,updated,production_id,episode_no,episode_title
+        ) VALUES(?,?,1,?,?,?,?,?,?)''',(
+            pid,title,s.dumps(document),now,now,production_id,episode_no,title,
+        ))
+        c.execute('UPDATE productions SET updated=? WHERE id=?',(now,production_id))
+    return project(pid)
 
 class ProjectCreate(BaseModel):
     name:str=Field(default='未命名短片',max_length=100)
@@ -144,10 +211,15 @@ def normalized_project_name(name:str)->str:
 
 @app.post('/api/projects')
 def create_project(body:ProjectCreate):
-    pid = s.uid('project-')
+    pid = s.uid('project-');production_id=s.uid('production-')
     document = new_document(default_ark_policy(s.get_setting('providers',[])))
+    now=time.time();name=normalized_project_name(body.name)
     with s.db() as c:
-        c.execute('INSERT INTO projects VALUES(?,?,1,?,?,?)',(pid,normalized_project_name(body.name),s.dumps(document),time.time(),time.time()))
+        c.execute('BEGIN IMMEDIATE')
+        c.execute('INSERT INTO productions(id,name,created,updated) VALUES(?,?,?,?)',(production_id,name,now,now))
+        c.execute('''INSERT INTO projects(
+            id,name,revision,document,created,updated,production_id,episode_no,episode_title
+        ) VALUES(?,?,1,?,?,?,?,1,?)''',(pid,name,s.dumps(document),now,now,production_id,name))
     return project(pid)
 
 @app.get('/api/projects/{pid}')
@@ -192,7 +264,11 @@ def save_project(pid:str,body:ProjectSave):
         from .film_bible.versioning import validate_film_bible_transition
         validate_film_bible_transition(migrate_document(s.unpack(old)['document']),document)
         c.execute('INSERT INTO revisions VALUES(?,?,?,?,?)',(s.uid(),pid,old['revision'],old['document'],time.time()))
-        c.execute('UPDATE projects SET name=?,revision=revision+1,document=?,updated=? WHERE id=?',(normalized_project_name(body.name),encoded,time.time(),pid))
+        name=normalized_project_name(body.name)
+        updated=time.time()
+        c.execute('UPDATE projects SET name=?,episode_title=?,revision=revision+1,document=?,updated=? WHERE id=?',(name,name,encoded,updated,pid))
+        if old['production_id']:
+            c.execute('UPDATE productions SET updated=? WHERE id=?',(updated,old['production_id']))
     s.event(pid,{'type':'project','revision':body.revision+1})
     return {'revision':body.revision+1,'updated':time.time()}
 

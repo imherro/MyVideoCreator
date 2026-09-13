@@ -18,7 +18,7 @@ def test_real_export_two_stills_and_decode():
     s.set_setting('ffmpeg',ffmpeg)
     pid=s.uid();jid=s.uid();now=time.time()
     with s.db() as c:
-        c.execute('INSERT INTO projects VALUES(?,?,1,?,?,?)',(pid,'Export integration','{}',now,now))
+        c.execute('INSERT INTO projects(id,name,revision,document,created,updated) VALUES(?,?,1,?,?,?)',(pid,'Export integration','{}',now,now))
         c.execute('INSERT INTO jobs(id,submission_id,project_id,node_id,kind,status,input,created,updated) VALUES(?,?,?,?,?,?,?,?,?)',(jid,jid,pid,'export','export','running','{}',now,now))
     job={'id':jid,'project_id':pid,'node_id':'export','kind':'export','input':{}}
     timeline=[]
@@ -46,7 +46,7 @@ def test_export_original_audio_music_subtitle_and_mute():
     from backend.media import ffmpeg_executable,probe
     s.init();ffmpeg=ffmpeg_executable()
     pid=s.uid();now=time.time()
-    with s.db() as c:c.execute('INSERT INTO projects VALUES(?,?,1,?,?,?)',(pid,'Sound and subtitle','{}',now,now))
+    with s.db() as c:c.execute('INSERT INTO projects(id,name,revision,document,created,updated) VALUES(?,?,1,?,?,?)',(pid,'Sound and subtitle','{}',now,now))
     def job():
         jid=s.uid()
         with s.db() as c:c.execute('INSERT INTO jobs(id,submission_id,project_id,node_id,kind,status,input,created,updated) VALUES(?,?,?,?,?,?,?,?,?)',(jid,jid,pid,'export','export','running','{}',now,now))
@@ -90,7 +90,7 @@ def test_editor_export_composites_tracks_text_and_audio():
     s.init();ffmpeg=ffmpeg_executable()
     pid=s.uid();jid=s.uid();now=time.time()
     with s.db() as c:
-        c.execute('INSERT INTO projects VALUES(?,?,1,?,?,?)',(pid,'Editor export','{}',now,now))
+        c.execute('INSERT INTO projects(id,name,revision,document,created,updated) VALUES(?,?,1,?,?,?)',(pid,'Editor export','{}',now,now))
         c.execute('INSERT INTO jobs(id,submission_id,project_id,node_id,kind,status,input,created,updated) VALUES(?,?,?,?,?,?,?,?,?)',(jid,jid,pid,'export','export','running','{}',now,now))
     job={'id':jid,'project_id':pid,'node_id':'export','kind':'export','input':{}}
     source=s.DATA/(s.uid()+'.mp4');music=s.DATA/(s.uid()+'.wav');overlay=s.DATA/(s.uid()+'.png')
@@ -151,7 +151,7 @@ def test_editor_export_crossfades_adjacent_visuals():
     s.init();ffmpeg=ffmpeg_executable()
     pid=s.uid();jid=s.uid();now=time.time()
     with s.db() as c:
-        c.execute('INSERT INTO projects VALUES(?,?,1,?,?,?)',(pid,'Crossfade','{}',now,now))
+        c.execute('INSERT INTO projects(id,name,revision,document,created,updated) VALUES(?,?,1,?,?,?)',(pid,'Crossfade','{}',now,now))
         c.execute('INSERT INTO jobs(id,submission_id,project_id,node_id,kind,status,input,created,updated) VALUES(?,?,?,?,?,?,?,?,?)',(jid,jid,pid,'export','export','running','{}',now,now))
     job={'id':jid,'project_id':pid,'node_id':'export','kind':'export','input':{}}
     assets=[]
@@ -188,7 +188,7 @@ def test_editor_export_honors_source_trim_rate_filter_and_caption():
     s.init();ffmpeg=ffmpeg_executable()
     pid=s.uid();jid=s.uid();now=time.time()
     with s.db() as c:
-        c.execute('INSERT INTO projects VALUES(?,?,1,?,?,?)',(pid,'Trim filter caption','{}',now,now))
+        c.execute('INSERT INTO projects(id,name,revision,document,created,updated) VALUES(?,?,1,?,?,?)',(pid,'Trim filter caption','{}',now,now))
         c.execute('INSERT INTO jobs(id,submission_id,project_id,node_id,kind,status,input,created,updated) VALUES(?,?,?,?,?,?,?,?,?)',(jid,jid,pid,'export','export','running','{}',now,now))
     job={'id':jid,'project_id':pid,'node_id':'export','kind':'export','input':{}}
     source=s.DATA/(s.uid()+'.mp4')
