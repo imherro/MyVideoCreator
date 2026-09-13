@@ -165,7 +165,7 @@ def compile_shot_image_input(
     versions = visual.get('versions') or {}
     compiled = []
     constraint_lines = []
-    for index, (group, binding) in enumerate(rows, 1):
+    for group, binding in rows:
         if not isinstance(binding, dict) or not binding.get('versionId'):
             raise ValueError('分镜视觉绑定缺少版本编号，请重新绑定资产')
         version_id = binding['versionId']
@@ -173,6 +173,9 @@ def compile_shot_image_input(
         card = cards.get(version.get('cardId')) if isinstance(version, dict) else None
         if not version or not card:
             raise ValueError(f'分镜视觉绑定 {version_id} 已悬空，请重新绑定资产')
+        if card.get('status') == 'deprecated':
+            continue
+        index = len(compiled) + 1
         if card.get('kind') not in GROUP_KINDS[group]:
             raise ValueError(f'分镜视觉绑定 {card.get("name", version_id)} 的资产类型不正确')
         confirmed_deprecated = (
@@ -195,6 +198,9 @@ def compile_shot_image_input(
             'versionChain': [item['id'] for _, item in chain],
         })
         constraint_lines.extend(_constraint_lines(index, group, chain))
+
+    if not compiled:
+        return result
 
     provider_id = str(result.get('provider') or '')
     provider = next((item for item in providers if item.get('id') == provider_id), None)

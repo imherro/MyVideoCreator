@@ -246,3 +246,17 @@ def test_deprecated_previously_locked_version_remains_resolvable_for_old_shot():
     )
     assert result['reference_compiler']['bindings'][0]['versionId'] == 'hero-v1'
     assert result['asset_ids'][0] == 'asset-hero'
+
+
+def test_soft_deleted_card_is_ignored_until_restored():
+    value = document()
+    value['filmBible']['visual']['cards']['hero']['status'] = 'deprecated'
+    value['filmBible']['visual']['cards']['hero']['deletedAt'] = 123
+    result = compile_shot_image_input(
+        value, 'image-1', 'image', input_value(), PROVIDERS, supports(),
+    )
+    assert 'asset-hero' not in result['asset_ids']
+    assert all(
+        item['cardId'] != 'hero'
+        for item in result['reference_compiler']['bindings']
+    )

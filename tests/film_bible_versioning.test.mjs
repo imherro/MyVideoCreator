@@ -7,7 +7,7 @@ import {
   setProjectVisualStyle,
   upgradeVisualBindings,
 } from '../src/filmBible/versioning.ts';
-import {setVisualVersionStatus} from '../src/filmBible/commands.ts';
+import {restoreVisualCard,setVisualVersionStatus,softDeleteVisualCard} from '../src/filmBible/commands.ts';
 
 function fixture(){
   const v1={id:'hero-v1',cardId:'hero',version:1,parentVersionId:null,status:'locked',spec:{description:'灰色风衣',attributes:[{name:'发型',value:'短发'}]},invariants:['脸型不变'],references:[{role:'primary',assetId:'old-reference'}],createdAt:1,provenance:{lockedAt:2}};
@@ -91,6 +91,19 @@ test('referenced and immutable versions cannot be hard deleted; deprecated stays
   assert.equal(doc.shots[0].assetBindings.characters[0].versionId,'hero-v1');
   assert.equal(doc.filmBible.visual.versions['hero-v1'].status,'deprecated');
   assert.throws(()=>hardDeleteVisualVersion(doc,'hero-v1'),/仍被分镜引用/);
+});
+
+test('visual cards use a reversible deletion marker without removing versions or bindings',()=>{
+  const source=fixture();
+  const deleted=softDeleteVisualCard(source,'hero',123);
+  assert.equal(deleted.filmBible.visual.cards.hero.status,'deprecated');
+  assert.equal(deleted.filmBible.visual.cards.hero.deletedAt,123);
+  assert.deepEqual(deleted.filmBible.visual.versions,source.filmBible.visual.versions);
+  assert.deepEqual(deleted.shots,source.shots);
+  const restored=restoreVisualCard(deleted,'hero');
+  assert.equal(restored.filmBible.visual.cards.hero.status,'active');
+  assert.equal(restored.filmBible.visual.cards.hero.deletedAt,undefined);
+  assert.deepEqual(restored.shots,source.shots);
 });
 
 test('style version changes mark generated shots stale without removing media',()=>{

@@ -94,7 +94,9 @@ import { FilmBiblePanel } from "./filmBible/FilmBiblePanel";
 import {
   bindVisualVersion,
   renameVisualCard,
+  restoreVisualCard,
   setVisualVersionStatus,
+  softDeleteVisualCard,
   unbindVisualVersion,
   updateDraftVisualVersion,
 } from "./filmBible/commands";
@@ -558,6 +560,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     [busy, setBusy] = useState(false),
     [timelineOpen, setTimelineOpen] = useState(false),
     [revisions, setRevisions] = useState<Any[]>([]),
+    [trashItems, setTrashItems] = useState<Any>({ projects: [], assets: [] }),
     [preview, setPreview] = useState<Asset | null>(null);
   const [previewTimeline, setPreviewTimeline] = useState(false);
   const [visualFocus, setVisualFocus] = useState<string | undefined>();
@@ -1033,16 +1036,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   const activeCount = jobs.filter((j) =>
     ["queued", "running"].includes(j.status),
   ).length;
-  const canDeleteCurrentProject =
-    !!doc &&
-    !doc.nodes.length &&
-    !doc.edges.length &&
-    !doc.shots.length &&
-    !doc.timeline.length &&
-    !doc.characters.length &&
-    !String(doc.brief || "").trim() &&
-    !assets.length &&
-    !jobs.length;
   function editNode(patch: Any) {
     if (selected) update((d) => patchNode(d, selected, patch));
   }
@@ -1157,27 +1150,58 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       setNotice("已进入新项目；原项目的冲突草稿已保存在本浏览器，可随时返回恢复。");
     else setNotice(`已新建并进入空白项目“${projectName}”`);
   }
-  async function deleteCurrentProject() {
-    if (!project || !canDeleteCurrentProject) return;
-    if (
-      !window.confirm(
-        `删除空项目“${project.name}”？此操作无法恢复。`,
-      )
-    )
-      return;
-    const deletedId = project.id;
-    await api(`/projects/${deletedId}`, send("DELETE"));
+  async function loadTrash() {
+    setTrashItems(await api("/trash"));
+  }
+  async function openTrash() {
+    setPanel("trash");
+    await loadTrash();
+  }
+  async function deleteProject(target: Any) {
+    if (!target) return;
+    if (target.id === project?.id && (dirty.current || saveFlight.current))
+      await save();
+    if (target.id === project?.id && dirty.current)
+      throw new Error("当前项目尚未保存，请先解决保存问题再移入回收站。");
+    const entered = window.prompt(
+      `项目会移入回收站并可恢复。请输入项目名称“${target.name}”确认：`,
+      "",
+    );
+    if (entered === null) return;
+    if (entered.trim() !== target.name)
+      throw new Error("项目名称不匹配，未执行删除。");
+    await api(`/projects/${target.id}`, send("DELETE"));
     let list = await api("/projects");
     if (!list.length) {
       await api("/projects", send("POST", { name: "我的第一部短片" }));
       list = await api("/projects");
     }
-    dirty.current = false;
-    conflictRef.current = false;
-    setConflict(false);
     setProjects(list);
-    await openProject(list[0].id);
-    setNotice("空项目已删除");
+    if (target.id === project?.id) {
+      dirty.current = false;
+      conflictRef.current = false;
+      setConflict(false);
+      await openProject(list[0].id);
+    }
+    await loadTrash();
+    setNotice(`项目“${target.name}”已移入回收站`);
+  }
+  async function deleteAsset(asset: Asset) {
+    if (!project) return;
+    if (!window.confirm(`将素材“${asset.name}”移入回收站？项目中的引用会暂时不可用，恢复后会重新出现。`)) return;
+    await api(`/projects/${project.id}/assets/${asset.id}`, send("DELETE"));
+    setAssets((items) => items.filter((item) => item.id !== asset.id));
+    await loadTrash();
+    setNotice(`素材“${asset.name}”已移入回收站`);
+  }
+  async function restoreTrashItem(kind: "project" | "asset", item: Any) {
+    const currentProjectId = project?.id;
+    await api(`/trash/${kind}/${item.id}/restore`, send("POST"));
+    setProjects(await api("/projects"));
+    if (kind === "asset" && currentProjectId && item.project_id === currentProjectId)
+      await refresh(currentProjectId);
+    await loadTrash();
+    setNotice(`${kind === "project" ? "项目" : "素材"}“${item.name}”已恢复`);
   }
   function sourceAssets(nid: string) {
     const sources =
@@ -2986,7 +3010,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         <div
           className={
             "side-panel " +
-            (["settings", "assets", "jobs", "characters", "filmBible", "projectInfo"].includes(
+            (["settings", "assets", "jobs", "characters", "filmBible", "projectInfo", "trash"].includes(
               panel,
             )
               ? panel === "filmBible"
@@ -3011,6 +3035,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   export: "导出成片",
                   run: "运行工作流",
                   filmBible: "视觉圣经",
+                  trash: "回收站",
                 }[panel]
               }
             </h2>
@@ -3041,6 +3066,16 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                     const next = renameVisualCard(doc, cardId, name);
                     update(() => next);
                     setNotice("视觉卡名称已保存");
+                  } catch (reason) {
+                    report(reason);
+                  }
+                }}
+                onDeleteCard={(cardId) => {
+                  const card = visualBibleOf(doc).cards[cardId];
+                  if (!card || !window.confirm(`将视觉资产卡“${card.name}”移入回收站？恢复后原分镜绑定会重新生效。`)) return;
+                  try {
+                    update((currentDoc) => softDeleteVisualCard(currentDoc, cardId));
+                    setNotice(`视觉资产卡“${card.name}”已移入回收站`);
                   } catch (reason) {
                     report(reason);
                   }
@@ -3216,27 +3251,94 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   <Plus size={16} />
                   新建项目
                 </button>
+                <button className="secondary full" onClick={() => openTrash().catch(report)}>
+                  <Trash2 size={16} />
+                  回收站
+                </button>
                 <hr />
                 <h3>项目列表</h3>
                 {projects.map((p) => (
-                  <button
-                    className={
-                      "project-row " + (p.id === project.id ? "active" : "")
-                    }
-                    key={p.id}
-                    onClick={() => openProject(p.id).catch(report)}
-                  >
-                    <FolderOpen size={18} />
-                    <div>
-                      <b>{p.id === project.id ? project.name : p.name}</b>
-                      <small>
-                        {p.id === project.id ? "当前项目 · " : ""}
-                        {new Date(p.updated * 1000).toLocaleDateString()}
-                      </small>
-                    </div>
-                    <ChevronRight size={16} />
-                  </button>
+                  <div className="project-row-wrap" key={p.id}>
+                    <button
+                      className={
+                        "project-row " + (p.id === project.id ? "active" : "")
+                      }
+                      onClick={() => openProject(p.id).catch(report)}
+                    >
+                      <FolderOpen size={18} />
+                      <div>
+                        <b>{p.id === project.id ? project.name : p.name}</b>
+                        <small>
+                          {p.id === project.id ? "当前项目 · " : ""}
+                          {new Date(p.updated * 1000).toLocaleDateString()}
+                        </small>
+                      </div>
+                      <ChevronRight size={16} />
+                    </button>
+                    <button
+                      className="icon-button danger project-delete-button"
+                      aria-label={`删除项目 ${p.name}`}
+                      title="移入回收站"
+                      onClick={() => deleteProject(p.id === project.id ? { ...p, name: project.name } : p).catch(report)}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
                 ))}
+              </>
+            )}
+            {panel === "trash" && (
+              <>
+                <p className="muted">这里只隐藏内容，不删除数据库记录和媒体文件。恢复后会回到原来的项目。</p>
+                {!!trashItems.projects.length && <h3>项目</h3>}
+                {trashItems.projects.map((item: Any) => (
+                  <div className="trash-row" key={`project-${item.id}`}>
+                    <FolderOpen size={17} />
+                    <div><b>{item.name}</b><small>{new Date(item.deleted_at * 1000).toLocaleString()}</small></div>
+                    <button onClick={() => restoreTrashItem("project", item).catch(report)}><RefreshCw size={14} /> 恢复</button>
+                  </div>
+                ))}
+                {!!trashItems.assets.length && <h3>素材</h3>}
+                {trashItems.assets.map((item: Any) => (
+                  <div className="trash-row" key={`asset-${item.id}`}>
+                    <ImageIcon size={17} />
+                    <div><b>{item.name}</b><small>{item.project_name} · {assetKinds[item.kind] || item.kind}</small></div>
+                    <button onClick={() => restoreTrashItem("asset", item).catch(report)}><RefreshCw size={14} /> 恢复</button>
+                  </div>
+                ))}
+                {!!doc.characters.filter((item) => item.deletedAt).length && <h3>当前项目角色 / 场景</h3>}
+                {doc.characters.filter((item) => item.deletedAt).map((item) => (
+                  <div className="trash-row" key={`character-${item.id}`}>
+                    <FolderOpen size={17} />
+                    <div><b>{item.name}</b><small>手工角色 / 场景设定</small></div>
+                    <button onClick={() => {
+                      update((d) => ({
+                        ...d,
+                        characters: d.characters.map((candidate) => {
+                          if (candidate.id !== item.id) return candidate;
+                          const restored = { ...candidate };
+                          delete restored.deletedAt;
+                          return restored;
+                        }),
+                      }));
+                      setNotice(`角色/场景“${item.name}”已恢复`);
+                    }}><RefreshCw size={14} /> 恢复</button>
+                  </div>
+                ))}
+                {!!Object.values(visualBibleOf(doc).cards).filter((item) => item.deletedAt).length && <h3>当前项目视觉资产卡</h3>}
+                {Object.values(visualBibleOf(doc).cards).filter((item) => item.deletedAt).map((item) => (
+                  <div className="trash-row" key={`visual-${item.id}`}>
+                    <BookOpen size={17} />
+                    <div><b>{item.name}</b><small>{assetCategories[item.kind === "character_state" ? "character" : item.kind === "scene_state" ? "scene" : item.kind] || item.kind}</small></div>
+                    <button onClick={() => {
+                      update((currentDoc) => restoreVisualCard(currentDoc, item.id));
+                      setNotice(`视觉资产卡“${item.name}”已恢复`);
+                    }}><RefreshCw size={14} /> 恢复</button>
+                  </div>
+                ))}
+                {!trashItems.projects.length && !trashItems.assets.length && !doc.characters.some((item) => item.deletedAt) && !Object.values(visualBibleOf(doc).cards).some((item) => item.deletedAt) && (
+                  <div className="empty-state"><Trash2 /><h3>回收站为空</h3><p>移入回收站的项目、素材和角色场景会显示在这里。</p></div>
+                )}
               </>
             )}
             {panel === "projectInfo" && (
@@ -3353,15 +3455,13 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                     update((d) => ({ ...d, generationPolicy }))
                   }
                 />
-                {canDeleteCurrentProject && (
-                  <button
-                    className="full danger-button"
-                    onClick={() => deleteCurrentProject().catch(report)}
-                  >
-                    <Trash2 size={16} />
-                    删除空项目
-                  </button>
-                )}
+                <button
+                  className="full danger-button"
+                  onClick={() => deleteProject(project).catch(report)}
+                >
+                  <Trash2 size={16} />
+                  将项目移入回收站
+                </button>
               </>
             )}
             {panel === "assets" && (
@@ -3436,6 +3536,14 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                         <a href={a.url} download={a.name} title="下载">
                           <Download size={14} />
                         </a>
+                        <button
+                          className="icon-button danger asset-delete-button"
+                          onClick={() => deleteAsset(a).catch(report)}
+                          aria-label={`删除素材 ${a.name}`}
+                          title="移入回收站"
+                        >
+                          <Trash2 size={14} />
+                        </button>
                       </div>
                     </article>
                   ))}
@@ -3753,7 +3861,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   <Plus size={16} />
                   添加角色 / 场景
                 </button>
-                {doc.characters.map((c) => (
+                {doc.characters.filter((c) => !c.deletedAt).map((c) => (
                   <article className="character-card" key={c.id}>
                     <label>
                       名称
@@ -3839,6 +3947,23 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                         引用到当前节点
                       </button>
                     )}
+                    <button
+                      className="quiet danger"
+                      onClick={() => {
+                        if (!window.confirm(`将角色/场景“${c.name}”移入回收站？`)) return;
+                        update((d) => ({
+                          ...d,
+                          characters: d.characters.map((item) =>
+                            item.id === c.id
+                              ? { ...item, deletedAt: Date.now() / 1000 }
+                              : item,
+                          ),
+                        }));
+                        setNotice(`角色/场景“${c.name}”已移入回收站`);
+                      }}
+                    >
+                      <Trash2 size={14} /> 移至回收站
+                    </button>
                   </article>
                 ))}
               </>

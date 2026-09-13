@@ -24,10 +24,16 @@ def _style_version(document):
     return 1
 
 
-def _bound_versions(shot):
+def _bound_versions(document, shot):
     bindings = shot.get('assetBindings') or {}
+    visual = ((document.get('filmBible') or {}).get('visual') or {})
+    cards = visual.get('cards') or {}
+    versions = visual.get('versions') or {}
     result = []
     for item in bindings.get('characters') or []:
+        version = versions.get(str(item.get('versionId') or '')) or {}
+        if (cards.get(version.get('cardId')) or {}).get('status') == 'deprecated':
+            continue
         result.append({
             'group': 'character',
             'role': str(item.get('role') or ''),
@@ -35,8 +41,13 @@ def _bound_versions(shot):
         })
     scene = bindings.get('scene')
     if isinstance(scene, dict) and scene.get('versionId'):
-        result.append({'group': 'scene', 'role': '', 'versionId': str(scene['versionId'])})
+        version = versions.get(str(scene['versionId'])) or {}
+        if (cards.get(version.get('cardId')) or {}).get('status') != 'deprecated':
+            result.append({'group': 'scene', 'role': '', 'versionId': str(scene['versionId'])})
     for item in bindings.get('props') or []:
+        version = versions.get(str(item.get('versionId') or '')) or {}
+        if (cards.get(version.get('cardId')) or {}).get('status') == 'deprecated':
+            continue
         result.append({
             'group': 'prop',
             'role': str(item.get('role') or ''),
@@ -52,7 +63,7 @@ def generation_fingerprint_payload(
     """Return only generation-semantic, JSON-canonical inputs."""
     return {
         'shotVariables': {key: shot.get(key) for key in SHOT_VARIABLE_FIELDS},
-        'boundVisualVersions': _bound_versions(shot),
+        'boundVisualVersions': _bound_versions(document, shot),
         'styleVersion': _style_version(document),
         'promptCompilerVersion': prompt_compiler_version,
         'providerId': str(provider_id or ''),

@@ -49,6 +49,8 @@ def init():
         CREATE INDEX IF NOT EXISTS assets_project_created ON assets(project_id,created);
         CREATE INDEX IF NOT EXISTS revisions_project_revision ON revisions(project_id,revision);
         CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT,project_id TEXT,payload TEXT NOT NULL,created REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS deleted_items(kind TEXT NOT NULL,item_id TEXT NOT NULL,project_id TEXT,deleted_at REAL NOT NULL,PRIMARY KEY(kind,item_id));
+        CREATE INDEX IF NOT EXISTS deleted_items_project ON deleted_items(project_id,deleted_at);
         ''')
         columns={row['name'] for row in c.execute('PRAGMA table_info(jobs)')}
         for column,definition in (('started','REAL'),('finished','REAL'),('telemetry','TEXT')):

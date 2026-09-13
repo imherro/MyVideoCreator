@@ -46,9 +46,10 @@ export function filterManagedEdgeRemovals<
 
 function orderedVersions(document: FilmBibleDocument) {
   const visual = visualBibleOf(document);
-  const cards = Object.values(visual.cards).sort((a, b) =>
-    `${a.kind}:${a.name}:${a.id}`.localeCompare(`${b.kind}:${b.name}:${b.id}`),
-  );
+  const cards = Object.values(visual.cards)
+    .sort((a, b) =>
+      `${a.kind}:${a.name}:${a.id}`.localeCompare(`${b.kind}:${b.name}:${b.id}`),
+    );
   return cards.flatMap((card) =>
     Object.values(visual.versions)
       .filter((version) => version.cardId === card.id)
@@ -103,10 +104,12 @@ export function deriveManagedGraph<T extends FilmBibleDocument>(document: T): T 
   );
   const managedNodes = versions.map((version, index) => {
     const previous = existingByVersion.get(version.id);
+    const card = visual.cards[version.cardId];
     return {
       id: previous?.id || stableNodeId(version.id),
       type: VISUAL_NODE_TYPE,
       position: previous?.position || { x: 770, y: 80 + index * 190 },
+      hidden: Boolean(card?.deletedAt),
       data: {
         kind: "visual_asset",
         visualVersionId: version.id,
@@ -125,7 +128,7 @@ export function deriveManagedGraph<T extends FilmBibleDocument>(document: T): T 
       const version = visual.versions[binding.versionId];
       const card = version ? visual.cards[version.cardId] : undefined;
       const source = nodeIdByVersion.get(binding.versionId);
-      if (!source || !card) return [];
+      if (!source || !card || card.deletedAt) return [];
       const kind =
         card.kind === "character_state"
           ? "character"

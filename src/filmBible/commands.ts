@@ -131,6 +131,39 @@ export function setVisualVersionStatus<T extends FilmBibleDocument>(
   });
 }
 
+export function softDeleteVisualCard<T extends FilmBibleDocument>(
+  document: T,
+  cardId: string,
+  deletedAt = Date.now() / 1000,
+): T {
+  const visual = visualBibleOf(document);
+  const card = visual.cards[cardId];
+  if (!card) throw new Error("视觉资产卡不存在");
+  if (card.deletedAt) return document;
+  return withVisual(document, {
+    ...visual,
+    cards: {
+      ...visual.cards,
+      [cardId]: { ...card, status: "deprecated", deletedAt },
+    },
+  });
+}
+
+export function restoreVisualCard<T extends FilmBibleDocument>(
+  document: T,
+  cardId: string,
+): T {
+  const visual = visualBibleOf(document);
+  const card = visual.cards[cardId];
+  if (!card?.deletedAt) throw new Error("回收站中没有该视觉资产卡");
+  const restored = { ...card, status: "active" as const };
+  delete restored.deletedAt;
+  return withVisual(document, {
+    ...visual,
+    cards: { ...visual.cards, [cardId]: restored },
+  });
+}
+
 function shotIdentity(shot: Record<string, any>) {
   return String(shot.uid || shot.id || "");
 }

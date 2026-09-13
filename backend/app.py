@@ -120,7 +120,7 @@ def logout(request:Request,response:Response):
 
 def project(pid):
     with s.db() as c:
-        row = c.execute('SELECT * FROM projects WHERE id=?',(pid,)).fetchone()
+        row = c.execute("SELECT * FROM projects WHERE id=? AND NOT EXISTS(SELECT 1 FROM deleted_items WHERE kind='project' AND item_id=projects.id)",(pid,)).fetchone()
     if not row:
         raise HTTPException(404,'项目不存在')
     value=s.unpack(row)
@@ -134,7 +134,7 @@ def project(pid):
 @app.get('/api/projects')
 def projects():
     with s.db() as c:
-        return [dict(r) for r in c.execute('SELECT id,name,revision,created,updated FROM projects ORDER BY updated DESC')]
+        return [dict(r) for r in c.execute("SELECT id,name,revision,created,updated FROM projects WHERE NOT EXISTS(SELECT 1 FROM deleted_items WHERE kind='project' AND item_id=projects.id) ORDER BY updated DESC")]
 
 class ProjectCreate(BaseModel):
     name:str=Field(default='未命名短片',max_length=100)
@@ -155,20 +155,15 @@ def read_project(pid:str):
     return project(pid)
 
 @app.delete('/api/projects/{pid}')
-def delete_empty_project(pid:str):
+def delete_project(pid:str):
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
-        row=c.execute('SELECT * FROM projects WHERE id=?',(pid,)).fetchone()
+        row=c.execute("SELECT * FROM projects WHERE id=? AND NOT EXISTS(SELECT 1 FROM deleted_items WHERE kind='project' AND item_id=projects.id)",(pid,)).fetchone()
         if not row: raise HTTPException(404,'项目不存在')
-        document=migrate_document(s.unpack(row)['document'])
-        has_content=bool(str(document.get('brief','')).strip()) or any(document.get(key) for key in ('nodes','edges','shots','timeline','characters'))
-        has_assets=c.execute('SELECT 1 FROM assets WHERE project_id=? LIMIT 1',(pid,)).fetchone()
-        has_jobs=c.execute('SELECT 1 FROM jobs WHERE project_id=? LIMIT 1',(pid,)).fetchone()
-        if has_content or has_assets or has_jobs:
-            raise HTTPException(400,'只能删除没有内容、素材和任务的空项目。')
-        c.execute('DELETE FROM revisions WHERE project_id=?',(pid,))
-        c.execute('DELETE FROM projects WHERE id=?',(pid,))
-    return {'deleted':pid}
+        active=c.execute("SELECT COUNT(*) count FROM jobs WHERE project_id=? AND status IN ('queued','running')",(pid,)).fetchone()['count']
+        if active: raise HTTPException(409,f'项目仍有 {active} 个运行中任务，请先取消后再移入回收站。')
+        c.execute("INSERT INTO deleted_items(kind,item_id,project_id,deleted_at) VALUES('project',?,?,?)",(pid,pid,time.time()))
+    return {'deleted':pid,'soft':True}
 
 @app.get('/api/projects/{pid}/storyboard-sheet')
 def storyboard_sheet(pid:str,columns:int=3,page:int=1):
@@ -218,7 +213,7 @@ def revision(pid:str,rid:str):
 
 def asset_row(aid):
     with s.db() as c:
-        row=c.execute('SELECT * FROM assets WHERE id=?',(aid,)).fetchone()
+        row=c.execute("SELECT * FROM assets WHERE id=? AND NOT EXISTS(SELECT 1 FROM deleted_items WHERE kind='asset' AND item_id=assets.id)",(aid,)).fetchone()
     if not row: raise HTTPException(404,'素材不存在')
     return s.unpack(row)
 
@@ -237,7 +232,7 @@ def assets(pid:str,category:str|None=None,kind:str|None=None):
     project(pid)
     if category is not None:asset_category(category)
     if kind is not None and kind not in ASSET_KINDS:raise ValueError('媒体类型无效')
-    clauses=['project_id=?'];params=[pid]
+    clauses=['project_id=?',"NOT EXISTS(SELECT 1 FROM deleted_items WHERE kind='asset' AND item_id=assets.id)"];params=[pid]
     if category is not None:clauses.append('category=?');params.append(category)
     if kind is not None:clauses.append('kind=?');params.append(kind)
     with s.db() as c:
@@ -282,10 +277,41 @@ class AssetUpdate(BaseModel):
 def update_asset(pid:str,aid:str,body:AssetUpdate):
     category=asset_category(body.category)
     with s.db() as c:
-        row=c.execute('SELECT * FROM assets WHERE id=? AND project_id=?',(aid,pid)).fetchone()
+        row=c.execute("SELECT * FROM assets WHERE id=? AND project_id=? AND NOT EXISTS(SELECT 1 FROM deleted_items WHERE kind='asset' AND item_id=assets.id)",(aid,pid)).fetchone()
         if not row:raise HTTPException(404,'素材不存在')
         c.execute('UPDATE assets SET category=? WHERE id=?',(category,aid))
     return asset_public(asset_row(aid))
+
+@app.delete('/api/projects/{pid}/assets/{aid}')
+def delete_asset(pid:str,aid:str):
+    project(pid)
+    with s.db() as c:
+        row=c.execute("SELECT id FROM assets WHERE id=? AND project_id=? AND NOT EXISTS(SELECT 1 FROM deleted_items WHERE kind='asset' AND item_id=assets.id)",(aid,pid)).fetchone()
+        if not row:raise HTTPException(404,'素材不存在')
+        c.execute("INSERT INTO deleted_items(kind,item_id,project_id,deleted_at) VALUES('asset',?,?,?)",(aid,pid,time.time()))
+    s.event(pid,{'type':'asset_deleted','id':aid})
+    return {'deleted':aid,'soft':True}
+
+@app.get('/api/trash')
+def trash():
+    with s.db() as c:
+        deleted_projects=[dict(row) for row in c.execute("SELECT p.id,p.name,d.deleted_at FROM deleted_items d JOIN projects p ON p.id=d.item_id WHERE d.kind='project' ORDER BY d.deleted_at DESC")]
+        deleted_assets=[dict(row) for row in c.execute("SELECT a.id,a.name,a.kind,a.category,a.project_id,p.name project_name,d.deleted_at FROM deleted_items d JOIN assets a ON a.id=d.item_id JOIN projects p ON p.id=a.project_id WHERE d.kind='asset' ORDER BY d.deleted_at DESC")]
+    return {'projects':deleted_projects,'assets':deleted_assets}
+
+@app.post('/api/trash/{kind}/{item_id}/restore')
+def restore_deleted_item(kind:str,item_id:str):
+    if kind not in ('project','asset'):raise HTTPException(400,'回收站类型无效')
+    with s.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        row=c.execute('SELECT * FROM deleted_items WHERE kind=? AND item_id=?',(kind,item_id)).fetchone()
+        if not row:raise HTTPException(404,'回收站中没有该项目')
+        if kind=='asset':
+            hidden_project=c.execute("SELECT 1 FROM deleted_items WHERE kind='project' AND item_id=?",(row['project_id'],)).fetchone()
+            if hidden_project:raise HTTPException(409,'请先恢复素材所属项目。')
+        c.execute('DELETE FROM deleted_items WHERE kind=? AND item_id=?',(kind,item_id))
+    if row['project_id']:s.event(row['project_id'],{'type':'restored','kind':kind,'id':item_id})
+    return {'restored':item_id,'kind':kind}
 
 @app.get('/api/assets/{aid}/file')
 def asset_file(aid:str):

@@ -526,14 +526,29 @@ def test_blank_project_name_uses_default(authenticated):
     assert saved.status_code==200
     assert c.get('/api/projects/'+item['id']).json()['name']=='未命名短片'
 
-def test_only_empty_project_can_be_deleted(authenticated):
+def test_projects_and_assets_move_to_trash_and_restore(authenticated):
+    import io
+    from PIL import Image
     c=authenticated
-    empty=c.post('/api/projects',json={'name':'待删除'}).json()
-    assert c.delete('/api/projects/'+empty['id']).json()=={'deleted':empty['id']}
     occupied=project(c)
     occupied['document']['nodes']=[{'id':'n1','data':{'kind':'text'}}]
     assert c.put('/api/projects/'+occupied['id'],json={'name':occupied['name'],'revision':occupied['revision'],'document':occupied['document']}).status_code==200
-    assert c.delete('/api/projects/'+occupied['id']).status_code==400
+    deleted=c.delete('/api/projects/'+occupied['id'])
+    assert deleted.status_code==200 and deleted.json()=={'deleted':occupied['id'],'soft':True}
+    assert c.get('/api/projects/'+occupied['id']).status_code==404
+    assert occupied['id'] not in [item['id'] for item in c.get('/api/projects').json()]
+    assert occupied['id'] in [item['id'] for item in c.get('/api/trash').json()['projects']]
+    assert c.post(f'/api/trash/project/{occupied["id"]}/restore').status_code==200
+    assert c.get('/api/projects/'+occupied['id']).status_code==200
+
+    stream=io.BytesIO();Image.new('RGB',(8,8),'#223344').save(stream,format='PNG')
+    asset=c.post(f'/api/projects/{occupied["id"]}/assets',files={'file':('trash.png',stream.getvalue(),'image/png')}).json()
+    assert c.delete(f'/api/projects/{occupied["id"]}/assets/{asset["id"]}').json()=={'deleted':asset['id'],'soft':True}
+    assert asset['id'] not in [item['id'] for item in c.get(f'/api/projects/{occupied["id"]}/assets').json()]
+    assert c.get(f'/api/assets/{asset["id"]}/file').status_code==404
+    assert asset['id'] in [item['id'] for item in c.get('/api/trash').json()['assets']]
+    assert c.post(f'/api/trash/asset/{asset["id"]}/restore').status_code==200
+    assert c.get(f'/api/assets/{asset["id"]}/file').status_code==200
 
 def test_cloud_opt_in_idempotency_and_frozen_provider(authenticated):
     c=authenticated;p=project(c)

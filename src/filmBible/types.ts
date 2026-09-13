@@ -42,6 +42,7 @@ export type VisualCard = {
   parentCardId: string | null;
   currentVersionId: string;
   status: "active" | "deprecated";
+  deletedAt?: number;
   source: { type: "script_extraction" };
   generation?: { image?: VisualGenerationOverride };
 };

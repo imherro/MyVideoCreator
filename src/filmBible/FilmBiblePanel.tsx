@@ -6,6 +6,7 @@ import {
   LoaderCircle,
   LockKeyhole,
   Sparkles,
+  Trash2,
   Unlink,
 } from "lucide-react";
 import { ModelSelector } from "../ModelSelector.tsx";
@@ -39,6 +40,7 @@ export function FilmBiblePanel({
   focusVersionId,
   onFocusVersion,
   onRenameCard,
+  onDeleteCard,
   onSaveVersion,
   onStatus,
   onSetImageOverride,
@@ -63,6 +65,7 @@ export function FilmBiblePanel({
   focusVersionId?: string;
   onFocusVersion: (versionId: string) => void;
   onRenameCard: (cardId: string, name: string) => void;
+  onDeleteCard: (cardId: string) => void;
   onSaveVersion: (versionId: string, draft: VersionDraft) => void;
   onStatus: (versionId: string, status: VisualVersionStatus) => void;
   onSetImageOverride: (
@@ -91,7 +94,9 @@ export function FilmBiblePanel({
 }) {
   const versions = useMemo(
     () =>
-      Object.values(visual.versions).sort((left, right) => {
+      Object.values(visual.versions).filter(
+        (version) => !visual.cards[version.cardId]?.deletedAt,
+      ).sort((left, right) => {
         const leftCard = visual.cards[left.cardId];
         const rightCard = visual.cards[right.cardId];
         return `${leftCard?.kind}:${leftCard?.name}:${left.version}`.localeCompare(
@@ -106,7 +111,7 @@ export function FilmBiblePanel({
   const [shotUid, setShotUid] = useState(
     String(shots[0]?.uid || shots[0]?.id || ""),
   );
-  const selected = visual.versions[selectedId] || versions[0];
+  const selected = versions.find((version) => version.id === selectedId) || versions[0];
   const card = selected ? visual.cards[selected.cardId] : undefined;
   const shot = shots.find(
     (item) => String(item.uid || item.id || "") === shotUid,
@@ -226,6 +231,9 @@ export function FilmBiblePanel({
           </span>
           <button className="quiet" onClick={() => onLocate(selected.id)}>
             画布定位 <ArrowUpRight size={13} />
+          </button>
+          <button className="quiet danger" onClick={() => onDeleteCard(card.id)}>
+            <Trash2 size={13} /> 移至回收站
           </button>
         </div>
         <label>
