@@ -153,7 +153,15 @@ def productions():
             (SELECT COUNT(*) FROM projects e WHERE e.production_id=p.id AND NOT EXISTS(
                 SELECT 1 FROM deleted_items d WHERE d.kind='project' AND d.item_id=e.id
             )) episode_count
-            FROM productions p ORDER BY p.updated DESC''')]
+            FROM productions p
+            WHERE NOT EXISTS(
+                SELECT 1 FROM projects e WHERE e.production_id=p.id
+            ) OR EXISTS(
+                SELECT 1 FROM projects e WHERE e.production_id=p.id AND NOT EXISTS(
+                    SELECT 1 FROM deleted_items d WHERE d.kind='project' AND d.item_id=e.id
+                )
+            )
+            ORDER BY p.updated DESC''')]
 
 class ProductionCreate(BaseModel):
     name:str=Field(default='未命名剧集',max_length=100)

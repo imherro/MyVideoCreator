@@ -44,6 +44,12 @@ def test_production_can_own_multiple_episode_projects(authenticated):
     listed={item['id']:item for item in c.get('/api/projects').json()}
     assert listed[first['id']]['production_id']==production['id']
 
+def test_empty_production_remains_visible_until_its_first_episode_is_created(authenticated):
+    c=authenticated
+    production=c.post('/api/productions',json={'name':'待建分集'}).json()
+    listed={item['id']:item for item in c.get('/api/productions').json()}
+    assert listed[production['id']]['episode_count']==0
+
 def test_legacy_project_create_api_still_creates_one_episode_wrapper(authenticated):
     c=authenticated
     item=project(c)

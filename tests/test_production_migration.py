@@ -17,6 +17,7 @@ def test_legacy_projects_are_wrapped_without_rewriting_episode_data(monkeypatch,
             CREATE TABLE revisions(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),revision INTEGER NOT NULL,document TEXT NOT NULL,created REAL NOT NULL);
             CREATE TABLE assets(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),name TEXT NOT NULL,kind TEXT NOT NULL,path TEXT NOT NULL,mime TEXT NOT NULL,metadata TEXT NOT NULL,created REAL NOT NULL);
             CREATE TABLE jobs(id TEXT PRIMARY KEY,submission_id TEXT UNIQUE NOT NULL,project_id TEXT NOT NULL REFERENCES projects(id),node_id TEXT NOT NULL,kind TEXT NOT NULL,status TEXT NOT NULL,input TEXT NOT NULL,result TEXT,provider_job_id TEXT,error TEXT,phase TEXT NOT NULL DEFAULT '',progress REAL,created REAL NOT NULL,updated REAL NOT NULL);
+            CREATE TABLE deleted_items(kind TEXT NOT NULL,item_id TEXT NOT NULL,project_id TEXT,deleted_at REAL NOT NULL,PRIMARY KEY(kind,item_id));
         ''')
         connection.execute(
             'INSERT INTO projects VALUES(?,?,?,?,?,?)',
@@ -33,6 +34,10 @@ def test_legacy_projects_are_wrapped_without_rewriting_episode_data(monkeypatch,
         connection.execute(
             'INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
             ('job-legacy', 'submission-legacy', 'project-legacy', 'legacy-node', 'image', 'succeeded', '{}', '{}', None, '', 'done', 100.0, 17.0, 18.0),
+        )
+        connection.execute(
+            "INSERT INTO deleted_items(kind,item_id,project_id,deleted_at) VALUES('project',?,?,?)",
+            ('project-legacy', 'project-legacy', 19.0),
         )
 
     monkeypatch.setattr(s, 'DATA', data)
@@ -60,3 +65,11 @@ def test_legacy_projects_are_wrapped_without_rewriting_episode_data(monkeypatch,
     assert asset['project_id'] == project['id'] and asset['metadata'] == '{"kept":true}'
     assert job['project_id'] == project['id'] and job['status'] == 'succeeded'
     assert media.read_bytes() == b'unchanged-media'
+
+    from backend.app import productions, restore_deleted_item, trash
+
+    assert all(item['id'] != production[0]['id'] for item in productions())
+    assert [item['id'] for item in trash()['projects']] == ['project-legacy']
+    restore_deleted_item('project', 'project-legacy')
+    visible = {item['id']: item for item in productions()}
+    assert visible[production[0]['id']]['episode_count'] == 1
