@@ -11,6 +11,7 @@ const assets = [
   { id: "tail-a", kind: "image", name: "尾帧 A", url: "/tail.png" },
   { id: "clip-a", kind: "video", name: "视频 A", url: "/a.mp4" },
 ];
+const capabilities = { [["ark", "seedance-2"].join("\u0000")]: { end_frame: true } };
 
 function fixture() {
   const shots = [
@@ -39,7 +40,7 @@ function fixture() {
 
 test("video workspace projects canonical shots into all production states", () => {
   const { document, jobs } = fixture();
-  const rows = deriveVideoProductionRows(document, assets, jobs, providers);
+  const rows = deriveVideoProductionRows(document, assets, jobs, providers, capabilities);
   assert.deepEqual(rows.map((row) => row.status), ["ready", "generating", "failed", "stale", "complete", "blocked", "blocked"]);
   assert.equal(rows[4].firstFrame.id, "frame-a");
   assert.equal(rows[4].endFrame.id, "tail-a");
@@ -50,7 +51,7 @@ test("video workspace projects canonical shots into all production states", () =
 
 test("selected submission contains only explicit stable pipeline video nodes", () => {
   const { document, jobs } = fixture();
-  const rows = deriveVideoProductionRows(document, assets, jobs, providers);
+  const rows = deriveVideoProductionRows(document, assets, jobs, providers, capabilities);
   assert.deepEqual(selectedVideoNodeIds(rows, ["u-complete", "u-ready"]), ["v-ready", "v-complete"]);
   assert.deepEqual(validateVideoSubmission(rows, ["u-ready"]).map((row) => row.uid), ["u-ready"]);
   assert.throws(() => validateVideoSubmission(rows, ["u-ready", "u-blocked"]), /缺少已生成的首帧/);
@@ -59,9 +60,16 @@ test("selected submission contains only explicit stable pipeline video nodes", (
 
 test("batch review names count provider model and cloud use before submission", () => {
   const { document, jobs } = fixture();
-  const rows = deriveVideoProductionRows(document, assets, jobs, providers);
+  const rows = deriveVideoProductionRows(document, assets, jobs, providers, capabilities);
   const summary = videoSubmissionSummary(rows, ["u-ready", "u-complete"]);
   assert.equal(summary.count, 2);
   assert.equal(summary.cloudCount, 2);
   assert.deepEqual(summary.groups, [{ providerId: "ark", providerName: "火山方舟", modelId: "seedance-2", count: 2, cloud: true }]);
+});
+
+test("Ark end frame visibility follows the selected model capability, not provider type", () => {
+  const { document, jobs } = fixture();
+  const withoutCapability = deriveVideoProductionRows(document, assets, jobs, providers);
+  assert.equal(withoutCapability[4].endFrameSupported, false);
+  assert.match(withoutCapability[4].readinessReason, /不支持尾帧/);
 });

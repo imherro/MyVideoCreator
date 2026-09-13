@@ -2440,6 +2440,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             jobs={jobs}
             providers={config.providers}
             busy={busy}
+            request={api}
             onPatchShot={(uid, patch) =>
               update((document) => updateStoryboardShot(document, uid, patch))
             }

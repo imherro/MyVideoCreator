@@ -143,8 +143,11 @@ def test_batch_seedream_keeps_canvas_reference_order_after_parent_finishes(batch
     assert Worker().execute(target)['assets'][0]['id']=='result'
 
 
-def test_batch_seedance_allows_dynamic_first_frame_with_explicit_last_frame(batch_authenticated):
+def test_batch_seedance_allows_dynamic_first_frame_with_explicit_last_frame(batch_authenticated,monkeypatch):
     client=batch_authenticated;item=project(client);_ark_settings(client)
+    monkeypatch.setattr(ark,'list_models',lambda provider:[{
+        'id':'seedance','kind':'video','capabilities':{'image_reference':True,'end_frame':True},
+    }])
     tail=_image(client,item['id'],'tail.png')
     doc=item['document']
     doc['nodes']=[
@@ -161,3 +164,32 @@ def test_batch_seedance_allows_dynamic_first_frame_with_explicit_last_frame(batc
         {'type':'upstream_job','job_id':jobs['first']['id']},
     ]
     assert jobs['video']['input']['end_asset_id']==tail['id']
+
+
+def test_batch_seedance_rejects_end_frame_when_selected_model_lacks_capability(batch_authenticated,monkeypatch):
+    client=batch_authenticated;item=project(client);_ark_settings(client)
+    first=_image(client,item['id'],'first.png')
+    tail=_image(client,item['id'],'tail.png')
+    catalog_calls=[]
+    monkeypatch.setattr(ark,'list_models',lambda provider:catalog_calls.append(provider['id']) or [{
+        'id':'seedance-no-tail','kind':'video',
+        'capabilities':{'image_reference':True,'end_frame':False},
+    }])
+    doc=item['document']
+    doc['nodes']=[
+        {'id':'first','data':{'kind':'image','provider':'ark','prompt':'现有首帧','assetId':first['id']}},
+        {'id':'video','data':{
+            'kind':'video','provider':'ark','model':'seedance-no-tail',
+            'prompt':'镜头向前推进','end_asset_id':tail['id'],
+        }},
+    ]
+    doc['edges']=[{'id':'first-frame','source':'first','target':'video'}]
+    saved=client.put('/api/projects/'+item['id'],json={'name':item['name'],'revision':item['revision'],'document':doc})
+    assert saved.status_code==200,saved.text
+    result=client.post('/api/projects/'+item['id']+'/run',json={
+        'submission_id':'ark-no-tail-batch-001','node_ids':['video'],'exact':True,'allow_cloud':True,
+    })
+    assert result.status_code==400
+    assert '不支持尾帧' in result.text
+    assert catalog_calls==['ark']
+    assert client.get('/api/projects/'+item['id']+'/jobs').json()==[]

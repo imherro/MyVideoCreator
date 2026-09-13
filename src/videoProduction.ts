@@ -47,6 +47,7 @@ export function deriveVideoProductionRows(
   assets: Value[],
   jobs: Value[],
   providers: Value[],
+  modelCapabilities: Record<string, Value> = {},
 ): VideoProductionRow[] {
   const nodes = new Map<string, Value>((document.nodes || []).map((node: Value) => [node.id, node]));
   const assetMap = new Map<string, Value>(assets.map((asset) => [asset.id, asset]));
@@ -60,10 +61,14 @@ export function deriveVideoProductionRows(
     const videoAsset = videoNode?.data?.assetId ? assetMap.get(videoNode.data.assetId) : undefined;
     const job = latestJob(jobs, videoNode?.id);
     const provider = providerMap.get(videoNode?.data?.provider);
+    const catalogCapabilities = modelCapabilities[
+      [String(videoNode?.data?.provider || ""), String(videoNode?.data?.model || "")].join("\u0000")
+    ];
     const endFrameSupported = Boolean(
-      videoNode?.data?.model_capabilities?.end_frame ||
-      provider?.capabilities?.end_frame ||
-      provider?.type === "volcengine_ark",
+      videoNode?.data?.model_capabilities?.end_frame ??
+      catalogCapabilities?.end_frame ??
+      provider?.capabilities?.end_frame ??
+      false
     );
     let readinessReason = "";
     if (!videoNode) readinessReason = "视频生成节点不存在";

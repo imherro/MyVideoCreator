@@ -120,6 +120,21 @@ def list_models(provider):
     return sorted(models, key=lambda model: (model['id'] != configured.get(model['kind']), model['id']), reverse=False)
 
 
+def model_capabilities(provider, kind, model_id=None):
+    """Resolve capabilities for the concrete Ark model selected by a job."""
+    target = str(model_id or model_for(provider, kind) or '').strip()
+    if not target:
+        raise ValueError('请先选择火山方舟模型')
+    model = next(
+        (item for item in list_models(provider) if item.get('id') == target and item.get('kind') == kind),
+        None,
+    )
+    if not model:
+        label = {'text': '文本', 'image': '图片', 'video': '视频'}.get(kind, kind)
+        raise ValueError(f'火山方舟{label}模型目录中找不到所选模型，无法核对生成能力')
+    return model.get('capabilities') or {}
+
+
 def check_configured_model(provider, kind):
     """Check catalog visibility for a configured model without billed generation."""
     if kind not in ('text', 'image', 'video'):

@@ -10,6 +10,7 @@ type Props = {
   jobs: Value[];
   providers: Value[];
   busy: boolean;
+  request: (path: string) => Promise<any>;
   onPatchShot: (uid: string, patch: Value) => void;
   onPatchVideoNode: (nodeId: string, patch: Value) => void;
   onGenerate: (uids: string[]) => Promise<void>;
@@ -23,9 +24,40 @@ const statusLabels: Record<VideoProductionStatus, string> = {
 const jobLabels: Record<string, string> = { queued: "排队中", running: "生成中", interrupted: "等待恢复", failed: "失败", succeeded: "已完成" };
 
 export function VideoProductionWorkspace(props: Props) {
+  const [catalogCapabilities, setCatalogCapabilities] = useState<Record<string, Value>>({});
+  const arkProviderIds = useMemo(() => {
+    const providerMap = new Map(props.providers.map((provider) => [provider.id, provider]));
+    const ids = new Set<string>();
+    for (const shot of props.document.shots || []) {
+      const nodeId = shot.videoNode || shot.pipeline?.videoNodeId;
+      const node = (props.document.nodes || []).find((item: Value) => item.id === nodeId);
+      const provider = providerMap.get(node?.data?.provider);
+      if (provider?.type === "volcengine_ark") ids.add(provider.id);
+    }
+    return [...ids].sort();
+  }, [props.document.shots, props.document.nodes, props.providers]);
+  useEffect(() => {
+    let active = true;
+    if (!arkProviderIds.length) {
+      setCatalogCapabilities({});
+      return () => { active = false; };
+    }
+    void Promise.all(arkProviderIds.map(async (providerId) => {
+      const value = await props.request("/providers/" + encodeURIComponent(providerId) + "/models?kind=video");
+      return (value.models || []).map((model: Value) => [
+        [providerId, String(model.id || "")].join("\u0000"),
+        model.capabilities || {},
+      ]);
+    })).then((groups) => {
+      if (active) setCatalogCapabilities(Object.fromEntries(groups.flat()));
+    }).catch(() => {
+      if (active) setCatalogCapabilities({});
+    });
+    return () => { active = false; };
+  }, [arkProviderIds.join("|"), props.request]);
   const rows = useMemo(
-    () => deriveVideoProductionRows(props.document, props.assets, props.jobs, props.providers),
-    [props.document, props.assets, props.jobs, props.providers],
+    () => deriveVideoProductionRows(props.document, props.assets, props.jobs, props.providers, catalogCapabilities),
+    [props.document, props.assets, props.jobs, props.providers, catalogCapabilities],
   );
   const [filter, setFilter] = useState<"all" | VideoProductionStatus>("all");
   const [selected, setSelected] = useState<string[]>([]);

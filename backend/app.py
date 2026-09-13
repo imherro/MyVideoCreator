@@ -745,7 +745,7 @@ def create_job_record(c,pid,body):
     references=list(body.input.get('asset_ids',[]))
     if body.input.get('end_asset_id'):references.append(body.input['end_asset_id'])
     if selected and selected.get('type')=='volcengine_ark':
-        from .providers.volcengine_ark import max_image_references
+        from .providers.volcengine_ark import max_image_references, model_capabilities
         ark_video_reference_count=(
             len(body.input['image_reference_sources'])
             if 'image_reference_sources' in body.input
@@ -755,6 +755,10 @@ def create_job_record(c,pid,body):
             raise ValueError('当前火山方舟视频最多接受一张首帧，请移除多余引用')
         if body.kind=='video' and body.input.get('end_asset_id') and ark_video_reference_count!=1:
             raise ValueError('使用火山方舟尾帧时必须同时指定一张首帧')
+        if body.kind=='video' and body.input.get('end_asset_id'):
+            capabilities=model_capabilities(selected,'video',body.input.get('model'))
+            if capabilities.get('end_frame') is not True:
+                raise ValueError('所选火山方舟视频模型不支持尾帧控制')
         if body.kind=='image' and len(references)>max_image_references(selected):
             raise ValueError(f'当前火山方舟图片模型最多支持 {max_image_references(selected)} 张参考图，请移除多余引用')
     for aid in references:
