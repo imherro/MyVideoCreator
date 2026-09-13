@@ -42,9 +42,12 @@ def init():
         CREATE TABLE IF NOT EXISTS productions(id TEXT PRIMARY KEY,name TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 1,shared_context TEXT,created REAL NOT NULL,updated REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY,name TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 1,document TEXT NOT NULL,created REAL NOT NULL,updated REAL NOT NULL,production_id TEXT REFERENCES productions(id),episode_no INTEGER,episode_title TEXT);
         CREATE TABLE IF NOT EXISTS production_revisions(id TEXT PRIMARY KEY,production_id TEXT NOT NULL REFERENCES productions(id),revision INTEGER NOT NULL,shared_context TEXT NOT NULL,created REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS source_documents(id TEXT PRIMARY KEY,production_id TEXT NOT NULL REFERENCES productions(id),type TEXT NOT NULL,title TEXT NOT NULL,metadata TEXT NOT NULL,created REAL NOT NULL,updated REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS source_chapters(id TEXT PRIMARY KEY,source_id TEXT NOT NULL REFERENCES source_documents(id),chapter_no INTEGER NOT NULL,title TEXT NOT NULL,content TEXT NOT NULL,sort_order INTEGER NOT NULL,revision INTEGER NOT NULL DEFAULT 1,created REAL NOT NULL,updated REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS revisions(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),revision INTEGER NOT NULL,document TEXT NOT NULL,created REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS assets(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),name TEXT NOT NULL,kind TEXT NOT NULL,path TEXT NOT NULL,mime TEXT NOT NULL,metadata TEXT NOT NULL,created REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,submission_id TEXT UNIQUE NOT NULL,project_id TEXT NOT NULL REFERENCES projects(id),node_id TEXT NOT NULL,kind TEXT NOT NULL,status TEXT NOT NULL,input TEXT NOT NULL,result TEXT,provider_job_id TEXT,error TEXT,phase TEXT NOT NULL DEFAULT '',progress REAL,created REAL NOT NULL,updated REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS source_events(id TEXT PRIMARY KEY,production_id TEXT NOT NULL REFERENCES productions(id),chapter_id TEXT NOT NULL REFERENCES source_chapters(id),event_order INTEGER NOT NULL,characters TEXT NOT NULL,summary TEXT NOT NULL,importance TEXT NOT NULL,emotion TEXT NOT NULL,continuity TEXT NOT NULL,extraction_job_id TEXT REFERENCES jobs(id),created REAL NOT NULL,updated REAL NOT NULL);
         CREATE INDEX IF NOT EXISTS jobs_project_created ON jobs(project_id,created);
         CREATE INDEX IF NOT EXISTS jobs_status_created ON jobs(status,created);
         CREATE TABLE IF NOT EXISTS job_private(job_id TEXT PRIMARY KEY REFERENCES jobs(id),provider TEXT NOT NULL);
@@ -125,6 +128,10 @@ def init():
                         (dumps(stripped),episode['id']),
                     )
         c.execute('CREATE INDEX IF NOT EXISTS production_revisions_parent_revision ON production_revisions(production_id,revision)')
+        c.execute('CREATE INDEX IF NOT EXISTS source_documents_production ON source_documents(production_id,updated)')
+        c.execute('CREATE UNIQUE INDEX IF NOT EXISTS source_chapters_number ON source_chapters(source_id,chapter_no)')
+        c.execute('CREATE INDEX IF NOT EXISTS source_chapters_source_order ON source_chapters(source_id,sort_order)')
+        c.execute('CREATE INDEX IF NOT EXISTS source_events_production_chapter ON source_events(production_id,chapter_id,event_order)')
 
 def get_setting(key, default=None):
     with db() as c:

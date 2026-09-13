@@ -727,6 +727,161 @@ def submit(pid:str,body:JobCreate):
     s.event(pid,{'type':'job','id':result['id']})
     return result
 
+
+class SourceCreate(BaseModel):
+    title:str=Field(min_length=1,max_length=200)
+    type:str='manual'
+    metadata:dict=Field(default_factory=dict)
+
+class SourceImport(SourceCreate):
+    content:str=Field(min_length=1,max_length=20_000_000)
+
+class ChapterCreate(BaseModel):
+    title:str=Field(min_length=1,max_length=300)
+    content:str=Field(max_length=2_000_000)
+
+class ChapterSave(ChapterCreate):
+    revision:int=Field(ge=1)
+
+class SourceExtractionCreate(BaseModel):
+    project_id:str
+    chapter_ids:list[str]=Field(min_length=1,max_length=500)
+    provider:str
+    model:str
+    allow_cloud:bool=False
+    submission_id:str=Field(min_length=8,max_length=80)
+
+def source_document_row(production_id,source_id):
+    with s.db() as c:
+        row=c.execute('SELECT * FROM source_documents WHERE id=? AND production_id=?',(source_id,production_id)).fetchone()
+    if not row:raise HTTPException(404,'原著文档不存在')
+    return s.unpack(row)
+
+@app.get('/api/productions/{production_id}/sources')
+def source_documents(production_id:str):
+    production(production_id)
+    with s.db() as c:
+        rows=c.execute('''SELECT d.*,(SELECT COUNT(*) FROM source_chapters c WHERE c.source_id=d.id) chapter_count
+            FROM source_documents d WHERE d.production_id=? ORDER BY d.updated DESC,d.id''',(production_id,)).fetchall()
+    return [s.unpack(row) for row in rows]
+
+@app.post('/api/productions/{production_id}/sources')
+def create_source_document(production_id:str,body:SourceCreate):
+    production(production_id)
+    from .source_library import SOURCE_TYPES
+    if body.type not in SOURCE_TYPES:raise ValueError('原著类型无效')
+    if not body.title.strip():raise ValueError('原著名称不能为空')
+    source_id=s.uid('source-');now=time.time()
+    with s.db() as c:
+        c.execute('INSERT INTO source_documents VALUES(?,?,?,?,?,?,?)',(
+            source_id,production_id,body.type,body.title.strip(),s.dumps(body.metadata),now,now,
+        ))
+    return source_document_row(production_id,source_id)
+
+@app.post('/api/productions/{production_id}/sources/import')
+def import_source_document(production_id:str,body:SourceImport):
+    from .source_library import SOURCE_TYPES,split_chapters
+    production(production_id)
+    if body.type not in SOURCE_TYPES:raise ValueError('原著类型无效')
+    if not body.title.strip():raise ValueError('原著名称不能为空')
+    chapters=split_chapters(body.content)
+    source_id=s.uid('source-');now=time.time()
+    with s.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        c.execute('INSERT INTO source_documents VALUES(?,?,?,?,?,?,?)',(
+            source_id,production_id,body.type,body.title.strip(),s.dumps(body.metadata),now,now,
+        ))
+        for number,(title,content) in enumerate(chapters,1):
+            c.execute('INSERT INTO source_chapters VALUES(?,?,?,?,?,?,?,?,?)',(
+                s.uid('chapter-'),source_id,number,title,content,number,1,now,now,
+            ))
+    return {**source_document_row(production_id,source_id),'chapter_count':len(chapters)}
+
+@app.get('/api/productions/{production_id}/chapters')
+def source_chapters(production_id:str,source_id:str|None=None,q:str=''):
+    production(production_id)
+    clauses=['d.production_id=?'];params=[production_id]
+    if source_id:clauses.append('c.source_id=?');params.append(source_id)
+    if q.strip():clauses.append('(c.title LIKE ? OR c.content LIKE ?)');term='%'+q.strip()+'%';params.extend([term,term])
+    with s.db() as c:
+        rows=c.execute('''SELECT c.*,d.title source_title FROM source_chapters c
+            JOIN source_documents d ON d.id=c.source_id WHERE '''+' AND '.join(clauses)+
+            ' ORDER BY d.created,c.sort_order,c.chapter_no',params).fetchall()
+    return [dict(row) for row in rows]
+
+@app.post('/api/productions/{production_id}/sources/{source_id}/chapters')
+def create_source_chapter(production_id:str,source_id:str,body:ChapterCreate):
+    if not body.title.strip():raise ValueError('章节标题不能为空')
+    source_document_row(production_id,source_id);now=time.time()
+    with s.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        next_no=c.execute('SELECT COALESCE(MAX(chapter_no),0)+1 value FROM source_chapters WHERE source_id=?',(source_id,)).fetchone()['value']
+        chapter_id=s.uid('chapter-')
+        c.execute('INSERT INTO source_chapters VALUES(?,?,?,?,?,?,?,?,?)',(
+            chapter_id,source_id,next_no,body.title.strip(),body.content,next_no,1,now,now,
+        ))
+        c.execute('UPDATE source_documents SET updated=? WHERE id=?',(now,source_id))
+    return next(item for item in source_chapters(production_id,source_id) if item['id']==chapter_id)
+
+@app.put('/api/productions/{production_id}/chapters/{chapter_id}')
+def save_source_chapter(production_id:str,chapter_id:str,body:ChapterSave):
+    if not body.title.strip():raise ValueError('章节标题不能为空')
+    now=time.time()
+    with s.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        row=c.execute('''SELECT c.*,d.production_id FROM source_chapters c JOIN source_documents d ON d.id=c.source_id
+            WHERE c.id=?''',(chapter_id,)).fetchone()
+        if not row or row['production_id']!=production_id:raise HTTPException(404,'章节不存在')
+        if row['revision']!=body.revision:raise HTTPException(409,'章节已在其他页面更新，请重新加载。')
+        c.execute('UPDATE source_chapters SET title=?,content=?,revision=revision+1,updated=? WHERE id=?',(
+            body.title.strip(),body.content,now,chapter_id,
+        ))
+        c.execute('UPDATE source_documents SET updated=? WHERE id=?',(now,row['source_id']))
+    return next(item for item in source_chapters(production_id) if item['id']==chapter_id)
+
+@app.get('/api/productions/{production_id}/source-events')
+def source_events(production_id:str,chapter_id:str|None=None):
+    production(production_id)
+    query='''SELECT e.* FROM source_events e
+        JOIN source_chapters c ON c.id=e.chapter_id
+        JOIN source_documents d ON d.id=c.source_id
+        WHERE e.production_id=?''';params=[production_id]
+    if chapter_id:query+=' AND e.chapter_id=?';params.append(chapter_id)
+    query+=' ORDER BY d.created,c.sort_order,c.chapter_no,e.event_order'
+    with s.db() as c:rows=c.execute(query,params).fetchall()
+    result=[]
+    for row in rows:
+        item=dict(row)
+        item['characters']=json.loads(item['characters'])
+        item['continuity']=json.loads(item['continuity'])
+        result.append(item)
+    return result
+
+@app.post('/api/productions/{production_id}/source-extractions')
+def extract_source_events(production_id:str,body:SourceExtractionCreate):
+    production(production_id)
+    if len(set(body.chapter_ids))!=len(body.chapter_ids):raise ValueError('不能重复选择同一章节')
+    with s.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        owner=c.execute('SELECT id FROM projects WHERE id=? AND production_id=?',(body.project_id,production_id)).fetchone()
+        if not owner:raise ValueError('文本任务必须归属于当前 Production 的 Episode')
+        placeholders=','.join('?' for _ in body.chapter_ids)
+        chapters=c.execute(f'''SELECT c.* FROM source_chapters c JOIN source_documents d ON d.id=c.source_id
+            WHERE d.production_id=? AND c.id IN ({placeholders})''',[production_id,*body.chapter_ids]).fetchall()
+        if len(chapters)!=len(body.chapter_ids):raise ValueError('所选章节不存在或不属于当前 Production')
+        chapter_map={row['id']:row for row in chapters};created=[]
+        for chapter_id in body.chapter_ids:
+            chapter=chapter_map[chapter_id]
+            job_body=JobCreate(node_id='source-chapter:'+chapter_id,kind='text',
+                submission_id=body.submission_id+':'+chapter_id[:24],input={
+                    'provider':body.provider,'model':body.model,'allow_cloud':body.allow_cloud,
+                    'stage':'source_analysis','prompt':f'章节标题：{chapter["title"]}\n\n原文：\n{chapter["content"]}',
+                    'source_event_extraction':{'productionId':production_id,'chapterId':chapter_id,'chapterRevision':chapter['revision']},
+                })
+            created.append(create_job_record(c,body.project_id,job_body))
+    for item in created:s.event(body.project_id,{'type':'job','id':item['id']})
+    return {'jobs':created,'count':len(created)}
+
 @app.post('/api/projects/{pid}/run')
 async def run_workflow(pid:str,request:Request):
     from .workflows import execution_plan

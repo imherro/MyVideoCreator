@@ -206,6 +206,16 @@ class Worker:
 
     def text(self,job,p):
         inp=job['input']; kind=job['kind']
+        if kind=='text' and inp.get('source_event_extraction'):
+            from .source_library import EVENT_SCHEMA, SYSTEM_PROMPT, replace_events, validate_events
+            raw=self._chat_text(job,p,SYSTEM_PROMPT,inp['prompt'],EVENT_SCHEMA,'提取原著事件')
+            start=raw.find('{');end=raw.rfind('}')
+            if start<0 or end<start:raise ValueError('事件提取结果不是有效 JSON')
+            try:rows=validate_events(json.loads(raw[start:end+1]))
+            except (ValueError,TypeError,json.JSONDecodeError) as exc:
+                raise ValueError('事件提取结果校验失败：'+str(exc)) from exc
+            rows=replace_events(job,rows)
+            return {'text':s.dumps({'events':rows}),'events':rows}
         if kind=='storyboard' and inp.get('film_bible'):
             from .film_bible import extract_storyboard
             return extract_storyboard(

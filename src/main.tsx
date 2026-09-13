@@ -150,6 +150,7 @@ import {
 } from "./app/workflow";
 import { WorkflowOverview } from "./pages/WorkflowOverview";
 import { WorkflowEmptyState } from "./pages/WorkflowEmptyState";
+import { SourceLibraryPage } from "./pages/SourceLibraryPage";
 import { EpisodeSelector } from "./app/EpisodeSelector";
 import {
   episodesForProduction,
@@ -2075,7 +2076,16 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             activeJobs={activeCount}
             onOpenStage={activateWorkflowStage}
           />
-        ) : workflowStage === "source" || workflowStage === "adaptation" ? (
+        ) : workflowStage === "source" ? (
+          <SourceLibraryPage
+            productionId={project.production_id}
+            projectId={project.id}
+            providers={config.providers}
+            request={api}
+            notify={setNotice}
+            report={report}
+          />
+        ) : workflowStage === "adaptation" ? (
           <WorkflowEmptyState kind={workflowStage} onContinue={activateWorkflowStage} />
         ) : view === "editor" ? (
           <Suspense fallback={<div className="loading">加载剪辑工作区…</div>}>
