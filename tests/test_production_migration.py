@@ -1,9 +1,11 @@
+import json
 import sqlite3
 
 from backend import store as s
+from backend.project_schema import new_document
 
 
-def test_legacy_projects_are_wrapped_without_rewriting_episode_data(monkeypatch, tmp_path):
+def test_legacy_projects_are_wrapped_and_shared_context_is_extracted(monkeypatch, tmp_path):
     data = tmp_path / 'legacy-production-data'
     assets = data / 'assets'
     assets.mkdir(parents=True)
@@ -57,7 +59,12 @@ def test_legacy_projects_are_wrapped_without_rewriting_episode_data(monkeypatch,
     assert production[0]['name'] == '旧单片'
     assert project['id'] == 'project-legacy'
     assert project['revision'] == 7
-    assert project['document'] == document
+    current_document = json.loads(project['document'])
+    assert current_document['nodes'] == [{'id': 'legacy-node'}]
+    assert current_document['shots'] == []
+    assert 'filmBible' not in current_document
+    assert 'generationPolicy' not in current_document
+    assert 'style' not in current_document
     assert project['created'] == 10.0 and project['updated'] == 20.0
     assert project['production_id'] == production[0]['id']
     assert project['episode_no'] == 1 and project['episode_title'] == '旧单片'
@@ -73,3 +80,61 @@ def test_legacy_projects_are_wrapped_without_rewriting_episode_data(monkeypatch,
     restore_deleted_item('project', 'project-legacy')
     visible = {item['id']: item for item in productions()}
     assert visible[production[0]['id']]['episode_count'] == 1
+
+
+def test_phase1a_multi_episode_context_migration_preserves_ids_and_history(monkeypatch, tmp_path):
+    data = tmp_path / 'phase1a-production-data'
+    assets = data / 'assets'
+    assets.mkdir(parents=True)
+    database = data / 'studio.sqlite'
+    first = new_document()
+    second = new_document()
+    first['filmBible']['visual'] = {
+        'cards': {'hero': {'id': 'hero', 'kind': 'character', 'name': '主角', 'currentVersionId': 'hero-v1'}},
+        'versions': {'hero-v1': {'id': 'hero-v1', 'cardId': 'hero', 'version': 1, 'status': 'locked'}},
+    }
+    second['filmBible']['visual'] = {
+        'cards': {'station': {'id': 'station', 'kind': 'scene', 'name': '车站', 'currentVersionId': 'station-v1'}},
+        'versions': {'station-v1': {'id': 'station-v1', 'cardId': 'station', 'version': 1, 'status': 'draft'}},
+    }
+    second['shots'] = [{'id': 'shot-2', 'uid': 'shot-2', 'assetBindings': {
+        'characters': [{'role': '主角', 'versionId': 'hero-v1'}],
+        'scene': {'versionId': 'station-v1'}, 'props': [],
+    }}]
+    encoded_first = s.dumps(first)
+    encoded_second = s.dumps(second)
+    historical = s.dumps({'legacySnapshot': True, 'filmBible': first['filmBible']})
+    with sqlite3.connect(database) as connection:
+        connection.executescript('''
+            CREATE TABLE productions(id TEXT PRIMARY KEY,name TEXT NOT NULL,created REAL NOT NULL,updated REAL NOT NULL);
+            CREATE TABLE projects(id TEXT PRIMARY KEY,name TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 1,document TEXT NOT NULL,created REAL NOT NULL,updated REAL NOT NULL,production_id TEXT REFERENCES productions(id),episode_no INTEGER,episode_title TEXT);
+            CREATE TABLE revisions(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),revision INTEGER NOT NULL,document TEXT NOT NULL,created REAL NOT NULL);
+        ''')
+        connection.execute('INSERT INTO productions VALUES(?,?,?,?)',('production-series','系列',1.0,2.0))
+        connection.execute('INSERT INTO projects VALUES(?,?,?,?,?,?,?,?,?)',(
+            'episode-1','第一集',4,encoded_first,1.0,2.0,'production-series',1,'第一集',
+        ))
+        connection.execute('INSERT INTO projects VALUES(?,?,?,?,?,?,?,?,?)',(
+            'episode-2','第二集',7,encoded_second,1.0,3.0,'production-series',2,'第二集',
+        ))
+        connection.execute('INSERT INTO revisions VALUES(?,?,?,?,?)',(
+            'historical-2','episode-2',6,historical,2.5,
+        ))
+
+    monkeypatch.setattr(s, 'DATA', data)
+    monkeypatch.setattr(s, 'ASSETS', assets)
+    s.init()
+    s.init()
+
+    with s.db() as connection:
+        production = connection.execute('SELECT * FROM productions WHERE id=?',('production-series',)).fetchone()
+        episodes = connection.execute('SELECT * FROM projects ORDER BY episode_no').fetchall()
+        snapshot = connection.execute('SELECT document FROM revisions WHERE id=?',('historical-2',)).fetchone()
+    context = json.loads(production['shared_context'])
+    assert production['revision'] == 1
+    assert set(context['filmBible']['visual']['cards']) == {'hero', 'station'}
+    assert set(context['filmBible']['visual']['versions']) == {'hero-v1', 'station-v1'}
+    assert [(row['id'], row['revision']) for row in episodes] == [('episode-1', 4), ('episode-2', 7)]
+    assert json.loads(episodes[1]['document'])['shots'][0]['assetBindings']['characters'][0]['versionId'] == 'hero-v1'
+    assert all('filmBible' not in json.loads(row['document']) for row in episodes)
+    assert snapshot['document'] == historical

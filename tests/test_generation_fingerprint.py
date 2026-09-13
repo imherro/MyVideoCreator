@@ -49,3 +49,19 @@ def test_each_generation_dependency_changes_fingerprint_and_marks_stale():
     assert all(item['hash'] != original['hash'] for item in variants)
     assert fingerprint_status(original, original) == 'current'
     assert all(fingerprint_status(original, item) == 'stale' for item in variants)
+
+
+def test_fingerprint_reads_canonical_production_context():
+    document, shot = fixture()
+    full = build_generation_fingerprint(document, shot, 'ark', 'seedream', 1)
+    episode = {'schemaVersion': 3, 'shots': [shot]}
+    context = {
+        'schemaVersion': 1,
+        'style': document['style'],
+        'filmBible': document['filmBible'],
+        'generationPolicy': {'text': None, 'image': None, 'video': None},
+    }
+    projected = build_generation_fingerprint(
+        episode, shot, 'ark', 'seedream', 1, production_context=context,
+    )
+    assert projected == full

@@ -203,7 +203,7 @@ type Doc = {
   applied?: string[];
   editor?: EditorDocument;
 };
-type Project = EpisodeSummary & { document: Doc };
+type Project = EpisodeSummary & { document: Doc; production_revision: number };
 type SyncFailureKind = "api" | "sse" | "media";
 type SyncFailure = {
   kind: SyncFailureKind;
@@ -582,6 +582,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   const conflictRef = useRef(false);
   const workflowStageRef = useRef<WorkflowStage>(initialWorkflowStage);
   const revision = useRef(1),
+    productionRevision = useRef(1),
     dirty = useRef(false),
     current = useRef<{ project: Project | null; doc: Doc | null }>({
       project: null,
@@ -701,6 +702,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     const projectedDocument = deriveManagedGraph(p.document);
     const openedProject = { ...p, document: projectedDocument };
     revision.current = p.revision;
+    productionRevision.current = p.production_revision;
     dirty.current = projectedDocument !== p.document;
     // Update the imperative snapshot before scheduling React state changes.
     // This prevents an autosave tick from pairing the new project id with the
@@ -828,6 +830,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           project_id: snapshot.project.id,
           name: snapshot.project.name,
           revision: revision.current,
+          production_revision: productionRevision.current,
           document: snapshot.doc,
         },
         null,
@@ -843,6 +846,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 10000);
       revision.current = latest.revision;
+      productionRevision.current = latest.production_revision;
       dirty.current = false;
       conflictRef.current = false;
       setConflict(false);
@@ -878,16 +882,24 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           send("PUT", {
             name,
             revision: revision.current,
+            production_revision: productionRevision.current,
             document: snapshot.doc,
           }),
         );
         revision.current = result.revision;
+        productionRevision.current = result.production_revision;
+        setProject((current) =>
+          current?.id === projectSnapshot.id
+            ? {
+                ...current,
+                name,
+                episode_title: name,
+                revision: result.revision,
+                production_revision: result.production_revision,
+              }
+            : current,
+        );
         if (name !== projectSnapshot.name) {
-          setProject((current) =>
-            current?.id === projectSnapshot.id
-              ? { ...current, name, episode_title: name }
-              : current,
-          );
           setProjects((current) =>
             current.map((item) =>
               item.id === projectSnapshot.id
@@ -1178,6 +1190,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           project_id: snapshot.project.id,
           name: snapshot.project.name,
           revision: revision.current,
+          production_revision: productionRevision.current,
           document: snapshot.doc,
         },
         null,
@@ -1580,14 +1593,20 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         },
       }),
     );
-    if (!job.project_document || typeof job.project_revision !== "number")
+    if (
+      !job.project_document ||
+      typeof job.project_revision !== "number" ||
+      typeof job.production_revision !== "number"
+    )
       throw new Error("服务端未返回已持久化的参考图任务归属");
     const projectedDocument = deriveManagedGraph(job.project_document);
     revision.current = job.project_revision;
+    productionRevision.current = job.production_revision;
     dirty.current = projectedDocument !== job.project_document;
     const updatedProject = {
       ...snapshot.project,
       revision: job.project_revision,
+      production_revision: job.production_revision,
       document: projectedDocument,
     };
     current.current = { project: updatedProject, doc: projectedDocument };

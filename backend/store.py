@@ -39,8 +39,9 @@ def init():
         c.executescript('''
         CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY,expires REAL NOT NULL);
-        CREATE TABLE IF NOT EXISTS productions(id TEXT PRIMARY KEY,name TEXT NOT NULL,created REAL NOT NULL,updated REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS productions(id TEXT PRIMARY KEY,name TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 1,shared_context TEXT,created REAL NOT NULL,updated REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY,name TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 1,document TEXT NOT NULL,created REAL NOT NULL,updated REAL NOT NULL,production_id TEXT REFERENCES productions(id),episode_no INTEGER,episode_title TEXT);
+        CREATE TABLE IF NOT EXISTS production_revisions(id TEXT PRIMARY KEY,production_id TEXT NOT NULL REFERENCES productions(id),revision INTEGER NOT NULL,shared_context TEXT NOT NULL,created REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS revisions(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),revision INTEGER NOT NULL,document TEXT NOT NULL,created REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS assets(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),name TEXT NOT NULL,kind TEXT NOT NULL,path TEXT NOT NULL,mime TEXT NOT NULL,metadata TEXT NOT NULL,created REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,submission_id TEXT UNIQUE NOT NULL,project_id TEXT NOT NULL REFERENCES projects(id),node_id TEXT NOT NULL,kind TEXT NOT NULL,status TEXT NOT NULL,input TEXT NOT NULL,result TEXT,provider_job_id TEXT,error TEXT,phase TEXT NOT NULL DEFAULT '',progress REAL,created REAL NOT NULL,updated REAL NOT NULL);
@@ -86,6 +87,44 @@ def init():
         c.execute("UPDATE projects SET episode_title=name WHERE episode_title IS NULL OR trim(episode_title)='' ")
         c.execute('CREATE INDEX IF NOT EXISTS projects_production_updated ON projects(production_id,updated)')
         c.execute('CREATE UNIQUE INDEX IF NOT EXISTS projects_production_episode ON projects(production_id,episode_no) WHERE production_id IS NOT NULL')
+        production_columns={row['name'] for row in c.execute('PRAGMA table_info(productions)')}
+        if 'revision' not in production_columns:
+            c.execute('ALTER TABLE productions ADD COLUMN revision INTEGER NOT NULL DEFAULT 1')
+        if 'shared_context' not in production_columns:
+            c.execute('ALTER TABLE productions ADD COLUMN shared_context TEXT')
+        from .generation_policy import default_ark_policy
+        from .production_context import (
+            episode_document_from_document,
+            merge_migration_contexts,
+        )
+        provider_row=c.execute("SELECT value FROM settings WHERE key='providers'").fetchone()
+        providers=json.loads(provider_row['value']) if provider_row else []
+        default_policy=default_ark_policy(providers)
+        for production in c.execute(
+            'SELECT id,shared_context FROM productions ORDER BY id'
+        ).fetchall():
+            episodes=c.execute(
+                'SELECT id,document FROM projects WHERE production_id=? ORDER BY episode_no,id',
+                (production['id'],),
+            ).fetchall()
+            if not production['shared_context']:
+                context=merge_migration_contexts(
+                    [json.loads(episode['document']) for episode in episodes],
+                    default_policy,
+                )
+                c.execute(
+                    'UPDATE productions SET shared_context=?,revision=COALESCE(revision,1) WHERE id=?',
+                    (dumps(context),production['id']),
+                )
+            for episode in episodes:
+                current=json.loads(episode['document'])
+                stripped=episode_document_from_document(current)
+                if current != stripped:
+                    c.execute(
+                        'UPDATE projects SET document=? WHERE id=?',
+                        (dumps(stripped),episode['id']),
+                    )
+        c.execute('CREATE INDEX IF NOT EXISTS production_revisions_parent_revision ON production_revisions(production_id,revision)')
 
 def get_setting(key, default=None):
     with db() as c:

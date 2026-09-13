@@ -1,13 +1,13 @@
 """Server-side contract for Visual Bible primary-reference jobs."""
 from __future__ import annotations
 
-import json
 import time
 
 import httpx
 
 from . import store as s
 from .generation_policy import resolve_generation_target
+from .production_context import production_context_from_document, read_project_state
 
 STATE_KINDS = {'character_state', 'scene_state'}
 
@@ -106,16 +106,22 @@ def validate_visual_reference_job(
 
 def record_visual_reference_submission(c, pid, body, job):
     """Persist pending ownership in the same transaction as the durable job."""
-    row = c.execute('SELECT * FROM projects WHERE id=?', (pid,)).fetchone()
-    if not row:
+    state = read_project_state(c, pid)
+    if not state:
         raise ValueError('项目不存在')
-    document = json.loads(row['document'])
+    row = state['project']
+    production = state['production']
+    document = state['document']
     marker = body.input['visual_reference']
     version_id = marker['versionId']
     version = document['filmBible']['visual']['versions'][version_id]
     previous = (version.get('provenance') or {}).get('referenceGeneration') or {}
     if previous.get('submissionId') == body.submission_id and previous.get('jobId') == job['id']:
-        return {'revision': row['revision'], 'document': document}
+        return {
+            'revision': row['revision'],
+            'production_revision': production['revision'],
+            'document': document,
+        }
     generation = {
         'submissionId': body.submission_id,
         'jobId': job['id'],
@@ -131,13 +137,17 @@ def record_visual_reference_submission(c, pid, body, job):
     version['status'] = 'pending_reference'
     version['provenance'] = {**(version.get('provenance') or {}), 'referenceGeneration': generation}
     now = time.time()
-    revision = row['revision'] + 1
     c.execute(
-        'INSERT INTO revisions VALUES(?,?,?,?,?)',
-        (s.uid(), pid, row['revision'], row['document'], now),
+        'INSERT INTO production_revisions(id,production_id,revision,shared_context,created) VALUES(?,?,?,?,?)',
+        (s.uid(), production['id'], production['revision'], production['shared_context'], now),
     )
+    production_revision = production['revision'] + 1
     c.execute(
-        'UPDATE projects SET revision=?,document=?,updated=? WHERE id=?',
-        (revision, s.dumps(document), now, pid),
+        'UPDATE productions SET revision=?,shared_context=?,updated=? WHERE id=?',
+        (production_revision, s.dumps(production_context_from_document(document)), now, production['id']),
     )
-    return {'revision': revision, 'document': document}
+    return {
+        'revision': row['revision'],
+        'production_revision': production_revision,
+        'document': document,
+    }

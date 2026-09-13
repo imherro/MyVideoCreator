@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import copy
 
+from .production_context import compose_project_document
+
 from .generation_fingerprint import (
     PROMPT_COMPILER_VERSION,
     build_generation_fingerprint,
@@ -47,9 +49,14 @@ def _descendants(edges, roots):
 
 def reconcile_generation_staleness(
     document, providers=(), prompt_compiler_version=PROMPT_COMPILER_VERSION,
+    production_context=None,
 ):
     """Return a copy annotated from fingerprint comparison, without side effects."""
-    value = copy.deepcopy(document)
+    value = (
+        compose_project_document(document, production_context)
+        if production_context is not None
+        else copy.deepcopy(document)
+    )
     nodes = {item.get('id'): item for item in value.get('nodes') or []}
     stale_roots = set()
     stale_shot_outputs = set()

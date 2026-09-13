@@ -16,6 +16,14 @@ from . import store as s, runtime
 from .prompts import TEMPLATES
 from .generation_policy import default_ark_policy, validate_generation_policy
 from .project_schema import migrate_document, new_document
+from .production_context import (
+    compose_project_document,
+    episode_document_from_document,
+    new_production_context,
+    normalize_production_context,
+    production_context_from_document,
+    read_project_state,
+)
 
 @asynccontextmanager
 async def lifespan(app):
@@ -121,13 +129,16 @@ def logout(request:Request,response:Response):
 def project(pid):
     with s.db() as c:
         row = c.execute("SELECT * FROM projects WHERE id=? AND NOT EXISTS(SELECT 1 FROM deleted_items WHERE kind='project' AND item_id=projects.id)",(pid,)).fetchone()
+        state=read_project_state(c,pid) if row else None
     if not row:
         raise HTTPException(404,'项目不存在')
     value=s.unpack(row)
-    value['document']=migrate_document(value['document'])
+    value['document']=state['document']
+    value['production_revision']=state['production']['revision']
     from .generation_staleness import reconcile_generation_staleness
     value['document']=reconcile_generation_staleness(
-        value['document'],s.get_setting('providers',[]),
+        state['episode_document'],s.get_setting('providers',[]),
+        production_context=state['production_context'],
     )
     return value
 
@@ -144,12 +155,14 @@ def production(production_id):
             )) episode_count
             FROM productions p WHERE p.id=?''',(production_id,)).fetchone()
     if not row:raise HTTPException(404,'Production 不存在')
-    return dict(row)
+    value=dict(row)
+    value['context']=normalize_production_context(json.loads(value.pop('shared_context')))
+    return value
 
 @app.get('/api/productions')
 def productions():
     with s.db() as c:
-        return [dict(row) for row in c.execute('''SELECT p.*,
+        return [dict(row) for row in c.execute('''SELECT p.id,p.name,p.revision,p.created,p.updated,
             (SELECT COUNT(*) FROM projects e WHERE e.production_id=p.id AND NOT EXISTS(
                 SELECT 1 FROM deleted_items d WHERE d.kind='project' AND d.item_id=e.id
             )) episode_count
@@ -170,8 +183,9 @@ class ProductionCreate(BaseModel):
 def create_production(body:ProductionCreate):
     production_id=s.uid('production-')
     now=time.time();name=normalized_project_name(body.name)
+    context=new_production_context(default_ark_policy(s.get_setting('providers',[])))
     with s.db() as c:
-        c.execute('INSERT INTO productions(id,name,created,updated) VALUES(?,?,?,?)',(production_id,name,now,now))
+        c.execute('INSERT INTO productions(id,name,revision,shared_context,created,updated) VALUES(?,?,1,?,?,?)',(production_id,name,s.dumps(context),now,now))
     return production(production_id)
 
 @app.get('/api/productions/{production_id}')
@@ -206,7 +220,7 @@ def create_episode(production_id:str,body:EpisodeCreate):
         c.execute('''INSERT INTO projects(
             id,name,revision,document,created,updated,production_id,episode_no,episode_title
         ) VALUES(?,?,1,?,?,?,?,?,?)''',(
-            pid,title,s.dumps(document),now,now,production_id,episode_no,title,
+            pid,title,s.dumps(episode_document_from_document(document)),now,now,production_id,episode_no,title,
         ))
         c.execute('UPDATE productions SET updated=? WHERE id=?',(now,production_id))
     return project(pid)
@@ -221,13 +235,14 @@ def normalized_project_name(name:str)->str:
 def create_project(body:ProjectCreate):
     pid = s.uid('project-');production_id=s.uid('production-')
     document = new_document(default_ark_policy(s.get_setting('providers',[])))
+    context=production_context_from_document(document)
     now=time.time();name=normalized_project_name(body.name)
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
-        c.execute('INSERT INTO productions(id,name,created,updated) VALUES(?,?,?,?)',(production_id,name,now,now))
+        c.execute('INSERT INTO productions(id,name,revision,shared_context,created,updated) VALUES(?,?,1,?,?,?)',(production_id,name,s.dumps(context),now,now))
         c.execute('''INSERT INTO projects(
             id,name,revision,document,created,updated,production_id,episode_no,episode_title
-        ) VALUES(?,?,1,?,?,?,?,1,?)''',(pid,name,s.dumps(document),now,now,production_id,name))
+        ) VALUES(?,?,1,?,?,?,?,1,?)''',(pid,name,s.dumps(episode_document_from_document(document)),now,now,production_id,name))
     return project(pid)
 
 @app.get('/api/projects/{pid}')
@@ -253,6 +268,7 @@ def storyboard_sheet(pid:str,columns:int=3,page:int=1):
 class ProjectSave(BaseModel):
     name:str=Field(max_length=100)
     revision:int
+    production_revision:int|None=None
     document:dict
 
 @app.put('/api/projects/{pid}')
@@ -261,24 +277,68 @@ def save_project(pid:str,body:ProjectSave):
     # Preserve deleted provider ids so ordinary project edits remain savable;
     # the resolver reports the invalid target before any generation starts.
     document['generationPolicy']=validate_generation_policy(document['generationPolicy'],s.get_setting('providers',[]),allow_missing=True)
-    encoded = s.dumps(document)
-    if len(encoded)>8_000_000:
+    incoming_context=production_context_from_document(document)
+    episode_document=episode_document_from_document(document)
+    encoded_episode=s.dumps(episode_document)
+    if len(encoded_episode)>8_000_000:
         raise HTTPException(413,'项目数据过大，请将素材上传到素材库。')
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
-        old=c.execute('SELECT * FROM projects WHERE id=?',(pid,)).fetchone()
-        if not old: raise HTTPException(404,'项目不存在')
+        state=read_project_state(c,pid)
+        if not state: raise HTTPException(404,'项目不存在')
+        old=state['project'];production_row=state['production']
         if old['revision']!=body.revision: raise HTTPException(409,'项目已在其他页面更新，请重新加载后编辑。')
+        shared_changed=incoming_context!=state['production_context']
+        # Phase 1A clients do not know the Production revision yet. Allow their
+        # first shared-context save while the Production is still at revision 1;
+        # every later shared edit must carry the independent revision token.
+        episode_count = c.execute(
+            'SELECT COUNT(*) count FROM projects WHERE production_id=?',
+            (old['production_id'],),
+        ).fetchone()['count']
+        compatible_production_revision = (
+            production_row['revision']
+            if body.production_revision is None and episode_count == 1
+            else body.production_revision
+        )
+        if shared_changed and compatible_production_revision!=production_row['revision']:
+            raise HTTPException(409,'Production 共享资料已在其他页面更新，请重新加载后编辑。')
         from .film_bible.versioning import validate_film_bible_transition
-        validate_film_bible_transition(migrate_document(s.unpack(old)['document']),document)
-        c.execute('INSERT INTO revisions VALUES(?,?,?,?,?)',(s.uid(),pid,old['revision'],old['document'],time.time()))
-        name=normalized_project_name(body.name)
+        before_shots=[];after_shots=[]
+        for episode in c.execute(
+            'SELECT id,document FROM projects WHERE production_id=? ORDER BY episode_no,id',
+            (old['production_id'],),
+        ):
+            previous_episode=migrate_document(json.loads(episode['document']))
+            before_shots.extend(previous_episode.get('shots') or [])
+            current_episode=episode_document if episode['id']==pid else previous_episode
+            after_shots.extend(current_episode.get('shots') or [])
+        before_validation={**state['document'],'shots':before_shots}
+        after_validation={**document,'shots':after_shots}
+        validate_film_bible_transition(before_validation,after_validation)
         updated=time.time()
-        c.execute('UPDATE projects SET name=?,episode_title=?,revision=revision+1,document=?,updated=? WHERE id=?',(name,name,encoded,updated,pid))
-        if old['production_id']:
+        c.execute('INSERT INTO revisions VALUES(?,?,?,?,?)',(
+            s.uid(),pid,old['revision'],s.dumps(state['document']),updated,
+        ))
+        name=normalized_project_name(body.name)
+        c.execute('UPDATE projects SET name=?,episode_title=?,revision=revision+1,document=?,updated=? WHERE id=?',(name,name,encoded_episode,updated,pid))
+        production_revision=production_row['revision']
+        if shared_changed:
+            c.execute('INSERT INTO production_revisions(id,production_id,revision,shared_context,created) VALUES(?,?,?,?,?)',(
+                s.uid(),old['production_id'],production_revision,production_row['shared_context'],updated,
+            ))
+            production_revision+=1
+            c.execute('UPDATE productions SET revision=?,shared_context=?,updated=? WHERE id=?',(
+                production_revision,s.dumps(incoming_context),updated,old['production_id'],
+            ))
+        else:
             c.execute('UPDATE productions SET updated=? WHERE id=?',(updated,old['production_id']))
     s.event(pid,{'type':'project','revision':body.revision+1})
-    return {'revision':body.revision+1,'updated':time.time()}
+    return {
+        'revision':body.revision+1,
+        'production_revision':production_revision,
+        'updated':updated,
+    }
 
 @app.get('/api/projects/{pid}/revisions')
 def revisions(pid:str):
@@ -514,6 +574,21 @@ class PromptTemplateSave(BaseModel):
     content:str=Field(min_length=1,max_length=24000)
     deleted:bool=False
 
+def reference_asset(pid,aid):
+    with s.db() as c:
+        row=c.execute('''SELECT a.*,origin.production_id origin_production_id,
+            target.production_id target_production_id
+            FROM assets a
+            JOIN projects origin ON origin.id=a.project_id
+            JOIN projects target ON target.id=?
+            WHERE a.id=? AND NOT EXISTS(
+                SELECT 1 FROM deleted_items d WHERE d.kind='asset' AND d.item_id=a.id
+            )''',(pid,aid)).fetchone()
+    if not row:raise HTTPException(404,'素材不存在')
+    if row['origin_production_id']!=row['target_production_id']:
+        raise ValueError('不能引用其他 Production 的素材')
+    return s.unpack(row)
+
 @app.get('/api/prompt-library')
 def prompt_library():
     return s.get_setting('prompt_library',{'revision':0,'templates':[]})
@@ -547,15 +622,15 @@ def create_job_record(c,pid,body):
     if body.kind!='export' and not body.input.get('prompt','').strip(): raise ValueError('请输入生成描述')
     if body.kind=='video':
         from .state_review import require_video_source_reviews
-        saved=c.execute('SELECT document FROM projects WHERE id=?',(pid,)).fetchone()
-        if saved: require_video_source_reviews(json.loads(saved['document']),body.node_id)
+        state=read_project_state(c,pid)
+        if state: require_video_source_reviews(state['document'],body.node_id)
     if body.kind in ('text','storyboard') and body.input.get('target_duration') is not None:
         if not 1<=float(body.input['target_duration'])<=3000:raise ValueError('剧本或分镜目标时长应为 1–3000 秒')
     if body.input.get('visual_reference') is not None:
         from .visual_references import validate_visual_reference_job
-        saved=c.execute('SELECT document FROM projects WHERE id=?',(pid,)).fetchone()
+        state=read_project_state(c,pid)
         validate_visual_reference_job(
-            json.loads(saved['document']) if saved else {},body.node_id,body.kind,
+            state['document'] if state else {},body.node_id,body.kind,
             body.input,s.get_setting('providers',[]),
         )
     if body.kind in ('image','video') and body.input.get('provider','local')=='local':raise ValueError('请为图像或视频节点选择对应的本地媒体服务')
@@ -592,8 +667,7 @@ def create_job_record(c,pid,body):
         if body.kind=='image' and len(references)>max_image_references(selected):
             raise ValueError(f'当前火山方舟图片模型最多支持 {max_image_references(selected)} 张参考图，请移除多余引用')
     for aid in references:
-        asset=asset_row(aid)
-        if asset['project_id']!=pid: raise ValueError('不能引用其他项目的素材')
+        asset=reference_asset(pid,aid)
         if body.kind in ('image','video') and asset['kind']!='image':raise ValueError('当前图像和视频适配器只接受图像参考素材')
         if selected and selected['type']=='minimax':
             from .minimax_video import first_frame
@@ -607,10 +681,13 @@ def create_job_record(c,pid,body):
 @app.post('/api/projects/{pid}/jobs')
 def submit(pid:str,body:JobCreate):
     saved_project=project(pid)
+    with s.db() as c:
+        project_state=read_project_state(c,pid)
     from .reference_compiler import compile_shot_image_input
     prepared_input=compile_shot_image_input(
-        saved_project['document'],body.node_id,body.kind,body.input,
+        project_state['episode_document'],body.node_id,body.kind,body.input,
         s.get_setting('providers',[]),
+        production_context=project_state['production_context'],
     )
     if body.kind in ('text','storyboard') and prepared_input.get('target_duration') is None:
         prepared_input={**prepared_input,'target_duration':saved_project['document'].get('duration',15)}
@@ -619,8 +696,14 @@ def submit(pid:str,body:JobCreate):
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
         if body.input.get('reference_compiler'):
-            current_revision=c.execute('SELECT revision FROM projects WHERE id=?',(pid,)).fetchone()
-            if not current_revision or current_revision['revision']!=saved_project['revision']:
+            current_revision=c.execute('''SELECT e.revision,p.revision production_revision
+                FROM projects e JOIN productions p ON p.id=e.production_id
+                WHERE e.id=?''',(pid,)).fetchone()
+            if (
+                not current_revision
+                or current_revision['revision']!=saved_project['revision']
+                or current_revision['production_revision']!=saved_project['production_revision']
+            ):
                 raise HTTPException(409,'视觉绑定在任务准备期间已更新，请重试生成')
         result=create_job_record(c,pid,body)
         if body.input.get('visual_reference') is not None:
@@ -630,9 +713,13 @@ def submit(pid:str,body:JobCreate):
         result={
             **result,
             'project_revision':tracking['revision'],
+            'production_revision':tracking['production_revision'],
             'project_document':tracking['document'],
         }
-        s.event(pid,{'type':'project','revision':tracking['revision']})
+        s.event(pid,{
+            'type':'production',
+            'revision':tracking['production_revision'],
+        })
     s.event(pid,{'type':'job','id':result['id']})
     return result
 
@@ -640,6 +727,8 @@ def submit(pid:str,body:JobCreate):
 async def run_workflow(pid:str,request:Request):
     from .workflows import execution_plan
     body=await request.json();p=project(pid)
+    with s.db() as c:
+        project_state=read_project_state(c,pid)
     group=body.get('submission_id')
     if not isinstance(group,str) or len(group)<8 or len(group)>80: raise ValueError('批次提交标识无效')
     exact=body.get('exact') is True
@@ -685,7 +774,9 @@ async def run_workflow(pid:str,request:Request):
         data=dict(node.get('data',{}));kind=data.get('kind')
         if kind not in runnable: continue
         data=compile_shot_image_input(
-            p['document'],node['id'],kind,data,list(providers.values()),cached_image_capabilities,
+            project_state['episode_document'],node['id'],kind,data,
+            list(providers.values()),cached_image_capabilities,
+            production_context=project_state['production_context'],
         )
         film_bible_compiled=bool(data.get('reference_compiler'))
         manual_assets=list(data.get('asset_ids',[]))
@@ -733,7 +824,7 @@ async def run_workflow(pid:str,request:Request):
             reference_sources=list(data['image_reference_sources'])
             generated_image_parents=0
         for aid in data['asset_ids']:
-            if asset_row(aid)['project_id']!=pid: raise ValueError('批次不能引用其他项目素材')
+            reference_asset(pid,aid)
         provider=providers.get(data.get('provider','local'))
         if provider and provider.get('type')=='volcengine_ark':
             from .providers.volcengine_ark import max_image_references
@@ -764,8 +855,14 @@ async def run_workflow(pid:str,request:Request):
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
         if any(data.get('reference_compiler') for _,_,data,_ in prepared):
-            current_revision=c.execute('SELECT revision FROM projects WHERE id=?',(pid,)).fetchone()
-            if not current_revision or current_revision['revision']!=p['revision']:
+            current_revision=c.execute('''SELECT e.revision,p.revision production_revision
+                FROM projects e JOIN productions p ON p.id=e.production_id
+                WHERE e.id=?''',(pid,)).fetchone()
+            if (
+                not current_revision
+                or current_revision['revision']!=p['revision']
+                or current_revision['production_revision']!=p['production_revision']
+            ):
                 raise HTTPException(409,'视觉绑定在批量任务准备期间已更新，请重试运行')
         for node,parents,data,reference_sources in prepared:
             kind=data.get('kind')

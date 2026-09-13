@@ -8,6 +8,7 @@ from .generation_fingerprint import (
     PROMPT_COMPILER_VERSION,
     build_generation_fingerprint,
 )
+from .production_context import compose_project_document
 
 
 GROUP_KINDS = {
@@ -142,6 +143,7 @@ def compile_shot_prompt(document, shot, constraints):
 
 def compile_shot_image_input(
     document, node_id, kind, input_value, providers, capability_resolver=None,
+    production_context=None,
 ):
     """Return a provider-ready input compiled only from shot.assetBindings.
 
@@ -151,6 +153,8 @@ def compile_shot_image_input(
     result = dict(input_value)
     if kind != 'image':
         return result
+    if production_context is not None:
+        document = compose_project_document(document, production_context)
     shot = _shot_for_image_node(document, node_id)
     if not shot:
         return result

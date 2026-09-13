@@ -1,4 +1,5 @@
 import os
+import json
 import tempfile
 import time
 from pathlib import Path
@@ -40,6 +41,78 @@ def test_production_can_own_multiple_episode_projects(authenticated):
     assert first['revision']==second['revision']==1
     episodes=c.get(f'/api/productions/{production["id"]}/episodes').json()
     assert [item['id'] for item in episodes]==[first['id'],second['id']]
+
+
+def test_production_context_is_shared_versioned_and_episode_documents_stay_local(authenticated):
+    import copy
+    import io
+    from PIL import Image
+    from backend.app import reference_asset
+    from backend.film_bible import normalize_visual_bible
+
+    c=authenticated
+    production=c.post('/api/productions',json={'name':'共享资料测试剧'}).json()
+    first=c.post(f'/api/productions/{production["id"]}/episodes',json={'title':'第一集'}).json()
+    second=c.post(f'/api/productions/{production["id"]}/episodes',json={'title':'第二集'}).json()
+    stale_second=copy.deepcopy(second)
+
+    stream=io.BytesIO();Image.new('RGB',(16,16),'#26384a').save(stream,format='PNG')
+    reference=c.post(
+        f'/api/projects/{first["id"]}/assets?category=character',
+        files={'file':('shared-hero.png',stream.getvalue(),'image/png')},
+    ).json()
+    visual,ids=normalize_visual_bible({'cards':[{
+        'key':'hero','kind':'character','name':'共享主角','parent_key':'',
+        'description':'固定深蓝外套','attributes':[],'invariants':['服装不变'],
+    }]})
+    version_id=ids['hero'][1]
+    visual['versions'][version_id]['status']='locked'
+    visual['versions'][version_id]['references']=[{'role':'primary','assetId':reference['id']}]
+    first['document']['filmBible']['visual']=visual
+    saved=c.put(f'/api/projects/{first["id"]}',json={
+        'name':first['name'],'revision':first['revision'],
+        'production_revision':first['production_revision'],'document':first['document'],
+    })
+    assert saved.status_code==200,saved.text
+    assert saved.json()['production_revision']==first['production_revision']+1
+
+    inherited=c.get(f'/api/projects/{second["id"]}').json()
+    assert inherited['production_revision']==saved.json()['production_revision']
+    assert inherited['document']['filmBible']['visual']['versions'][version_id]['references'][0]['assetId']==reference['id']
+    assert reference_asset(second['id'],reference['id'])['id']==reference['id']
+
+    stale_second['document']['style']='冲突风格'
+    conflict=c.put(f'/api/projects/{second["id"]}',json={
+        'name':stale_second['name'],'revision':stale_second['revision'],
+        'production_revision':stale_second['production_revision'],'document':stale_second['document'],
+    })
+    assert conflict.status_code==409
+
+    inherited['document']['shots']=[{
+        'id':'shared-shot','uid':'shared-shot','order':1,
+        'assetBindings':{'characters':[{'role':'主角','versionId':version_id}],'scene':None,'props':[]},
+        'pipeline':{},
+    }]
+    episode_save=c.put(f'/api/projects/{second["id"]}',json={
+        'name':inherited['name'],'revision':inherited['revision'],
+        'production_revision':inherited['production_revision'],'document':inherited['document'],
+    })
+    assert episode_save.status_code==200,episode_save.text
+    assert episode_save.json()['production_revision']==inherited['production_revision']
+    with s.db() as db:
+        rows=db.execute(
+            'SELECT id,document FROM projects WHERE production_id=? ORDER BY episode_no',
+            (production['id'],),
+        ).fetchall()
+        assert len(db.execute(
+            'SELECT id FROM production_revisions WHERE production_id=?',
+            (production['id'],),
+        ).fetchall())==1
+    for row in rows:
+        persisted=json.loads(row['document'])
+        assert 'filmBible' not in persisted
+        assert 'generationPolicy' not in persisted
+        assert 'style' not in persisted
     assert c.get(f'/api/productions/{production["id"]}').json()['episode_count']==2
     listed={item['id']:item for item in c.get('/api/projects').json()}
     assert listed[first['id']]['production_id']==production['id']
@@ -81,13 +154,15 @@ def test_project_schema_revision_migration_and_generation_policy_roundtrip(authe
         with s.db() as db:
             db.execute('INSERT INTO projects(id,name,revision,document,created,updated) VALUES(?,?,1,?,?,?)',(pid,'旧项目',encoded,now,now))
             db.execute('INSERT INTO revisions VALUES(?,?,?,?,?)',(rid,pid,1,encoded,now))
+        s.init()
         current=c.get('/api/projects/'+pid).json()['document']
         historical=c.get(f'/api/projects/{pid}/revisions/{rid}').json()['document']
         assert current['schemaVersion']==CURRENT_SCHEMA_VERSION and historical['schemaVersion']==CURRENT_SCHEMA_VERSION
         assert current['nodes']==legacy['nodes'] and historical['editor']==legacy['editor']
         with s.db() as db:
             assert db.execute('SELECT document FROM revisions WHERE id=?',(rid,)).fetchone()['document']==encoded
-            assert db.execute('SELECT document FROM projects WHERE id=?',(pid,)).fetchone()['document']==encoded
+            persisted=json.loads(db.execute('SELECT document FROM projects WHERE id=?',(pid,)).fetchone()['document'])
+            assert 'filmBible' not in persisted and 'generationPolicy' not in persisted and 'style' not in persisted
     finally:
         s.set_setting('providers',old_providers)
 
@@ -260,7 +335,8 @@ def test_visual_reference_queue_validates_server_capability_and_persists_ownersh
             job['project_document']['filmBible']['visual']['versions'][state_version]
             ['provenance']['referenceGeneration']
         )
-        assert job['project_revision']==saved.json()['revision']+1
+        assert job['project_revision']==saved.json()['revision']
+        assert job['production_revision']==saved.json()['production_revision']+1
         assert generation['submissionId']==payload['submission_id']
         assert generation['jobId']==job['id']
         assert job['project_document']['filmBible']['visual']['versions'][state_version]['status']=='pending_reference'

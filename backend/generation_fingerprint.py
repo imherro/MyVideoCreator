@@ -4,6 +4,8 @@ from __future__ import annotations
 import hashlib
 import json
 
+from .production_context import compose_project_document
+
 
 FINGERPRINT_VERSION = 1
 PROMPT_COMPILER_VERSION = 1
@@ -58,9 +60,11 @@ def _bound_versions(document, shot):
 
 def generation_fingerprint_payload(
     document, shot, provider_id, model_id,
-    prompt_compiler_version=PROMPT_COMPILER_VERSION,
+    prompt_compiler_version=PROMPT_COMPILER_VERSION, production_context=None,
 ):
     """Return only generation-semantic, JSON-canonical inputs."""
+    if production_context is not None:
+        document = compose_project_document(document, production_context)
     return {
         'shotVariables': {key: shot.get(key) for key in SHOT_VARIABLE_FIELDS},
         'boundVisualVersions': _bound_versions(document, shot),
@@ -73,10 +77,11 @@ def generation_fingerprint_payload(
 
 def build_generation_fingerprint(
     document, shot, provider_id, model_id,
-    prompt_compiler_version=PROMPT_COMPILER_VERSION,
+    prompt_compiler_version=PROMPT_COMPILER_VERSION, production_context=None,
 ):
     payload = generation_fingerprint_payload(
         document, shot, provider_id, model_id, prompt_compiler_version,
+        production_context,
     )
     canonical = json.dumps(
         payload, ensure_ascii=False, sort_keys=True, separators=(',', ':'),

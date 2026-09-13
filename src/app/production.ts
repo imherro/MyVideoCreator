@@ -1,6 +1,7 @@
 export type ProductionSummary = {
   id: string;
   name: string;
+  revision: number;
   created: number;
   updated: number;
   episode_count: number;

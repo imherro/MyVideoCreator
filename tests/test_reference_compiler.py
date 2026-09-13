@@ -68,6 +68,27 @@ def input_value():
     }
 
 
+def test_compiler_accepts_separate_production_context():
+    value = document()
+    expected = compile_shot_image_input(
+        value, 'image-1', 'image', input_value(), PROVIDERS,
+        lambda provider, model: {'image_reference': True, 'max_references': 8},
+    )
+    context = {
+        'schemaVersion': 1,
+        'style': value['style'],
+        'filmBible': value['filmBible'],
+        'generationPolicy': {'text': None, 'image': None, 'video': None},
+    }
+    episode = {key: item for key, item in value.items() if key not in ('style', 'filmBible', 'generationPolicy')}
+    actual = compile_shot_image_input(
+        episode, 'image-1', 'image', input_value(), PROVIDERS,
+        lambda provider, model: {'image_reference': True, 'max_references': 8},
+        production_context=context,
+    )
+    assert actual == expected
+
+
 def supports(maximum=4):
     return lambda provider, model_id: {
         'image_reference': True, 'max_references': maximum,
