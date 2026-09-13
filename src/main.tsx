@@ -138,6 +138,17 @@ import { updateShot, framesForDuration } from "./shotSync";
 import { TimelinePreview } from "./TimelinePreview";
 import type { Clip } from "./timeline";
 import type { EditorDocument } from "./editor/editorDocument";
+import { AnYingMark } from "./app/AnYingMark";
+import { GlobalNav, type GlobalPanel } from "./app/GlobalNav";
+import { WorkflowStageNav } from "./app/WorkflowStageNav";
+import {
+  defaultViewForStage,
+  parseWorkflowStage,
+  workflowStageUrl,
+  type WorkflowStage,
+} from "./app/workflow";
+import { WorkflowOverview } from "./pages/WorkflowOverview";
+import { WorkflowEmptyState } from "./pages/WorkflowEmptyState";
 const EditorWorkspace = lazy(() =>
   import("./editor/EditorWorkspace").then((module) => ({
     default: module.EditorWorkspace,
@@ -404,22 +415,6 @@ function MediaNode({ data, selected }: { data: Any; selected?: boolean }) {
 }
 const nodeTypes = { media: MediaNode, visualAsset: VisualAssetNode };
 
-function AnYingMark({ size = 25 }: { size?: number }) {
-  return (
-    <svg
-      className="anying-mark"
-      width={size}
-      height={size}
-      viewBox="0 0 32 32"
-      aria-hidden="true"
-    >
-      <rect x="2.5" y="3.5" width="27" height="25" rx="7" />
-      <path d="M11 10.5v11l10-5.5-10-5.5Z" />
-      <path className="anying-mark-glint" d="M22.5 7.5h3v3" />
-    </svg>
-  );
-}
-
 function Auth({ onLogin }: { onLogin: () => void }) {
   const [status, setStatus] = useState<Any>();
   const [password, setPassword] = useState("");
@@ -537,6 +532,7 @@ function Studio() {
 }
 
 function Workspace({ onLogout }: { onLogout: () => void }) {
+  const initialWorkflowStage = parseWorkflowStage(window.location.search);
   const [projects, setProjects] = useState<Any[]>([]),
     [project, setProject] = useState<Project | null>(null),
     [doc, setDoc] = useState<Doc | null>(null),
@@ -551,8 +547,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       providers: [],
       model_directories: [],
     });
+  const [workflowStage, setWorkflowStage] = useState<WorkflowStage>(initialWorkflowStage);
   const [selected, setSelected] = useState<string | null>(null),
-    [view, setView] = useState("canvas"),
+    [view, setView] = useState(defaultViewForStage(initialWorkflowStage)),
     [panel, setPanel] = useState<string | null>(null),
     [notice, setNotice] = useState(""),
     [error, setError] = useState(""),
@@ -574,6 +571,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   const [conflict, setConflict] = useState(false),
     [recoveryBusy, setRecoveryBusy] = useState(false);
   const conflictRef = useRef(false);
+  const workflowStageRef = useRef<WorkflowStage>(initialWorkflowStage);
   const revision = useRef(1),
     dirty = useRef(false),
     current = useRef<{ project: Project | null; doc: Doc | null }>({
@@ -591,6 +589,29 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     updateNodeInternals = useUpdateNodeInternals();
   const [layoutVersion, setLayoutVersion] = useState(0);
   current.current = { project, doc };
+  workflowStageRef.current = workflowStage;
+  function activateWorkflowStage(
+    next: WorkflowStage,
+    historyMode: "push" | "replace" | "none" = "push",
+  ) {
+    workflowStageRef.current = next;
+    setWorkflowStage(next);
+    if (historyMode !== "none") {
+      const nextUrl = workflowStageUrl(window.location.href, next);
+      window.history[historyMode === "replace" ? "replaceState" : "pushState"](
+        null,
+        "",
+        nextUrl,
+      );
+    }
+    setPanel(next === "art" ? "filmBible" : null);
+    if (
+      next === "storyboard" &&
+      ["shots", "grid", "director"].includes(view)
+    )
+      return;
+    setView(defaultViewForStage(next));
+  }
   const report = (e: any) => {
     const message = e?.message || String(e);
     setError(e?.url ? `${message}（开发调试：${e.url}）` : message);
@@ -689,9 +710,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setPreviewTimeline(false);
     setPanorama(null);
     setTimelineOpen(false);
-    setView("canvas");
+    setView(defaultViewForStage(workflowStageRef.current));
     setSaved(projectedDocument === p.document ? "已保存" : "未保存");
-    setPanel(null);
+    setPanel(workflowStageRef.current === "art" ? "filmBible" : null);
     setTimeout(() => {
       fitView({ padding: 0.2 });
     }, 100);
@@ -719,6 +740,17 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       report(e);
     }
   }
+  useEffect(() => {
+    window.history.replaceState(
+      null,
+      "",
+      workflowStageUrl(window.location.href, workflowStageRef.current),
+    );
+    const onPopState = () =>
+      activateWorkflowStage(parseWorkflowStage(window.location.search), "none");
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [view]);
   useEffect(() => {
     boot();
   }, []);
@@ -1007,7 +1039,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           },
         }));
         update((d) => ({ ...d, nodes: [...d.nodes, ...nodes] }));
-        setView("canvas");
+        activateWorkflowStage("canvas");
         return {
           staged_node_ids: nodes.map((n: Any) => n.id),
           generation_submitted: false,
@@ -1329,8 +1361,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         storyboardNode?.id,
       );
     });
-    setView("shots");
-    setPanel(null);
+    activateWorkflowStage("storyboard");
     const cardCount = Object.keys(job.result.filmBible?.visual?.cards || {}).length;
     setNotice(`已导入 ${job.result.shots.length} 个分镜${cardCount ? `和 ${cardCount} 张视觉卡` : ""}，画布节点和连线已同步建立；检查后可运行画布`);
   }
@@ -1345,7 +1376,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         shot.storyboardNode || storyboardContextId(d),
       ),
     );
-    setView("canvas");
+    activateWorkflowStage("canvas");
     setSelected(null);
     setTimeout(() => fitView({ padding: 0.2 }), 80);
   }
@@ -1371,7 +1402,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         storyboardContextId(d),
       ),
     );
-    setView("canvas");
+    activateWorkflowStage("canvas");
     setSelected(null);
     setTimeout(() => fitView({ padding: 0.2 }), 80);
     setNotice("已补齐分镜生成节点，检查提示词后可运行画布");
@@ -1754,10 +1785,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         <button
           className="brand"
           onClick={() => {
-            setPanel(null);
-            setView("canvas");
+            activateWorkflowStage("overview");
           }}
-          aria-label="返回安影画布"
+          aria-label="返回安影项目概览"
         >
           <AnYingMark />
           <strong>安影</strong>
@@ -1787,56 +1817,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           {saved}
         </span>
         <div className="top-spacer" />
-        <div className="top-edit-actions" aria-label="剪辑工作区">
-          <button
-            className={view !== "editor" && timelineOpen ? "quiet active" : "quiet"}
-            onClick={toggleTimelineWorkspace}
-            title="打开快速排序、连续预览和成片时间线"
-          >
-            <Layers size={15} />
-            时间线
-          </button>
-          <button
-            className={view === "editor" ? "quiet active" : "quiet"}
-            onClick={openMultitrackEditor}
-            title="打开视频、音频、字幕和叠加轨道编辑器"
-          >
-            <Scissors size={15} />
-            多轨剪辑
-          </button>
-        </div>
-        <details className="top-edit-menu">
-          <summary><Scissors size={15} /> 剪辑 <ChevronDown size={13} /></summary>
-          <div>
-            <button
-              className={view !== "editor" && timelineOpen ? "active" : ""}
-              onClick={(event) => {
-                toggleTimelineWorkspace();
-                event.currentTarget.closest("details")?.removeAttribute("open");
-              }}
-            >
-              <Layers size={15} /> 时间线
-            </button>
-            <button
-              className={view === "editor" ? "active" : ""}
-              onClick={(event) => {
-                openMultitrackEditor();
-                event.currentTarget.closest("details")?.removeAttribute("open");
-              }}
-            >
-              <Scissors size={15} /> 多轨剪辑
-            </button>
-          </div>
-        </details>
-        <button
-          className={"queue-button " + (activeCount ? "active" : "")}
-          onClick={() => setPanel("jobs")}
-          aria-label={`任务 ${activeCount || jobs.length}`}
-          title="查看生成任务"
-        >
-          <Clock size={16} />
-          <b>{activeCount || jobs.length}</b>
-        </button>
         <button
           className="icon-button"
           aria-label="保存项目"
@@ -1865,77 +1845,54 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           我
         </button>
       </header>
-      <nav className="rail">
-        <button
-          className="add-button"
-          title="添加节点"
-          onClick={() => setPanel(panel === "add" ? null : "add")}
-        >
-          <Plus />
-        </button>
-        <button
-          className={panel === "assets" ? "active" : ""}
-          title="素材库"
-          onClick={() => setPanel(panel === "assets" ? null : "assets")}
-        >
-          <ImageIcon />
-        </button>
-        <button
-          className={panel === "characters" ? "active" : ""}
-          title="角色与场景"
-          onClick={() => setPanel(panel === "characters" ? null : "characters")}
-        >
-          <FolderOpen />
-        </button>
-        <button
-          className={panel === "filmBible" ? "active" : ""}
-          title="视觉圣经"
-          onClick={() => setPanel(panel === "filmBible" ? null : "filmBible")}
-        >
-          <BookOpen />
-        </button>
-        <button title="提示词模板" onClick={() => setPanel("prompts")}>
-          <Sparkles />
-        </button>
-        <button title="历史版本" onClick={() => history().catch(report)}>
-          <History />
-        </button>
-        <div className="rail-space" />
-        <button title="模型与服务" onClick={() => setPanel("settings")}>
-          <Settings />
-        </button>
-      </nav>
+      <GlobalNav
+        active={panel}
+        taskCount={activeCount || jobs.length}
+        onChange={(next: GlobalPanel) => setPanel(panel === next ? null : next)}
+      />
       <main className="work-area">
+        <WorkflowStageNav active={workflowStage} onChange={activateWorkflowStage} />
         <div className="viewbar">
-          <div className="segmented">
-            <button
-              className={view === "canvas" ? "active" : ""}
-              onClick={() => setView("canvas")}
-            >
-              <LayoutGrid size={15} />
-              创作画布
-            </button>
-            <button
-              className={view === "shots" ? "active" : ""}
-              onClick={() => setView("shots")}
-            >
-              <Table2 size={15} />
-              分镜表<span>{doc.shots.length || ""}</span>
-            </button>
-            <button
-              className={view === "grid" ? "active" : ""}
-              onClick={() => setView("grid")}
-            >
-              <LayoutGrid size={15} />
-              宫格
-            </button>
-            <button
-              className={view === "director" ? "active" : ""}
-              onClick={() => setView("director")}
-            >
-              3D 导演台
-            </button>
-          </div>
+          {workflowStage === "storyboard" ? (
+            <div className="segmented" aria-label="分镜视图">
+              <button className={view === "shots" ? "active" : ""} onClick={() => setView("shots")}>
+                <Table2 size={15} />分镜表<span>{doc.shots.length || ""}</span>
+              </button>
+              <button className={view === "grid" ? "active" : ""} onClick={() => setView("grid")}>
+                <LayoutGrid size={15} />宫格
+              </button>
+              <button className={view === "director" ? "active" : ""} onClick={() => setView("director")}>
+                3D 导演台
+              </button>
+            </div>
+          ) : workflowStage === "editor" ? (
+            <div className="segmented" aria-label="剪辑视图">
+              <button
+                className={view !== "editor" && timelineOpen ? "active" : ""}
+                onClick={() => {
+                  setView("canvas");
+                  setTimelineOpen(true);
+                }}
+              >
+                <Layers size={15} />快速编排
+              </button>
+              <button className={view === "editor" ? "active" : ""} onClick={openMultitrackEditor}>
+                <Scissors size={15} />多轨剪辑
+              </button>
+            </div>
+          ) : (
+            <strong className="workspace-title">
+              {{
+                overview: "项目概览",
+                source: "原著资料",
+                adaptation: "改编策划",
+                script: "剧本工作区",
+                art: "塑角造景",
+                video: "视频工作区",
+                canvas: "高级画布",
+              }[workflowStage]}
+            </strong>
+          )}
           <div className="view-meta">
             {doc.ratio}
             <span>·</span>
@@ -1943,7 +1900,17 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             <span>·</span>
             {doc.duration} 秒
           </div>
-          {view === "canvas" && (
+          {workflowStage === "canvas" && view === "canvas" && (
+            <>
+            <button className="quiet" onClick={() => setPanel(panel === "add" ? null : "add")}>
+              <Plus size={15} />添加节点
+            </button>
+            <button className="quiet" onClick={() => setPanel("prompts")}>
+              <Sparkles size={15} />提示词
+            </button>
+            <button className="quiet" onClick={() => history().catch(report)}>
+              <History size={15} />历史
+            </button>
             <button
               className="quiet"
               disabled={!doc.nodes.length}
@@ -1959,10 +1926,11 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               <LayoutGrid size={15} />
               自动排列
             </button>
+            </>
           )}
-          {["canvas", "shots", "grid"].includes(view) && (
+          {["art", "storyboard", "video", "canvas"].includes(workflowStage) && (
             <div className="batch-generation-actions" aria-label="批量生成">
-              <button
+              {["art", "canvas"].includes(workflowStage) && <button
                 className="quiet"
                 disabled={busy}
                 onClick={() => void runSmartBatch("assets")}
@@ -1970,8 +1938,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               >
                 <BookOpen size={15} />
                 全部资产 <b>{assetBatchPlan.readyIds.length}</b>
-              </button>
-              <button
+              </button>}
+              {["storyboard", "canvas"].includes(workflowStage) && <button
                 className="quiet"
                 disabled={busy}
                 onClick={() => void runSmartBatch("shot_images")}
@@ -1979,8 +1947,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               >
                 <ImageIcon size={15} />
                 全部分镜图 <b>{imageBatchPlan.readyIds.length}</b>
-              </button>
-              <button
+              </button>}
+              {["video", "canvas"].includes(workflowStage) && <button
                 className="quiet"
                 disabled={busy}
                 onClick={() => void runSmartBatch("shot_videos")}
@@ -1988,10 +1956,10 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               >
                 <Film size={15} />
                 全部视频 <b>{videoBatchPlan.readyIds.length}</b>
-              </button>
+              </button>}
             </div>
           )}
-          {view !== "editor" && (
+          {workflowStage === "canvas" && view !== "editor" && (
               <button
                 className="quiet"
                 disabled={busy || !doc.nodes.length}
@@ -2002,7 +1970,22 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               </button>
           )}
         </div>
-        {view === "editor" ? (
+        {workflowStage === "overview" ? (
+          <WorkflowOverview
+            projectName={project.name}
+            duration={doc.duration}
+            ratio={doc.ratio}
+            style={doc.style}
+            scriptCount={doc.nodes.filter((node) => node.data?.kind === "text").length}
+            visualCount={Object.values(visualBibleOf(doc).cards).filter((card) => !card.deletedAt).length}
+            shotCount={doc.shots.length}
+            videoCount={doc.nodes.filter((node) => node.data?.kind === "video" && node.data?.assetId).length}
+            activeJobs={activeCount}
+            onOpenStage={activateWorkflowStage}
+          />
+        ) : workflowStage === "source" || workflowStage === "adaptation" ? (
+          <WorkflowEmptyState kind={workflowStage} onContinue={activateWorkflowStage} />
+        ) : view === "editor" ? (
           <Suspense fallback={<div className="loading">加载剪辑工作区…</div>}>
             <EditorWorkspace
               projectId={project.id}
@@ -2224,7 +2207,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   asset_ids: [asset.id],
                   resolution: "1280x720",
                 });
-                setView("canvas");
+                activateWorkflowStage("canvas");
                 setNotice("构图已保存，完善场景描述后即可生成");
               }}
             />
@@ -2237,7 +2220,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             onOpen={(shot, index) => {
               if (shot.imageNode) {
                 setSelected(shot.imageNode);
-                setView("canvas");
+                activateWorkflowStage("canvas");
               } else shotNodes(shot, index);
             }}
             onExport={async (columns, page) => {
@@ -2368,7 +2351,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                     className="quiet"
                     onClick={() =>
                       doc.nodes.some((n) => n.id === shot.imageNode)
-                        ? (setSelected(shot.imageNode), setView("canvas"))
+                        ? (setSelected(shot.imageNode), activateWorkflowStage("canvas"))
                         : shotNodes(shot, index)
                     }
                   >
@@ -3026,9 +3009,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   add: "添加节点",
                   projects: "项目",
                   projectInfo: "当前项目信息",
-                  assets: "素材库",
+                  assets: "资产中心",
                   jobs: "生成任务",
-                  settings: "模型与工作室",
+                  settings: "设置",
                   prompts: "提示词模板",
                   history: "历史版本",
                   characters: "角色与场景",
@@ -3179,7 +3162,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                     (item) => item.data?.visualVersionId === versionId,
                   );
                   if (!visualNode) return;
-                  setView("canvas");
+                  activateWorkflowStage("canvas");
                   setSelected(visualNode.id);
                   setPanel(null);
                   setTimeout(
@@ -3466,6 +3449,10 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             )}
             {panel === "assets" && (
               <>
+                <div className="asset-center-links">
+                  <button onClick={() => setPanel("characters")}><FolderOpen size={15} />角色与场景</button>
+                  <button onClick={() => activateWorkflowStage("art")}><BookOpen size={15} />视觉圣经</button>
+                </div>
                 <button
                   className="secondary full"
                   onClick={() =>
@@ -3634,7 +3621,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                       onClick={() => {
                         setSelected(j.node_id);
                         setPanel(null);
-                        setView("canvas");
+                        activateWorkflowStage("canvas");
                       }}
                     >
                       查看节点
