@@ -17,6 +17,7 @@ from .prompts import TEMPLATES
 from .generation_policy import default_ark_policy, validate_generation_policy
 from .project_schema import migrate_document, new_document
 from .production_context import (
+    SHARED_DOCUMENT_KEYS,
     compose_project_document,
     episode_document_from_document,
     new_production_context,
@@ -140,6 +141,9 @@ def project(pid):
         state['episode_document'],s.get_setting('providers',[]),
         production_context=state['production_context'],
     )
+    from .adaptation import project_script_to_document
+    with s.db() as c:
+        value['document']=project_script_to_document(c,pid,value['document'])
     return value
 
 @app.get('/api/projects')
@@ -223,6 +227,8 @@ def create_episode(production_id:str,body:EpisodeCreate):
             pid,title,s.dumps(episode_document_from_document(document)),now,now,production_id,episode_no,title,
         ))
         c.execute('UPDATE productions SET updated=? WHERE id=?',(now,production_id))
+        from .adaptation import seed_episode_scripts
+        seed_episode_scripts(c)
     return project(pid)
 
 class ProjectCreate(BaseModel):
@@ -243,6 +249,8 @@ def create_project(body:ProjectCreate):
         c.execute('''INSERT INTO projects(
             id,name,revision,document,created,updated,production_id,episode_no,episode_title
         ) VALUES(?,?,1,?,?,?,?,1,?)''',(pid,name,s.dumps(episode_document_from_document(document)),now,now,production_id,name))
+        from .adaptation import seed_episode_scripts
+        seed_episode_scripts(c)
     return project(pid)
 
 @app.get('/api/projects/{pid}')
@@ -277,17 +285,24 @@ def save_project(pid:str,body:ProjectSave):
     # Preserve deleted provider ids so ordinary project edits remain savable;
     # the resolver reports the invalid target before any generation starts.
     document['generationPolicy']=validate_generation_policy(document['generationPolicy'],s.get_setting('providers',[]),allow_missing=True)
-    incoming_context=production_context_from_document(document)
-    episode_document=episode_document_from_document(document)
-    encoded_episode=s.dumps(episode_document)
-    if len(encoded_episode)>8_000_000:
-        raise HTTPException(413,'项目数据过大，请将素材上传到素材库。')
+    projected_context=production_context_from_document(document)
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
         state=read_project_state(c,pid)
         if not state: raise HTTPException(404,'项目不存在')
         old=state['project'];production_row=state['production']
+        incoming_context={
+            **state['production_context'],
+            **{key:projected_context[key] for key in SHARED_DOCUMENT_KEYS},
+        }
         if old['revision']!=body.revision: raise HTTPException(409,'项目已在其他页面更新，请重新加载后编辑。')
+        from .adaptation import project_script_to_document
+        episode_document=episode_document_from_document(
+            project_script_to_document(c,pid,document)
+        )
+        encoded_episode=s.dumps(episode_document)
+        if len(encoded_episode)>8_000_000:
+            raise HTTPException(413,'项目数据过大，请将素材上传到素材库。')
         shared_changed=incoming_context!=state['production_context']
         # Phase 1A clients do not know the Production revision yet. Allow their
         # first shared-context save while the Production is still at revision 1;
@@ -837,6 +852,11 @@ def save_source_chapter(production_id:str,chapter_id:str,body:ChapterSave):
             body.title.strip(),body.content,now,chapter_id,
         ))
         c.execute('UPDATE source_documents SET updated=? WHERE id=?',(now,row['source_id']))
+        from .adaptation import mark_adaptation_stale
+        production_revision=mark_adaptation_stale(c,production_id,chapter_ids=[chapter_id])
+    if production_revision is not None:
+        with s.db() as event_db:targets=production_event_targets(event_db,production_id)
+        for target in targets:s.event(target,{'type':'production','revision':production_revision})
     return next(item for item in source_chapters(production_id) if item['id']==chapter_id)
 
 @app.get('/api/productions/{production_id}/source-events')
@@ -880,6 +900,264 @@ def extract_source_events(production_id:str,body:SourceExtractionCreate):
                 })
             created.append(create_job_record(c,body.project_id,job_body))
     for item in created:s.event(body.project_id,{'type':'job','id':item['id']})
+    return {'jobs':created,'count':len(created)}
+
+
+class AdaptationSave(BaseModel):
+    revision:int=Field(ge=1)
+    adaptationPlan:dict
+    episodePlans:list[dict]=Field(max_length=500)
+    monetizationPlan:dict
+
+class RevisionAction(BaseModel):
+    revision:int=Field(ge=1)
+
+class TextGenerationCreate(BaseModel):
+    project_id:str
+    provider:str
+    model:str=''
+    allow_cloud:bool=False
+    submission_id:str=Field(min_length=8,max_length=100)
+
+class ScriptSave(BaseModel):
+    revision:int=Field(ge=0)
+    title:str
+    synopsis:str
+    body:str
+    estimatedDuration:float
+    sourceChapterRefs:list[str]
+    storyGoal:str
+    paywallBeat:dict
+    characters:list[str]
+    scenes:list[str]
+    props:list[str]
+
+class ScriptGenerationCreate(BaseModel):
+    episode_nos:list[int]=Field(min_length=1,max_length=500)
+    provider:str
+    model:str=''
+    allow_cloud:bool=False
+    submission_id:str=Field(min_length=8,max_length=100)
+
+def production_event_targets(connection,production_id):
+    return [row['id'] for row in connection.execute('''SELECT p.id FROM projects p
+        WHERE p.production_id=? AND NOT EXISTS(
+            SELECT 1 FROM deleted_items d WHERE d.kind='project' AND d.item_id=p.id
+        )''',(production_id,)).fetchall()]
+
+@app.get('/api/productions/{production_id}/adaptation')
+def read_adaptation(production_id:str):
+    from .adaptation import adaptation_bundle,source_snapshot
+    value=production(production_id)
+    with s.db() as c:sources=source_snapshot(c,production_id)
+    return {**adaptation_bundle(value['context']),'revision':value['revision'],'sourceEventCount':len(sources)}
+
+@app.put('/api/productions/{production_id}/adaptation')
+def save_adaptation(production_id:str,body:AdaptationSave):
+    from .adaptation import (
+        _persist_production_context,_stale_scripts,prepare_manual_adaptation,
+        validate_source_references,
+    )
+    with s.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        row=c.execute('SELECT * FROM productions WHERE id=?',(production_id,)).fetchone()
+        if not row:raise HTTPException(404,'Production 不存在')
+        if row['revision']!=body.revision:raise HTTPException(409,'改编策划已在其他页面更新，请重新加载。')
+        context=normalize_production_context(json.loads(row['shared_context']))
+        bundle,changed=prepare_manual_adaptation(context,{
+            'adaptationPlan':body.adaptationPlan,'episodePlans':body.episodePlans,
+            'monetizationPlan':body.monetizationPlan,
+        })
+        validate_source_references(c,production_id,[chapter for plan in bundle['episodePlans'] for chapter in plan['sourceChapterRefs']])
+        context.update(bundle)
+        if changed:_stale_scripts(c,production_id)
+        revision=_persist_production_context(c,row,context)
+        targets=production_event_targets(c,production_id)
+    for pid in targets:s.event(pid,{'type':'production','revision':revision})
+    return {**bundle,'revision':revision}
+
+def transition_adaptation(production_id,expected_revision,target):
+    from .adaptation import _persist_production_context,adaptation_bundle,validate_adaptation_bundle,validate_approval_ready
+    with s.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        row=c.execute('SELECT * FROM productions WHERE id=?',(production_id,)).fetchone()
+        if not row:raise HTTPException(404,'Production 不存在')
+        if row['revision']!=expected_revision:raise HTTPException(409,'改编策划已在其他页面更新，请重新加载。')
+        context=normalize_production_context(json.loads(row['shared_context']))
+        bundle=adaptation_bundle(context)
+        if target=='review':
+            validate_adaptation_bundle(bundle)
+            bundle['adaptationPlan']['status']='review'
+            for plan in bundle['episodePlans']:plan['status']='review'
+        else:
+            if bundle['adaptationPlan']['status']!='review':raise ValueError('请先将改编策划提交审核，再批准')
+            bundle=validate_approval_ready(c,production_id,bundle)
+            bundle['adaptationPlan']['status']='approved'
+            for plan in bundle['episodePlans']:plan['status']='approved'
+        context.update(bundle)
+        revision=_persist_production_context(c,row,context)
+        targets=production_event_targets(c,production_id)
+    for pid in targets:s.event(pid,{'type':'production','revision':revision})
+    return {**bundle,'revision':revision}
+
+@app.post('/api/productions/{production_id}/adaptation/review')
+def review_adaptation(production_id:str,body:RevisionAction):
+    return transition_adaptation(production_id,body.revision,'review')
+
+@app.post('/api/productions/{production_id}/adaptation/approve')
+def approve_adaptation(production_id:str,body:RevisionAction):
+    return transition_adaptation(production_id,body.revision,'approved')
+
+@app.post('/api/productions/{production_id}/adaptation/generate')
+def generate_adaptation(production_id:str,body:TextGenerationCreate):
+    from .adaptation import adaptation_fingerprint,source_fingerprint,source_snapshot
+    with s.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        state=read_project_state(c,body.project_id)
+        if not state or state['project']['production_id']!=production_id:
+            raise ValueError('改编任务必须归属于当前 Production 的 Episode')
+        sources=source_snapshot(c,production_id)
+        if not sources:raise ValueError('请先在原著资料库提取事件，再生成改编策划')
+        context=state['production_context'];format_value=context['adaptationPlan']['format']
+        prompt='''请依据原著事件生成完整改编策划。所有 sourceEventIds/sourceChapterRefs 只能使用输入中已有 ID。
+目标规格：'''+s.dumps(format_value)+'\n原著事件：\n'+s.dumps(sources)
+        job_body=JobCreate(node_id='adaptation:'+production_id,kind='text',submission_id=body.submission_id,input={
+            'provider':body.provider,'model':body.model,'allow_cloud':body.allow_cloud,
+            'stage':'adaptation_generation','prompt':prompt,'max_tokens':12000,
+            'adaptation_generation':{
+                'productionId':production_id,'adaptationFingerprint':adaptation_fingerprint(context),
+                'sourceFingerprint':source_fingerprint(sources),'sourceEventIds':[item['id'] for item in sources],
+                'sourceChapterIds':list(dict.fromkeys(item['chapterId'] for item in sources)),
+            },
+        })
+        result=create_job_record(c,body.project_id,job_body)
+    s.event(body.project_id,{'type':'job','id':result['id']})
+    return result
+
+@app.get('/api/productions/{production_id}/scripts')
+def production_scripts(production_id:str):
+    from .adaptation import adaptation_bundle,script_to_api
+    value=production(production_id);plans=adaptation_bundle(value['context'])['episodePlans']
+    with s.db() as c:
+        rows=c.execute('''SELECT p.id project_id,p.episode_no,p.episode_title,sc.* FROM projects p
+            LEFT JOIN episode_scripts sc ON sc.project_id=p.id
+            WHERE p.production_id=? AND NOT EXISTS(
+                SELECT 1 FROM deleted_items d WHERE d.kind='project' AND d.item_id=p.id
+            )''',(production_id,)).fetchall()
+    existing={row['episode_no']:row for row in rows}
+    result=[]
+    for plan in plans:
+        row=existing.get(plan['episodeNo'])
+        result.append({'episodeNo':plan['episodeNo'],'plan':plan,'projectId':row['project_id'] if row else None,
+            'episodeTitle':row['episode_title'] if row else f'第 {plan["episodeNo"]:02d} 集',
+            'script':script_to_api(row) if row and row['revision'] is not None else None})
+    return result
+
+def episode_plan_context(connection,production_id,episode_no):
+    row=connection.execute('SELECT * FROM productions WHERE id=?',(production_id,)).fetchone()
+    if not row:raise HTTPException(404,'Production 不存在')
+    context=normalize_production_context(json.loads(row['shared_context']))
+    plan=next((item for item in context['episodePlans'] if item['episodeNo']==episode_no),None)
+    if not plan:raise HTTPException(404,'分集规划中没有这一集')
+    return row,context,plan
+
+@app.get('/api/productions/{production_id}/episode-scripts/{episode_no}')
+def read_episode_script(production_id:str,episode_no:int):
+    from .adaptation import script_default_from_plan,script_row
+    with s.db() as c:
+        _,_,plan=episode_plan_context(c,production_id,episode_no)
+        project_row=c.execute('''SELECT p.* FROM projects p WHERE p.production_id=? AND p.episode_no=?
+            AND NOT EXISTS(SELECT 1 FROM deleted_items d WHERE d.kind='project' AND d.item_id=p.id)''',(production_id,episode_no)).fetchone()
+        if not project_row:return script_default_from_plan(None,plan)
+        return script_row(c,project_row['id']) or script_default_from_plan(project_row['id'],plan)
+
+@app.put('/api/productions/{production_id}/episode-scripts/{episode_no}')
+def save_episode_script(production_id:str,episode_no:int,body:ScriptSave):
+    from .adaptation import ensure_episode_for_plan,save_script_row,validate_source_references
+    with s.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        _,_,plan=episode_plan_context(c,production_id,episode_no)
+        existed=c.execute('SELECT id FROM projects WHERE production_id=? AND episode_no=?',(production_id,episode_no)).fetchone()
+        project_row=ensure_episode_for_plan(c,production_id,episode_no)
+        row=c.execute('SELECT * FROM episode_scripts WHERE project_id=?',(project_row['id'],)).fetchone()
+        compatible_revision=row['revision'] if not existed and body.revision==0 else body.revision
+        if row['revision']!=compatible_revision:raise HTTPException(409,'本集剧本已在其他页面更新，请重新加载。')
+        payload=body.model_dump(exclude={'revision'})
+        validate_source_references(c,production_id,payload['sourceChapterRefs'])
+        saved=save_script_row(c,row,payload,status='draft')
+    s.event(project_row['id'],{'type':'script','revision':saved['revision']})
+    return saved
+
+def transition_script(production_id,episode_no,expected_revision,target):
+    from .adaptation import ensure_episode_for_plan,script_row,script_to_api
+    with s.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        _,context,plan=episode_plan_context(c,production_id,episode_no)
+        project_row=ensure_episode_for_plan(c,production_id,episode_no)
+        row=c.execute('SELECT * FROM episode_scripts WHERE project_id=?',(project_row['id'],)).fetchone()
+        if row['revision']!=expected_revision:raise HTTPException(409,'本集剧本已在其他页面更新，请重新加载。')
+        if target in ('review','approved') and not row['body'].strip():raise ValueError('剧本正文为空，不能提交审核或批准')
+        if target=='approved':
+            if context['adaptationPlan']['status']!='approved' or plan['status']!='approved':raise ValueError('请先批准改编策划和本集分集规划')
+            if row['status']!='review':raise ValueError('请先将本集剧本提交审核')
+        if target=='review' and row['status']=='stale':raise ValueError('剧本已过期，请先修订后再提交审核')
+        now=time.time()
+        from .adaptation import _script_snapshot
+        c.execute('INSERT INTO episode_script_revisions VALUES(?,?,?,?,?)',(
+            s.uid('script-revision-'),project_row['id'],row['revision'],s.dumps(_script_snapshot(row)),now,
+        ))
+        c.execute('UPDATE episode_scripts SET status=?,revision=revision+1,updated=? WHERE project_id=?',(target,now,project_row['id']))
+        saved=script_row(c,project_row['id'])
+    s.event(project_row['id'],{'type':'script','revision':saved['revision']})
+    return saved
+
+@app.post('/api/productions/{production_id}/episode-scripts/{episode_no}/review')
+def review_episode_script(production_id:str,episode_no:int,body:RevisionAction):
+    return transition_script(production_id,episode_no,body.revision,'review')
+
+@app.post('/api/productions/{production_id}/episode-scripts/{episode_no}/approve')
+def approve_episode_script(production_id:str,episode_no:int,body:RevisionAction):
+    return transition_script(production_id,episode_no,body.revision,'approved')
+
+@app.post('/api/productions/{production_id}/episode-scripts/{episode_no}/needs-changes')
+def revise_episode_script(production_id:str,episode_no:int,body:RevisionAction):
+    return transition_script(production_id,episode_no,body.revision,'draft')
+
+@app.post('/api/productions/{production_id}/script-generations')
+def generate_episode_scripts(production_id:str,body:ScriptGenerationCreate):
+    from .adaptation import adaptation_fingerprint,ensure_episode_for_plan,script_to_api,validate_source_references
+    if len(set(body.episode_nos))!=len(body.episode_nos):raise ValueError('不能重复选择同一集')
+    with s.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        production_row,context,_=episode_plan_context(c,production_id,body.episode_nos[0])
+        if context['adaptationPlan']['status']!='approved':raise ValueError('请先批准改编策划，再生成逐集剧本')
+        plan_map={item['episodeNo']:item for item in context['episodePlans']}
+        fingerprint=adaptation_fingerprint(context);created=[]
+        for episode_no in body.episode_nos:
+            plan=plan_map.get(episode_no)
+            if not plan:raise ValueError(f'第 {episode_no:02d} 集不在分集规划中')
+            if plan['status']!='approved':raise ValueError(f'第 {episode_no:02d} 集规划尚未批准')
+            validate_source_references(c,production_id,plan['sourceChapterRefs'])
+            project_row=ensure_episode_for_plan(c,production_id,episode_no)
+            script=c.execute('SELECT * FROM episode_scripts WHERE project_id=?',(project_row['id'],)).fetchone()
+            placeholders=','.join('?' for _ in plan['sourceChapterRefs'])
+            chapters=[]
+            if plan['sourceChapterRefs']:
+                chapters=[dict(row) for row in c.execute(f'''SELECT id,title,content,revision FROM source_chapters
+                    WHERE id IN ({placeholders})''',plan['sourceChapterRefs']).fetchall()]
+            prompt='''请生成且只生成目标单集剧本。\n已批准分集规划：'''+s.dumps(plan)+\
+                '\n原著章节：'+s.dumps(chapters)+'\n本集现有剧本（为空则首次生成）：'+s.dumps(script_to_api(script))
+            job_body=JobCreate(node_id='episode-script:'+project_row['id'],kind='text',
+                submission_id=body.submission_id+f':{episode_no:03d}',input={
+                    'provider':body.provider,'model':body.model,'allow_cloud':body.allow_cloud,
+                    'stage':'script_generation','prompt':prompt,'max_tokens':12000,
+                    'episode_script_generation':{
+                        'productionId':production_id,'episodeNo':episode_no,
+                        'scriptRevision':script['revision'],'adaptationFingerprint':fingerprint,
+                    },
+                })
+            created.append(create_job_record(c,project_row['id'],job_body))
+    for item in created:s.event(item['project_id'],{'type':'job','id':item['id']})
     return {'jobs':created,'count':len(created)}
 
 @app.post('/api/projects/{pid}/run')

@@ -47,6 +47,8 @@ def init():
         CREATE TABLE IF NOT EXISTS revisions(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),revision INTEGER NOT NULL,document TEXT NOT NULL,created REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS assets(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),name TEXT NOT NULL,kind TEXT NOT NULL,path TEXT NOT NULL,mime TEXT NOT NULL,metadata TEXT NOT NULL,created REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,submission_id TEXT UNIQUE NOT NULL,project_id TEXT NOT NULL REFERENCES projects(id),node_id TEXT NOT NULL,kind TEXT NOT NULL,status TEXT NOT NULL,input TEXT NOT NULL,result TEXT,provider_job_id TEXT,error TEXT,phase TEXT NOT NULL DEFAULT '',progress REAL,created REAL NOT NULL,updated REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS episode_scripts(project_id TEXT PRIMARY KEY REFERENCES projects(id),revision INTEGER NOT NULL DEFAULT 1,status TEXT NOT NULL,title TEXT NOT NULL,synopsis TEXT NOT NULL,source_chapter_refs TEXT NOT NULL,story_goal TEXT NOT NULL,paywall_beat TEXT NOT NULL,body TEXT NOT NULL,estimated_duration REAL NOT NULL,characters TEXT NOT NULL,scenes TEXT NOT NULL,props TEXT NOT NULL,generation_job_id TEXT REFERENCES jobs(id),metadata TEXT NOT NULL,created REAL NOT NULL,updated REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS episode_script_revisions(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),revision INTEGER NOT NULL,snapshot TEXT NOT NULL,created REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS source_events(id TEXT PRIMARY KEY,production_id TEXT NOT NULL REFERENCES productions(id),chapter_id TEXT NOT NULL REFERENCES source_chapters(id),event_order INTEGER NOT NULL,characters TEXT NOT NULL,summary TEXT NOT NULL,importance TEXT NOT NULL,emotion TEXT NOT NULL,continuity TEXT NOT NULL,extraction_job_id TEXT REFERENCES jobs(id),created REAL NOT NULL,updated REAL NOT NULL);
         CREATE INDEX IF NOT EXISTS jobs_project_created ON jobs(project_id,created);
         CREATE INDEX IF NOT EXISTS jobs_status_created ON jobs(status,created);
@@ -132,6 +134,10 @@ def init():
         c.execute('CREATE UNIQUE INDEX IF NOT EXISTS source_chapters_number ON source_chapters(source_id,chapter_no)')
         c.execute('CREATE INDEX IF NOT EXISTS source_chapters_source_order ON source_chapters(source_id,sort_order)')
         c.execute('CREATE INDEX IF NOT EXISTS source_events_production_chapter ON source_events(production_id,chapter_id,event_order)')
+        c.execute('CREATE INDEX IF NOT EXISTS episode_scripts_status ON episode_scripts(status,updated)')
+        c.execute('CREATE INDEX IF NOT EXISTS episode_script_revisions_parent ON episode_script_revisions(project_id,revision)')
+        from .adaptation import seed_episode_scripts
+        seed_episode_scripts(c)
 
 def get_setting(key, default=None):
     with db() as c:

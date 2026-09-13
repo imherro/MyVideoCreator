@@ -206,6 +206,20 @@ class Worker:
 
     def text(self,job,p):
         inp=job['input']; kind=job['kind']
+        if kind=='text' and inp.get('adaptation_generation'):
+            from .adaptation import ADAPTATION_SCHEMA, ADAPTATION_SYSTEM_PROMPT, apply_adaptation_generation
+            raw=self._chat_text(job,p,ADAPTATION_SYSTEM_PROMPT,inp['prompt'],ADAPTATION_SCHEMA,'生成改编策划')
+            try:value=json.loads(raw.strip())
+            except json.JSONDecodeError as exc:raise ValueError('改编策划结果不是严格 JSON：'+str(exc)) from exc
+            result=apply_adaptation_generation(job,value)
+            return {'text':s.dumps(result),'adaptation':result}
+        if kind=='text' and inp.get('episode_script_generation'):
+            from .adaptation import SCRIPT_SCHEMA, SCRIPT_SYSTEM_PROMPT, apply_episode_script_generation
+            raw=self._chat_text(job,p,SCRIPT_SYSTEM_PROMPT,inp['prompt'],SCRIPT_SCHEMA,'生成本集剧本')
+            try:value=json.loads(raw.strip())
+            except json.JSONDecodeError as exc:raise ValueError('逐集剧本结果不是严格 JSON：'+str(exc)) from exc
+            result=apply_episode_script_generation(job,value)
+            return {'text':result['script']['body'],'script':result['script']}
         if kind=='text' and inp.get('source_event_extraction'):
             from .source_library import EVENT_SCHEMA, SYSTEM_PROMPT, replace_events, validate_events
             raw=self._chat_text(job,p,SYSTEM_PROMPT,inp['prompt'],EVENT_SCHEMA,'提取原著事件')

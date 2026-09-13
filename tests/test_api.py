@@ -19,7 +19,9 @@ def client():
 @pytest.fixture(scope='module')
 def authenticated(client):
     assert client.get('/api/projects').status_code==401
-    assert client.post('/api/auth/setup',json={'password':'integration-test-only'}).status_code==200
+    status=client.get('/api/auth/status').json()
+    endpoint='/api/auth/login' if status['configured'] else '/api/auth/setup'
+    assert client.post(endpoint,json={'password':'integration-test-only'}).status_code==200
     return client
 
 def project(c):

@@ -98,6 +98,9 @@ def replace_events(job, rows):
             raise ValueError('事件提取任务的章节归属已失效')
         if chapter['revision'] != expected_revision:
             raise ValueError('章节已在提取期间更新，旧结果未写入；请重新提取')
+        previous_ids = [row['id'] for row in connection.execute(
+            'SELECT id FROM source_events WHERE chapter_id=?', (chapter_id,)
+        ).fetchall()]
         connection.execute('DELETE FROM source_events WHERE chapter_id=?',(chapter_id,))
         for order, row in enumerate(validated, 1):
             connection.execute('INSERT INTO source_events VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',(
@@ -105,4 +108,10 @@ def replace_events(job, rows):
                 row['summary'],row['importance'],row['emotion'],s.dumps(row['continuity']),
                 job['id'],now,now,
             ))
+        from .adaptation import mark_adaptation_stale
+        production_revision = mark_adaptation_stale(
+            connection, production_id, chapter_ids=[chapter_id], event_ids=previous_ids,
+        )
+    if production_revision is not None:
+        s.event(job['project_id'], {'type': 'production', 'revision': production_revision})
     return validated

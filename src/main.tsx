@@ -149,8 +149,9 @@ import {
   type WorkflowStage,
 } from "./app/workflow";
 import { WorkflowOverview } from "./pages/WorkflowOverview";
-import { WorkflowEmptyState } from "./pages/WorkflowEmptyState";
 import { SourceLibraryPage } from "./pages/SourceLibraryPage";
+import { AdaptationPage } from "./pages/AdaptationPage";
+import { ScriptRoomPage } from "./pages/ScriptRoomPage";
 import { EpisodeSelector } from "./app/EpisodeSelector";
 import {
   episodesForProduction,
@@ -786,6 +787,11 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       try {
         const data = JSON.parse(e.data);
         const pid = current.current.project?.id;
+        if (data.project_id === pid && data.type === "production" && typeof data.revision === "number") {
+          productionRevision.current = data.revision;
+          setProject((value) => value ? { ...value, production_revision: data.revision } : value);
+          setProductions((items) => items.map((item) => item.id === current.current.project?.production_id ? { ...item, revision: data.revision } : item));
+        }
         if (data.project_id === pid && data.type === "job")
           refresh(pid!).catch(() => {});
       } catch {
@@ -2086,7 +2092,33 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             report={report}
           />
         ) : workflowStage === "adaptation" ? (
-          <WorkflowEmptyState kind={workflowStage} onContinue={activateWorkflowStage} />
+          <AdaptationPage
+            productionId={project.production_id}
+            projectId={project.id}
+            providers={config.providers}
+            defaultTarget={(doc as Any).generationPolicy?.text}
+            request={api}
+            notify={setNotice}
+            report={report}
+            onRevision={(nextRevision) => {
+              productionRevision.current = nextRevision;
+              setProject((currentProject) => currentProject ? { ...currentProject, production_revision: nextRevision } : currentProject);
+              setProductions((items) => items.map((item) => item.id === project.production_id ? { ...item, revision: nextRevision } : item));
+            }}
+          />
+        ) : workflowStage === "script" ? (
+          <ScriptRoomPage
+            productionId={project.production_id}
+            providers={config.providers}
+            defaultTarget={(doc as Any).generationPolicy?.text}
+            request={api}
+            notify={setNotice}
+            report={report}
+            onChanged={async (changedProjectId) => {
+              await refreshProductionHierarchy();
+              if (changedProjectId === project.id) await openProject(project.id);
+            }}
+          />
         ) : view === "editor" ? (
           <Suspense fallback={<div className="loading">加载剪辑工作区…</div>}>
             <EditorWorkspace

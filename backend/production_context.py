@@ -5,9 +5,10 @@ import copy
 import json
 
 from .project_schema import empty_film_bible, empty_generation_policy, migrate_document
+from .adaptation import empty_adaptation_context, normalize_adaptation_context
 
 
-CONTEXT_SCHEMA_VERSION = 1
+CONTEXT_SCHEMA_VERSION = 2
 SHARED_DOCUMENT_KEYS = ('filmBible', 'generationPolicy', 'style')
 
 
@@ -19,6 +20,7 @@ def new_production_context(generation_policy=None):
             generation_policy or empty_generation_policy()
         ),
         'style': '电影写实',
+        **empty_adaptation_context(),
     }
 
 
@@ -42,6 +44,9 @@ def normalize_production_context(value, generation_policy=None):
         result['generationPolicy'].setdefault(kind, None)
     if 'style' in source:
         result['style'] = copy.deepcopy(source['style'])
+    adaptation = normalize_adaptation_context(source)
+    for key in ('adaptationPlan', 'episodePlans', 'monetizationPlan'):
+        result[key] = adaptation[key]
     return result
 
 
