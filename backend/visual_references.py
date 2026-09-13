@@ -7,7 +7,7 @@ import httpx
 
 from . import store as s
 from .generation_policy import resolve_generation_target
-from .production_context import production_context_from_document, read_project_state
+from .production_context import read_project_state
 
 STATE_KINDS = {'character_state', 'scene_state'}
 
@@ -142,9 +142,13 @@ def record_visual_reference_submission(c, pid, body, job):
         (s.uid(), production['id'], production['revision'], production['shared_context'], now),
     )
     production_revision = production['revision'] + 1
+    production_context = {
+        **state['production_context'],
+        'filmBible': document['filmBible'],
+    }
     c.execute(
         'UPDATE productions SET revision=?,shared_context=?,updated=? WHERE id=?',
-        (production_revision, s.dumps(production_context_from_document(document)), now, production['id']),
+        (production_revision, s.dumps(production_context), now, production['id']),
     )
     return {
         'revision': row['revision'],

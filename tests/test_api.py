@@ -346,7 +346,36 @@ def test_visual_reference_queue_validates_server_capability_and_persists_ownersh
     }
     s.set_setting('providers',[*old_providers,provider])
     try:
-        p=project(c);doc=p['document']
+        p=project(c)
+        adaptation={
+            'revision':c.get(f'/api/productions/{p["production_id"]}/adaptation').json()['revision'],
+            'adaptationPlan':{
+                'status':'approved',
+                'format':{'episodeCount':2,'targetDuration':45,'ratio':'9:16','platform':'测试平台'},
+                'storyCore':{'premise':'非默认前提'},'storyArc':{'opening':'非默认开场'},
+                'adaptationStrategy':{'tone':'非默认风格'},'sourceEventIds':[],
+            },
+            'episodePlans':[{
+                'episodeNo':number,'sourceChapterRefs':[],'logline':f'第 {number} 集',
+                'coreConflict':'守护真相','emotionalBeat':'紧张','hook':'立刻入戏',
+                'cliffhanger':'留下悬念','paywallRole':'conversion' if number==2 else 'setup',
+                'targetDuration':45,'status':'approved',
+            } for number in (1,2)],
+            'monetizationPlan':{
+                'mode':'custom','freeEpisodes':1,'firstPaywallEpisode':2,
+                'beats':[{'episodeNo':1,'type':'pre_paywall_hook','setup':'非默认铺垫',
+                    'cliffhanger':'非默认卡点','expectedEmotion':'期待','rationale':'测试保留'}],
+            },
+        }
+        adaptation_saved=c.put(
+            f'/api/productions/{p["production_id"]}/adaptation',json=adaptation,
+        )
+        assert adaptation_saved.status_code==200,adaptation_saved.text
+        before_adaptation=c.get(f'/api/productions/{p["production_id"]}/adaptation').json()
+        before_adaptation={key:copy.deepcopy(before_adaptation[key]) for key in (
+            'adaptationPlan','episodePlans','monetizationPlan',
+        )}
+        p=c.get(f'/api/projects/{p["id"]}').json();doc=p['document']
         visual,keys=normalize_visual_bible({'cards':[
             {'key':'hero','kind':'character','name':'林岚','parent_key':'','description':'灰色风衣','attributes':[],'invariants':['脸型不变']},
             {'key':'wet','kind':'character_state','name':'雨中的林岚','parent_key':'hero','description':'衣服淋湿','attributes':[],'invariants':['仍是同一人']},
@@ -361,7 +390,10 @@ def test_visual_reference_queue_validates_server_capability_and_persists_ownersh
         visual['versions'][hero_version]['references']=[{'role':'primary','assetId':parent['id']}]
         doc['filmBible']['visual']=visual
         doc['generationPolicy']['image']={'providerId':'phase3-image','modelId':'image-model'}
-        saved=c.put(f'/api/projects/{p["id"]}',json={'name':p['name'],'revision':p['revision'],'document':doc})
+        saved=c.put(f'/api/projects/{p["id"]}',json={
+            'name':p['name'],'revision':p['revision'],
+            'production_revision':p['production_revision'],'document':doc,
+        })
         assert saved.status_code==200,saved.text
         payload={
             'node_id':f'visual-version:{state_version}','kind':'image','submission_id':'phase3-state-reference',
@@ -402,6 +434,8 @@ def test_visual_reference_queue_validates_server_capability_and_persists_ownersh
         restored=c.get(f'/api/projects/{p["id"]}').json()
         assert restored['revision']==job['project_revision']
         assert restored['document']['filmBible']['visual']['versions'][state_version]['provenance']['referenceGeneration']==generation
+        after_adaptation=c.get(f'/api/productions/{p["production_id"]}/adaptation').json()
+        assert {key:after_adaptation[key] for key in before_adaptation}==before_adaptation
         stale_without_production_token=copy.deepcopy(doc)
         stale_without_production_token['style']='不应覆盖的新风格'
         bypass=c.put(f'/api/projects/{p["id"]}',json={
