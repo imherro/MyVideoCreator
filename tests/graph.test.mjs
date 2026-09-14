@@ -18,6 +18,18 @@ test('new outputs invalidate previous downstream takes but preserve awaiting bat
  assert.deepEqual(expected.nodes.map(n=>!!n.data.stale),[false,false,false,false]);
  assert.equal(expected.nodes[1].data.generation_revision,undefined);
 });
+test('compiled Film Bible prompt does not make its fresh image stale',()=>{
+ const original=graph();
+ const job={
+  id:'compiled-image',node_id:'a',status:'succeeded',
+  input:{prompt:'完整编译提示词',reference_compiler:{version:1},generation_fingerprint:{hash:'current'}},
+  result:{assets:[{id:'new-image'}]},
+ };
+ const next=acceptResult(original,job,[]);
+ assert.equal(next.nodes[0].data.prompt,'old');
+ assert.equal(next.nodes[0].data.stale,false);
+ assert.deepEqual(next.nodes[0].data.generationFingerprint,{hash:'current'});
+});
 test('removing an image reference removes its duplicate manual and edge sources',()=>{
  const original=graph();original.nodes[1].data.asset_ids=['asset-a','independent-image'];
  const next=removeReference(original,'b','asset-a');

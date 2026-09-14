@@ -79,10 +79,11 @@ def reconcile_generation_staleness(
             data['staleReason'] = 'generation-fingerprint-mismatch'
             stale_roots.add(image_id)
             stale_shot_outputs.update(filter(None, (image_id, _video_node_id(shot))))
-        elif data.get('staleReason') in (
-            'generation-fingerprint-mismatch', 'visual-version-upgraded',
-            'style-version-changed', 'upstream-generation-stale',
-        ):
+        else:
+            # The fingerprint is the canonical comparison of shot variables,
+            # visual bindings, style version, provider, and model. Clear stale
+            # flags left by older clients that compared a compiled prompt with
+            # the shorter editable node prompt.
             data['stale'] = False
             data.pop('staleReason', None)
     affected = _descendants(value.get('edges') or [], stale_roots) | stale_shot_outputs

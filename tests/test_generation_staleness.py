@@ -35,6 +35,15 @@ def test_reconciliation_marks_matching_fingerprint_current_without_jobs():
     assert result['jobs'] == [] and document['jobs'] == []
 
 
+def test_reconciliation_clears_legacy_prompt_comparison_stale_flag():
+    document = fixture()
+    document['nodes'][0]['data']['stale'] = True
+    result = reconcile_generation_staleness(document, prompt_compiler_version=1)
+    image = result['nodes'][0]['data']
+    assert image['generationStatus'] == 'current'
+    assert image['stale'] is False
+
+
 def test_reopen_reconciliation_detects_compiler_change_and_preserves_downstream_media():
     document = fixture(); document['jobs'] = []
     result = reconcile_generation_staleness(document, prompt_compiler_version=2)
