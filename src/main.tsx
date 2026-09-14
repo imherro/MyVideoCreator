@@ -4732,8 +4732,8 @@ function SettingsPanel({
                   {[...new Set(DOUBAO_TTS2_VOICES.map((item)=>item.category))].map((category)=><optgroup key={category} label={category}>{DOUBAO_TTS2_VOICES.filter((item)=>item.category===category).map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</optgroup>)}
                   <option value={CUSTOM_VOICE_ID}>自定义 / 声音复刻 ID…</option>
                 </select>
-                {!catalogVoice(p.model || "") && <input value={p.model || ""} placeholder="粘贴自定义 Speaker ID" onChange={(e)=>patchProvider(i,{model:e.target.value})}/>} 
-              </> : <input value={p.model || ""} onChange={(e) => patchProvider(i, { model: e.target.value })}/>} 
+                {!catalogVoice(p.model || "") && <input value={p.model || ""} placeholder="粘贴自定义 Speaker ID" onChange={(e)=>patchProvider(i,{model:e.target.value})}/>}
+              </> : <input value={p.model || ""} onChange={(e) => patchProvider(i, { model: e.target.value })}/>}
             </label>
           )}
           <label>
