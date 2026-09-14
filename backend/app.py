@@ -655,7 +655,7 @@ async def update_settings(request:Request):
         old={p['id']:p for p in s.get_setting('providers',[])}
         for p in body['providers']:
             masked_key_set=bool(p.pop('api_key_set',False))
-            if not p.get('id') or p.get('type') not in ('openai','comfy','maestro','video_api','minimax','replicate','volcengine_ark'): raise ValueError('模型服务配置无效')
+            if not p.get('id') or p.get('type') not in ('openai','comfy','maestro','video_api','minimax','replicate','volcengine_ark','volcengine_speech'): raise ValueError('模型服务配置无效')
             if p.get('type')=='volcengine_ark':
                 from .providers.volcengine_ark import DEFAULT_BASE_URL
                 p['url']=p.get('url') or DEFAULT_BASE_URL
@@ -664,6 +664,12 @@ async def update_settings(request:Request):
                 p['local']=False
                 p.pop('kind',None)
                 if not isinstance(p.get('models'),dict):raise ValueError('火山方舟模型配置无效')
+            if p.get('type')=='volcengine_speech':
+                from .providers.volcengine_speech import DEFAULT_RESOURCE_ID, DEFAULT_URL
+                p['url']=p.get('url') or DEFAULT_URL
+                p['local']=False
+                p['kind']='audio'
+                p['resource_id']=str(p.get('resource_id') or DEFAULT_RESOURCE_ID).strip()
             url=p.get('url','')
             if urlparse(url).scheme not in ('http','https') or urlparse(url).username: raise ValueError('请输入 HTTP(S) 服务地址')
             # A masked settings round-trip may omit the key or send an empty
@@ -723,6 +729,9 @@ def provider_models(provider_id:str,kind:str|None=None):
 @app.post('/api/providers/{provider_id}/verify')
 def verify_provider(provider_id:str):
     provider=next((p for p in s.get_setting('providers',[]) if p['id']==provider_id),None)
+    if provider and provider.get('type')=='volcengine_speech':
+        from .providers.volcengine_speech import verify
+        return verify(provider)
     if not provider or provider.get('type')!='volcengine_ark':raise ValueError('火山方舟服务配置不存在')
     from .providers.volcengine_ark import list_models
     models=list_models(provider)
@@ -792,7 +801,7 @@ def save_prompt_template(tid:str,body:PromptTemplateSave):
 def create_job_record(c,pid,body):
     from .job_contracts import freeze_prompt_contract
     body.input=freeze_prompt_contract(body.kind,body.input)
-    if body.kind not in ('text','storyboard','image','video','export'): raise ValueError('不支持的任务类型')
+    if body.kind not in ('text','storyboard','image','video','audio','export'): raise ValueError('不支持的任务类型')
     old=c.execute('SELECT * FROM jobs WHERE submission_id=?',(body.submission_id,)).fetchone()
     if old:
         if old['project_id']!=pid: raise HTTPException(409,'提交标识冲突')
@@ -829,6 +838,7 @@ def create_job_record(c,pid,body):
             # Defend jobs created from settings saved by an older build.
             selected={**selected,'local':False}
         if selected.get('kind') and selected['kind']!=('text' if body.kind=='storyboard' else body.kind):raise ValueError('模型服务用途与节点不匹配，请选择适用服务')
+        if body.kind=='audio' and selected.get('type')!='volcengine_speech':raise ValueError('角色对白请选择豆包语音服务')
         if selected.get('type')=='volcengine_ark':
             from .providers.volcengine_ark import model_for
             if not model_for(selected,body.kind):raise ValueError('请先配置火山方舟对应类型的模型 ID')

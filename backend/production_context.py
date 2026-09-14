@@ -39,6 +39,8 @@ def normalize_production_context(value, generation_policy=None):
     visual.setdefault('versions', {})
     for key in ('continuity', 'style', 'story'):
         film_bible.setdefault(key, {})
+    voices = film_bible.setdefault('voices', {})
+    voices.setdefault('profiles', {})
     film_bible.setdefault('styleVersion', 1)
     policy = source.get('generationPolicy')
     if isinstance(policy, dict):

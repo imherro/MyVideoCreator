@@ -18,6 +18,7 @@ def storyboard_input(character_key='hero_wet'):
         'camera':'中景缓推','audio':'雨声','image_prompt':'林岚站在红伞旁',
         'video_prompt':'林岚弯腰拾起红伞','character_keys':[character_key],
         'scene_key':'alley','prop_keys':['umbrella'],
+        'dialogues':[{'character_key':'hero','text':'谁在那里？','emotion':'警觉'}],
     }]}
 
 
@@ -43,6 +44,7 @@ def test_bound_shots_use_system_uids_and_version_bindings_only():
     assert shot['assetBindings']['characters'][0]['versionId']==keys['hero_wet'][1]
     assert shot['assetBindings']['scene']['versionId']==keys['alley'][1]
     assert shot['assetBindings']['props'][0]['versionId']==keys['umbrella'][1]
+    assert shot['dialogues'][0]['characterCardId']==keys['hero'][0]
     assert 'character_keys' not in shot and 'scene_key' not in shot and 'prop_keys' not in shot
 
 

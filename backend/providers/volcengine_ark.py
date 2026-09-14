@@ -10,6 +10,8 @@ from . import common
 
 
 DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
+DEFAULT_VIDEO_MODEL = 'doubao-seedance-2-5-260628'
+DISABLED_VIDEO_PREFIXES = ('doubao-seedance-2-0',)
 SUPPORTED_REFERENCE_FORMATS = {'JPEG': 'image/jpeg', 'PNG': 'image/png'}
 MAX_REFERENCE_BYTES = 10 * 1024 * 1024
 MAX_REFERENCE_DIMENSION = 6000
@@ -92,6 +94,8 @@ def list_models(provider):
         seen.add(model_id)
         kind = _catalog_kind(model_id, provider, item)
         if not kind:
+            continue
+        if kind == 'video' and model_id.lower().startswith(DISABLED_VIDEO_PREFIXES):
             continue
         lifecycle = str(item.get('status') or 'Active')
         if lifecycle.lower() == 'shutdown':
@@ -270,6 +274,9 @@ def generate_video(worker, job, provider):
     model = model_for(provider, 'video')
     if not model:
         raise ValueError('请填写火山方舟视频模型 ID')
+    selected_model = str(job['input'].get('model') or model).strip()
+    if selected_model.lower().startswith(DISABLED_VIDEO_PREFIXES):
+        raise ValueError('安影已停用 Seedance 2.0，请在项目设置中选择 Doubao-Seedance-2.5')
     root = _root(provider)
     remote = job.get('provider_job_id')
     params = {**provider.get('parameters', {}).get('video', {}), **job['input'].get('parameters', {})}
@@ -295,7 +302,7 @@ def generate_video(worker, job, provider):
                         'role':'last_frame',
                     })
             body = {
-                'model': job['input'].get('model') or model,
+                'model': selected_model,
                 'content': content,
                 'duration': int(params.get('duration', 5)),
                 'resolution': str(params.get('resolution', '720p')),

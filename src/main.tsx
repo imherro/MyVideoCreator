@@ -126,6 +126,8 @@ import {
   VisualBibleGraphProvider,
 } from "./filmBible/VisualAssetNode";
 import { visualBibleOf } from "./filmBible/types";
+import type { VoiceProfile } from "./filmBible/types";
+import { acceptVoiceResult, saveVoiceProfile, setVoiceLocked, voiceProfilesOf } from "./filmBible/voices";
 import { StoryboardWorkspace } from "./pages/StoryboardWorkspace";
 import { VideoProductionWorkspace } from "./pages/VideoProductionWorkspace";
 import { TaskCenter } from "./pages/TaskCenter";
@@ -250,6 +252,7 @@ const titles: Any = {
   storyboard: "分镜规划",
   image: "图像",
   video: "视频",
+  audio: "角色配音",
   reference: "参考素材",
 };
 const icons: Any = {
@@ -257,6 +260,7 @@ const icons: Any = {
   storyboard: Layers,
   image: ImageIcon,
   video: Film,
+  audio: FileText,
   reference: FolderOpen,
 };
 const states: Any = {
@@ -686,7 +690,11 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     );
   }, []);
   const update = useCallback((fn: (d: Doc) => Doc) => {
-    setDoc((d) => (d ? deriveManagedGraph(fn(d)) : d));
+    const base = current.current.doc;
+    if (!base) return;
+    const next = deriveManagedGraph(fn(base));
+    current.current = { ...current.current, doc: next };
+    setDoc(next);
     dirty.current = true;
     setSaved("未保存");
   }, []);
@@ -1060,7 +1068,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     update((d) => {
       let next = d;
       for (const job of completed) {
-        if (job.node_id.startsWith("visual-version:")) {
+        if (job.kind === "audio" && job.input?.voice_profile) {
+          next = acceptVoiceResult(next, job);
+        } else if (job.node_id.startsWith("visual-version:")) {
           next = acceptVisualReferenceResult(next, job);
         } else if (job.kind === "storyboard" && job.result?.shots) {
           const storyboardNode = next.nodes.find(
@@ -2225,7 +2235,101 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     providers: config.providers,
     localModels: system.models,
     request: api,
+    voiceProfiles: voiceProfilesOf(doc),
     onPreviewAsset: (asset) => setPreview(asset as Asset),
+    onSaveVoice: (cardId, profile) => {
+      try {
+        update((document)=>saveVoiceProfile(document,cardId,profile));
+        setNotice("角色声音设定已保存");
+      } catch (reason) { report(reason); }
+    },
+    onGenerateVoice: async (cardId, profile) => {
+      const card = visualBibleOf(doc).cards[cardId];
+      if (!card) throw new Error("角色资产卡不存在");
+      const next = saveVoiceProfile(doc, cardId, profile);
+      const savedProfile = voiceProfilesOf(next)[cardId];
+      update(()=>next);
+      await save();
+      if (dirty.current) throw new Error("角色声音设定尚未保存，请先解决保存冲突");
+      const job = await api(`/projects/${project.id}/jobs`, send("POST", {
+        node_id: `voice-profile:${cardId}`,
+        kind: "audio",
+        submission_id: id(),
+        input: {
+          prompt: savedProfile.previewText,
+          provider: savedProfile.providerId,
+          model: savedProfile.voiceType,
+          voice_type: savedProfile.voiceType,
+          voice_version: savedProfile.version,
+          character_name: card.name,
+          output_name: `${card.name} · 声音 V${savedProfile.version} 试听.mp3`,
+          asset_category: "voice",
+          parameters: {
+            speech_rate: savedProfile.parameters.speechRate,
+            emotion: savedProfile.parameters.emotion,
+          },
+          voice_profile: { cardId, version: savedProfile.version },
+        },
+      }));
+      update((document)=>({
+        ...document,
+        filmBible:{
+          ...document.filmBible,
+          voices:{profiles:{...voiceProfilesOf(document),[cardId]:{...voiceProfilesOf(document)[cardId],generationJobId:job.id}}},
+        },
+      }));
+      await refresh(project.id);
+      setNotice("角色固定音色试听已进入任务队列");
+    },
+    onLockVoice: (cardId, locked) => {
+      try {
+        update((document)=>setVoiceLocked(document,cardId,locked));
+        setNotice(locked ? "角色主音色已锁定" : "已创建可编辑的新声音版本");
+      } catch (reason) { report(reason); }
+    },
+    onGenerateCharacterDialogue: async (cardId) => {
+      const profile = voiceProfilesOf(doc)[cardId];
+      const card = visualBibleOf(doc).cards[cardId];
+      if (!profile || profile.status !== "locked") throw new Error("请先试听并锁定角色主音色");
+      const dialogues = doc.shots.flatMap((shot) =>
+        (Array.isArray(shot.dialogues) ? shot.dialogues : [])
+          .filter((dialogue: Any) => dialogue.characterCardId === cardId)
+          .map((dialogue: Any, index: number) => ({ shot, dialogue, index })),
+      );
+      if (!dialogues.length) throw new Error("本集分镜没有该角色的结构化对白；重新生成分镜规划后会自动提取对白");
+      const existing = new Set(assets.flatMap((asset) => {
+        const dialogue = asset.metadata?.input?.dialogue;
+        return dialogue?.id && dialogue.voiceVersion === profile.version ? [dialogue.id] : [];
+      }));
+      const pending = new Set(jobs.flatMap((job) => {
+        const dialogue = job.input?.dialogue;
+        return dialogue?.id && dialogue.voiceVersion === profile.version && ["queued","running","succeeded"].includes(job.status) ? [dialogue.id] : [];
+      }));
+      const needed = dialogues.filter(({dialogue})=>!existing.has(dialogue.id) && !pending.has(dialogue.id));
+      if (!needed.length) throw new Error("该角色本集对白已经生成或正在生成");
+      await save();
+      await Promise.all(needed.map(({shot,dialogue,index})=>api(`/projects/${project.id}/jobs`,send("POST",{
+        node_id:`dialogue:${dialogue.id}`,
+        kind:"audio",
+        submission_id:id(),
+        input:{
+          prompt:dialogue.text,
+          provider:profile.providerId,
+          model:profile.voiceType,
+          voice_type:profile.voiceType,
+          voice_version:profile.version,
+          character_name:card?.name || dialogue.characterName,
+          output_name:`${shot.id || "分镜"} · ${card?.name || "角色"}对白 ${index+1}.mp3`,
+          asset_category:"voice",
+          emotion:dialogue.emotion,
+          parameters:{speech_rate:profile.parameters.speechRate,emotion:dialogue.emotion || profile.parameters.emotion},
+          dialogue:{id:dialogue.id,shotUid:String(shot.uid||shot.id),characterCardId:cardId,voiceVersion:profile.version,text:dialogue.text},
+        },
+      }))));
+      await refresh(project.id);
+      setNotice(`已并发提交 ${needed.length} 条${card?.name || "角色"}对白`);
+      return needed.length;
+    },
     focusVersionId: visualFocus,
     onFocusVersion: setVisualFocus,
     onRenameCard: (cardId, name) => {
@@ -4347,7 +4451,7 @@ function SettingsPanel({
         [current.id]: { ...checks[current.id], [changedKind]: undefined },
       }));
     }
-    if (current?.type === "volcengine_ark" && ("api_key" in patch || "url" in patch)) {
+    if (["volcengine_ark", "volcengine_speech"].includes(current?.type) && ("api_key" in patch || "url" in patch)) {
       setArkVerified((verified) => ({ ...verified, [current.id]: false }));
       setArkCatalogs((catalogs) => ({ ...catalogs, [current.id]: [] }));
       setArkChecks((checks) => ({ ...checks, [current.id]: {} }));
@@ -4568,6 +4672,15 @@ function SettingsPanel({
                           url: "https://ark.cn-beijing.volces.com/api/v3",
                           models: p.models || { text: "", image: "", video: "" },
                         }
+                      : e.target.value === "volcengine_speech"
+                        ? {
+                            type: e.target.value,
+                            kind: "audio",
+                            local: false,
+                            url: "https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse",
+                            model: p.model || "zh_female_vv_uranus_bigtts",
+                            resource_id: p.resource_id || "seed-tts-2.0",
+                          }
                       : p.type === "volcengine_ark"
                         ? { type: e.target.value, kind: "text", model: p.models?.text || "", models: undefined }
                         : { type: e.target.value },
@@ -4581,10 +4694,13 @@ function SettingsPanel({
                 <option value="minimax">MiniMax 原生视频</option>
                 <option value="replicate">Replicate 模型平台</option>
                 <option value="volcengine_ark">火山方舟（文本 / 图像 / 视频）</option>
+                <option value="volcengine_speech">豆包语音（角色固定音色）</option>
               </select>
             </label>
             {p.type === "volcengine_ark" ? (
               <label>用途<input value="统一：文本、图像、视频" readOnly /></label>
+            ) : p.type === "volcengine_speech" ? (
+              <label>用途<input value="角色对白与旁白" readOnly /></label>
             ) : (
               <label>
                 用途
@@ -4609,7 +4725,7 @@ function SettingsPanel({
           </label>
           {p.type !== "volcengine_ark" && (
             <label>
-              默认模型 ID
+              {p.type === "volcengine_speech" ? "默认音色 ID" : "默认模型 ID"}
               <input
                 value={p.model || ""}
                 onChange={(e) => patchProvider(i, { model: e.target.value })}
@@ -4641,6 +4757,20 @@ function SettingsPanel({
                 onTest={(kind) => void testArkModel(p.id, kind)}
               />
               <p className="muted">一个 ARK API Key 统一调用豆包文本、Seedream 图片与 Seedance 视频。</p>
+            </>
+          ) : p.type === "volcengine_speech" ? (
+            <>
+              <label>
+                Resource ID
+                <input value={p.resource_id || "seed-tts-2.0"} onChange={(e) => patchProvider(i, { resource_id: e.target.value })}/>
+                <small>常用值为 seed-tts-2.0；必须与已开通的豆包语音实例和音色匹配。</small>
+              </label>
+              <div className="two-fields">
+                <label>输出格式<select value={p.parameters?.format || "mp3"} onChange={(e)=>patchProvider(i,{parameters:{...p.parameters,format:e.target.value}})}><option value="mp3">MP3</option><option value="ogg_opus">OGG Opus</option></select></label>
+                <label>采样率<select value={p.parameters?.sample_rate || 24000} onChange={(e)=>patchProvider(i,{parameters:{...p.parameters,sample_rate:Number(e.target.value)}})}><option value={24000}>24 kHz</option><option value={48000}>48 kHz</option></select></label>
+              </div>
+              <button className="secondary full" disabled={busy} onClick={()=>void verifyArk(p.id)}><Check size={14}/>检查语音配置</button>
+              <p className="muted">Speech API Key 与 ARK API Key 是两套凭证。配置检查不生成音频；角色卡中的试听会调用语音服务。</p>
             </>
           ) : (
             <label className="check-label">
@@ -4835,7 +4965,7 @@ function SettingsPanel({
                   models: {
                     text: "doubao-seed-2-1-pro-260628",
                     image: "doubao-seedream-5-0-pro-260628",
-                    video: "doubao-seedance-2-0-260128",
+                    video: "doubao-seedance-2-5-260628",
                   },
                   parameters: {
                     image: { size: "2K", watermark: false, max_references: 10 },
@@ -4847,6 +4977,29 @@ function SettingsPanel({
           }
         >
           添加火山方舟
+        </button>
+        <button
+          onClick={() =>
+            setValue({
+              ...value,
+              providers: [
+                ...value.providers,
+                {
+                  id: id(),
+                  name: "豆包语音",
+                  type: "volcengine_speech",
+                  url: "https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse",
+                  local: false,
+                  kind: "audio",
+                  model: "zh_female_vv_uranus_bigtts",
+                  resource_id: "seed-tts-2.0",
+                  parameters: { format: "mp3", sample_rate: 24000, speech_rate: 0 },
+                },
+              ],
+            })
+          }
+        >
+          添加豆包语音
         </button>
         <button
           onClick={() =>

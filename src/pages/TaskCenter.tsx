@@ -20,6 +20,7 @@ const kindLabels: Record<string, string> = {
   storyboard: "分镜规划",
   image: "图片",
   video: "视频",
+  audio: "角色配音",
   export: "成片导出",
 };
 

@@ -7,6 +7,8 @@ IMAGE_SYSTEM_PROMPT = """你是安影的影视分镜美术生成器。严格依�
 
 VIDEO_SYSTEM_PROMPT = """你是安影的影视镜头生成器。严格依据用户提示词和首帧/尾帧参考生成连续视频，保持人物身份、服装、场景、道具和空间关系稳定。动作与摄影机运动应符合镜头描述，避免闪烁、形变、身份漂移、额外人物、文字和水印。"""
 
+AUDIO_SYSTEM_PROMPT = """你是安影的角色对白合成器。严格使用角色 Film Bible 中已选择的固定音色和本次台词参数生成音频，不改变台词内容，不在前后添加说明、音乐或额外对白。"""
+
 
 def freeze_prompt_contract(kind: str, value: dict, *, origin: str = 'submission') -> dict:
     result = copy.deepcopy(value)
@@ -42,7 +44,7 @@ def freeze_prompt_contract(kind: str, value: dict, *, origin: str = 'submission'
                 'system_prompt': STORYBOARD_DIRECTOR_PROMPT,
                 'user_prompt_template': '剧本：\n{{script}}\n\n只允许引用以下视觉卡：\n{{visual_cards_json}}\n{{duration_constraint}}',
                 'response_schema': BOUND_STORYBOARD_SCHEMA,
-                'schema_version': 'bound-storyboard/v1',
+                'schema_version': 'bound-storyboard/v2',
             },
         ])
         schema_version = 'film-bible-storyboard/v1'
@@ -55,6 +57,8 @@ def freeze_prompt_contract(kind: str, value: dict, *, origin: str = 'submission'
         system_prompt, schema_version = IMAGE_SYSTEM_PROMPT, 'image-generation/v1'
     elif kind == 'video':
         system_prompt, schema_version = VIDEO_SYSTEM_PROMPT, 'video-generation/v1'
+    elif kind == 'audio':
+        system_prompt, schema_version = AUDIO_SYSTEM_PROMPT, 'dialogue-tts/v1'
 
     if system_prompt is not None:
         result.setdefault('system_prompt', system_prompt)

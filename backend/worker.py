@@ -67,7 +67,7 @@ class Worker:
         with s.db() as c:
             row=c.execute('SELECT provider FROM job_private WHERE job_id=?',(job['id'],)).fetchone()
         if not row:return False
-        try:return json.loads(row['provider']).get('type')=='volcengine_ark'
+        try:return json.loads(row['provider']).get('type') in ('volcengine_ark','volcengine_speech')
         except (TypeError,ValueError):return False
     def loop(self):
         while not self.halt.is_set():
@@ -190,6 +190,9 @@ class Worker:
             finally:
                 if provider_id=='local': runtime.schedule_idle()
         runtime.unload()
+        if kind=='audio' and provider['type']=='volcengine_speech':
+            from .providers.volcengine_speech import synthesize
+            return synthesize(self,job,provider)
         if provider['type']=='maestro': return self.maestro(job,provider)
         if provider['type']=='comfy': return self.comfy(job,provider)
         if kind=='image' and provider['type']=='openai': return self.image(job,provider)

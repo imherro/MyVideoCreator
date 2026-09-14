@@ -5,7 +5,7 @@ import copy
 import json
 import uuid
 
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 
 def empty_film_bible():
     return {
@@ -14,6 +14,7 @@ def empty_film_bible():
         'style': {},
         'styleVersion': 1,
         'story': {},
+        'voices': {'profiles': {}},
     }
 
 def empty_generation_policy():
@@ -71,6 +72,13 @@ def _migrate_v3_to_v4(value):
     value['schemaVersion']=4
     return value
 
+def _migrate_v4_to_v5(value):
+    film=value.setdefault('filmBible',{})
+    voices=film.setdefault('voices',{})
+    voices.setdefault('profiles',{})
+    value['schemaVersion']=5
+    return value
+
 def migrate_document(document):
     """Return a migrated copy. Reject future schemas rather than downgrading."""
     source = document if isinstance(document, dict) else {}
@@ -93,6 +101,9 @@ def migrate_document(document):
         elif version == 3:
             value = _migrate_v3_to_v4(value)
             version = 4
+        elif version == 4:
+            value = _migrate_v4_to_v5(value)
+            version = 5
         else:
             raise ValueError(f'缺少项目 Schema v{version} 的迁移程序')
     return value

@@ -68,6 +68,18 @@ export type VisualBible = {
   versions: Record<string, VisualVersion>;
 };
 
+export type VoiceProfile = {
+  cardId: string;
+  providerId: string;
+  voiceType: string;
+  version: number;
+  status: "draft" | "locked";
+  previewText: string;
+  previewAssetId?: string;
+  generationJobId?: string;
+  parameters: { speechRate: number; emotion: string };
+};
+
 export type ShotAssetBindings = {
   characters: Array<{ role: string; versionId: string }>;
   scene: { versionId: string } | null;
@@ -75,7 +87,7 @@ export type ShotAssetBindings = {
 };
 
 export type FilmBibleDocument = {
-  filmBible?: { visual?: VisualBible; styleVersion?: number | string; [key: string]: unknown };
+  filmBible?: { visual?: VisualBible; voices?: { profiles?: Record<string, VoiceProfile> }; styleVersion?: number | string; [key: string]: unknown };
   shots: Array<Record<string, any>>;
   nodes: Array<Record<string, any>>;
   edges: Array<Record<string, any>>;

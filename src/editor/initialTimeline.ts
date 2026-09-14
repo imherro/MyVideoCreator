@@ -29,6 +29,7 @@ export function planInitialTimeline(
 ): InitialTimelinePlan {
   const issues: string[] = [];
   const elements: ElementJSON[] = [];
+  const dialogueElements: ElementJSON[] = [];
   let cursor = 0;
 
   shots.forEach((shot, index) => {
@@ -64,6 +65,11 @@ export function planInitialTimeline(
 
     const duration = Math.min(plannedDuration, mediaDuration);
     const elementId = `e-${newId()}`;
+    const shotStart = cursor;
+    const dialogueAssets = assets.filter((candidate) =>
+      candidate.kind === "audio" &&
+      String(candidate.metadata?.input?.dialogue?.shotUid || "") === String(shot.uid || shot.id || ""),
+    );
     elements.push({
       id: elementId,
       trackId: "t-v1",
@@ -76,7 +82,7 @@ export function planInitialTimeline(
         srcAssetId: asset.id,
         time: 0,
         playbackRate: 1,
-        volume: 1,
+        volume: dialogueAssets.length ? 0 : 1,
         mediaFilter: "none",
       },
       metadata: {
@@ -90,12 +96,33 @@ export function planInitialTimeline(
       objectFit: "cover",
       mediaDuration,
     });
+    let dialogueCursor = shotStart;
+    dialogueAssets.forEach((dialogueAsset) => {
+      const dialogueDuration = Number(dialogueAsset.metadata?.duration);
+      if (!Number.isFinite(dialogueDuration) || dialogueDuration <= 0) {
+        issues.push(`${label}对白“${dialogueAsset.name}”时长无效`);
+        return;
+      }
+      if (dialogueCursor + dialogueDuration > shotStart + duration + 0.08) {
+        issues.push(`${label}对白总时长超过镜头时长`);
+        return;
+      }
+      dialogueElements.push({
+        id: `e-${newId()}`, trackId: "t-dialogue", type: "audio", name: dialogueAsset.name,
+        s: dialogueCursor, e: dialogueCursor + dialogueDuration,
+        props: { src: dialogueAsset.url, srcAssetId: dialogueAsset.id, time: 0, playbackRate: 1, volume: 1 },
+        metadata: { assetId: dialogueAsset.id, assetSource: "my-video-creator", role: "dialogue", shotId: shot.id, generatedInitialEdit: true },
+        mediaDuration: dialogueDuration,
+      });
+      dialogueCursor += dialogueDuration;
+    });
     cursor += duration;
   });
 
   const tracks: TrackJSON[] = [
     { id: "t-v1", name: "V1 · AI 初剪", type: "video", elements },
   ];
+  if (dialogueElements.length) tracks.push({ id: "t-dialogue", name: "A1 · 角色对白", type: "audio", elements: dialogueElements });
 
   const music = assets.find((asset) => asset.id === audioId && asset.kind === "audio");
   if (music && cursor > 0) {

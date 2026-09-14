@@ -8,6 +8,7 @@ import {
   Sparkles,
   Trash2,
   Unlink,
+  Volume2,
 } from "lucide-react";
 import { ModelSelector } from "../ModelSelector.tsx";
 import type { GenerationPolicy } from "../generationPolicy.ts";
@@ -16,7 +17,9 @@ import type {
   VisualBible,
   VisualGenerationOverride,
   VisualVersionStatus,
+  VoiceProfile,
 } from "./types.ts";
+import { defaultVoiceProfile } from "./voices.ts";
 import { visualKindLabels, visualStatusLabels } from "./types.ts";
 import {
   isVersionBound,
@@ -59,6 +62,11 @@ export function FilmBiblePanel({
   providers,
   localModels,
   request,
+  voiceProfiles,
+  onSaveVoice,
+  onGenerateVoice,
+  onLockVoice,
+  onGenerateCharacterDialogue,
 }: {
   visual: VisualBible;
   shots: Array<Record<string, any>>;
@@ -91,6 +99,11 @@ export function FilmBiblePanel({
   providers: Array<Record<string, any>>;
   localModels: Array<Record<string, any>>;
   request: (path: string) => Promise<any>;
+  voiceProfiles: Record<string, VoiceProfile>;
+  onSaveVoice: (cardId: string, profile: VoiceProfile) => void;
+  onGenerateVoice: (cardId: string, profile: VoiceProfile) => Promise<void>;
+  onLockVoice: (cardId: string, locked: boolean) => void;
+  onGenerateCharacterDialogue: (cardId: string) => Promise<number>;
 }) {
   const versions = useMemo(
     () =>
@@ -124,6 +137,13 @@ export function FilmBiblePanel({
   });
   const [referenceBusy, setReferenceBusy] = useState(false);
   const [referenceError, setReferenceError] = useState("");
+  const speechProviders = providers.filter((item) => item.type === "volcengine_speech");
+  const storedVoice = card ? voiceProfiles[card.id] : undefined;
+  const [voiceDraft, setVoiceDraft] = useState<VoiceProfile>(() =>
+    defaultVoiceProfile("", speechProviders[0]?.id || ""),
+  );
+  const [voiceBusy, setVoiceBusy] = useState(false);
+  const [voiceError, setVoiceError] = useState("");
   useEffect(() => {
     if (focusVersionId && visual.versions[focusVersionId])
       setSelectedId(focusVersionId);
@@ -143,6 +163,11 @@ export function FilmBiblePanel({
   useEffect(() => {
     setReferenceError("");
   }, [selected?.id]);
+  useEffect(() => {
+    if (!card) return;
+    setVoiceDraft(storedVoice || defaultVoiceProfile(card.id, speechProviders[0]?.id || ""));
+    setVoiceError("");
+  }, [card?.id, storedVoice, speechProviders[0]?.id]);
   if (!versions.length)
     return (
       <div className="empty-state film-bible-empty">
@@ -339,6 +364,28 @@ export function FilmBiblePanel({
             )}
           </>
         )}
+        {card.kind === "character" && <>
+          <hr />
+          <div className="film-bible-section-title"><b>角色固定音色</b><small>跨镜头统一对白声纹</small></div>
+          {!speechProviders.length ? <p className="warning-text">尚未配置豆包语音。请到“设置 → 模型服务”添加豆包语音并填写独立 Speech API Key。</p> : <>
+            <label>语音服务<select value={voiceDraft.providerId} disabled={voiceDraft.status === "locked"} onChange={(event)=>setVoiceDraft({...voiceDraft,providerId:event.target.value})}>{speechProviders.map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+            <label>音色 ID<input value={voiceDraft.voiceType} disabled={voiceDraft.status === "locked"} onChange={(event)=>setVoiceDraft({...voiceDraft,voiceType:event.target.value})}/><small>可填写预置音色、音色设计或声音复刻返回的 Speaker ID。</small></label>
+            <label>试听台词<textarea value={voiceDraft.previewText} disabled={voiceDraft.status === "locked"} onChange={(event)=>setVoiceDraft({...voiceDraft,previewText:event.target.value})}/></label>
+            <div className="two-fields">
+              <label>语速<select value={voiceDraft.parameters.speechRate} disabled={voiceDraft.status === "locked"} onChange={(event)=>setVoiceDraft({...voiceDraft,parameters:{...voiceDraft.parameters,speechRate:Number(event.target.value)}})}><option value={-25}>较慢</option><option value={0}>正常</option><option value={25}>较快</option></select></label>
+              <label>情绪<input value={voiceDraft.parameters.emotion} disabled={voiceDraft.status === "locked"} placeholder="留空自动演绎" onChange={(event)=>setVoiceDraft({...voiceDraft,parameters:{...voiceDraft.parameters,emotion:event.target.value}})}/></label>
+            </div>
+            <div className="film-bible-actions">
+              {voiceDraft.status !== "locked" && <button onClick={()=>onSaveVoice(card.id,voiceDraft)}>保存声音设定</button>}
+              {voiceDraft.status !== "locked" && <button className="primary" disabled={voiceBusy} onClick={()=>{setVoiceBusy(true);setVoiceError("");void onGenerateVoice(card.id,voiceDraft).catch((reason)=>setVoiceError(reason?.message||String(reason))).finally(()=>setVoiceBusy(false));}}>{voiceBusy?<LoaderCircle className="spin" size={14}/>:<Volume2 size={14}/>}生成试听</button>}
+              {storedVoice?.previewAssetId && <button className="secondary" onClick={()=>{const asset=assets.find((item)=>item.id===storedVoice.previewAssetId);if(asset)onPreviewAsset(asset);}}>试听声音</button>}
+              {storedVoice?.status === "locked" ? <button onClick={()=>onLockVoice(card.id,false)}>创建新声音版本</button> : storedVoice?.previewAssetId ? <button onClick={()=>onLockVoice(card.id,true)}>锁定主音色 V{storedVoice.version}</button> : null}
+              {storedVoice?.status === "locked" && <button className="primary" disabled={voiceBusy} onClick={()=>{setVoiceBusy(true);setVoiceError("");void onGenerateCharacterDialogue(card.id).catch((reason)=>setVoiceError(reason?.message||String(reason))).finally(()=>setVoiceBusy(false));}}><Volume2 size={14}/>生成本集全部对白</button>}
+            </div>
+            <p className="muted">{storedVoice ? `声音 V${storedVoice.version} · ${storedVoice.status === "locked" ? "已锁定" : "草稿"}` : "保存并试听后可锁定为角色主音色。"}</p>
+            {voiceError && <p className="error">{voiceError}</p>}
+          </>}
+        </>}
         <hr />
         <h3>主参考图</h3>
         <div className="reference-policy">

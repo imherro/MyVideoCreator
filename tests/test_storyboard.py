@@ -48,6 +48,7 @@ def test_film_bible_storyboard_is_two_text_passes_with_deterministic_bindings(mo
     board={'title':'雨巷','shots':[{
       'duration':5,'scene':'雨巷','characters':'林岚','action':'向前走','emotion':'警觉','camera':'中景跟拍','audio':'雨声',
       'image_prompt':'林岚站在雨巷','video_prompt':'林岚向前走','character_keys':['hero'],'scene_key':'alley','prop_keys':[],
+      'dialogues':[{'character_key':'hero','text':'雨还没有停。','emotion':'警觉'}],
     }]}
     payloads=[visual,board];requests=[]
     def respond(request):
@@ -76,7 +77,7 @@ def test_non_structured_visual_output_gets_one_bounded_repair(monkeypatch):
         c.execute('INSERT INTO jobs(id,submission_id,project_id,node_id,kind,status,input,created,updated) VALUES(?,?,?,?,?,?,?,?,?)',(jid,jid,pid,'n','storyboard','running','{}',now,now))
     malformed=[{'key':'hero','kind':'character','name':'林岚','parent_key':'','description':'灰色风衣','attributes':{},'invariants':'灰色风衣'}]
     valid_visual={'cards':[{'key':'hero','kind':'character','name':'林岚','parent_key':'','description':'灰色风衣','attributes':[],'invariants':['灰色风衣']}]}
-    valid_board={'title':'短片','shots':[{'duration':5,'scene':'室内','characters':'林岚','action':'站立','emotion':'平静','camera':'中景','audio':'环境声','image_prompt':'林岚站立','video_prompt':'林岚呼吸','character_keys':['hero'],'scene_key':'','prop_keys':[]}]}
+    valid_board={'title':'短片','shots':[{'duration':5,'scene':'室内','characters':'林岚','action':'站立','emotion':'平静','camera':'中景','audio':'环境声','image_prompt':'林岚站立','video_prompt':'林岚呼吸','character_keys':['hero'],'scene_key':'','prop_keys':[],'dialogues':[]}]}
     payloads=[malformed,valid_visual,valid_board];requests=[]
     def respond(request):
         requests.append(json.loads(request.content));content=json.dumps(payloads[len(requests)-1],ensure_ascii=False)

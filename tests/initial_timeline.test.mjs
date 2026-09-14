@@ -97,3 +97,27 @@ test("initial edit rejects missing, stale, and overlong shot media", () => {
   assert.equal(plan.clipCount, 0);
   assert.equal(plan.issues.length, 3);
 });
+
+test("fixed character dialogue becomes an audio track and replaces generated video audio", () => {
+  const plan = planInitialTimeline(
+    {
+      shots: [{ id: "shot-1", uid: "shot-uid-1", videoNode: "video-node", duration: 5 }],
+      nodes: [{ id: "video-node", data: { assetId: "video" } }],
+      assets: [
+        { id: "video", name: "镜头", kind: "video", url: "/video", metadata: { duration: 5 } },
+        { id: "voice", name: "角色对白", kind: "audio", url: "/voice", metadata: {
+          duration: 2.4,
+          input: { dialogue: { id: "dialogue-1", shotUid: "shot-uid-1", characterCardId: "card-1", voiceVersion: 2 } },
+        } },
+      ],
+      resolution: { width: 1280, height: 720 },
+    },
+    (() => { let id = 0; return () => String(++id); })(),
+  );
+  assert.deepEqual(plan.issues, []);
+  assert.equal(plan.timeline.tracks[0].elements[0].props.volume, 0);
+  assert.equal(plan.timeline.tracks[1].name, "A1 · 角色对白");
+  assert.equal(plan.timeline.tracks[1].elements[0].metadata.assetId, "voice");
+  assert.equal(plan.timeline.tracks[1].elements[0].s, 0);
+  assert.equal(plan.timeline.tracks[1].elements[0].e, 2.4);
+});
