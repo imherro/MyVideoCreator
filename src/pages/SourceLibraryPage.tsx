@@ -1,33 +1,189 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BookOpen, FilePlus2, RefreshCw, Save, Search, Sparkles, Upload } from "lucide-react";
+import { BookOpen, FilePlus2, Plus, RefreshCw, Save, Search, Sparkles, Upload, X } from "lucide-react";
+import { episodeSourceReferences, setEpisodeSourceReference } from "../sourceReferences";
 
 type AnyValue = any;
+type CreateDialog = { mode: "source" | "chapter"; sourceId?: string; sourceName?: string };
 
-export function SourceLibraryPage({ productionId, projectId, providers, defaultTarget, request, notify, report }:{
-  productionId:string; projectId:string; providers:AnyValue[]; defaultTarget?:AnyValue;
-  request:(path:string,options?:RequestInit)=>Promise<AnyValue>; notify:(message:string)=>void; report:(error:unknown)=>void;
+export function SourceLibraryPage({
+  productionId, projectId, episodeNo, episodeTitle, providers, defaultTarget, request, notify, report,
+}: {
+  productionId: string; projectId: string; episodeNo: number; episodeTitle: string;
+  providers: AnyValue[]; defaultTarget?: AnyValue;
+  request: (path: string, options?: RequestInit) => Promise<AnyValue>;
+  notify: (message: string) => void; report: (error: unknown) => void;
 }) {
-  const [sources,setSources]=useState<AnyValue[]>([]),[chapters,setChapters]=useState<AnyValue[]>([]),[events,setEvents]=useState<AnyValue[]>([]);
-  const [active,setActive]=useState<string>(""),[selected,setSelected]=useState<Set<string>>(new Set()),[query,setQuery]=useState("");
-  const [busy,setBusy]=useState(false),fileRef=useRef<HTMLInputElement>(null);
-  const textProviders=useMemo(()=>[{id:"local",name:"本地 llama.cpp",local:true,model:""},...providers.filter(p=>!p.kind||p.kind==="text")],[providers]);
-  const [providerId,setProviderId]=useState(defaultTarget?.providerId||"local"),[model,setModel]=useState(defaultTarget?.modelId||"");
-  const chapter=chapters.find(item=>item.id===active);
-  async function load(){const [s,c,e]=await Promise.all([request(`/productions/${productionId}/sources`),request(`/productions/${productionId}/chapters`),request(`/productions/${productionId}/source-events`)]);setSources(s);setChapters(c);setEvents(e);setActive(value=>value&&c.some((x:AnyValue)=>x.id===value)?value:c[0]?.id||"")}
-  useEffect(()=>{setSelected(new Set());void load().catch(report)},[productionId]);
-  useEffect(()=>{setProviderId(defaultTarget?.providerId||"local");setModel(defaultTarget?.modelId||"")},[productionId,projectId,defaultTarget?.providerId,defaultTarget?.modelId]);
-  async function importFile(file:File){setBusy(true);try{await request(`/productions/${productionId}/sources/import`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({title:file.name.replace(/\.(txt|md|markdown)$/i,""),type:/\.md|\.markdown$/i.test(file.name)?"markdown":"txt",content:await file.text(),metadata:{filename:file.name}})});await load();notify(`已导入 ${file.name}`)}finally{setBusy(false)}}
-  async function manual(){const title=window.prompt("原著名称","未命名原著");if(!title)return;setBusy(true);try{const source=await request(`/productions/${productionId}/sources`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({title,type:"manual",metadata:{}})});await request(`/productions/${productionId}/sources/${source.id}/chapters`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({title:"正文",content:""})});await load()}finally{setBusy(false)}}
-  async function saveChapter(){if(!chapter)return;setBusy(true);try{const saved=await request(`/productions/${productionId}/chapters/${chapter.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({title:chapter.title,content:chapter.content,revision:chapter.revision})});setChapters(items=>items.map(item=>item.id===saved.id?saved:item));notify("章节已保存")}finally{setBusy(false)}}
-  async function extract(){if(!selected.size)return;const provider=textProviders.find(p=>p.id===providerId);const modelId=model||(provider?.models?.text||provider?.model||"");if(!modelId&&providerId!=="local")throw new Error("请填写文本模型 ID");if(!window.confirm(`将分析 ${selected.size} 个章节\n模型：${provider?.name||providerId} / ${modelId||"本地默认"}\n确认创建文本任务？`))return;setBusy(true);try{await request(`/productions/${productionId}/source-extractions`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({project_id:projectId,chapter_ids:[...selected],provider:providerId,model:modelId,allow_cloud:providerId!=="local"&&provider?.local!==true,submission_id:`source-${Date.now()}`})});notify(`已创建 ${selected.size} 个事件提取任务，可在任务中心查看`)}finally{setBusy(false)}}
-  function run(action:()=>Promise<void>){void action().catch(report)}
-  const visible=chapters.filter(item=>!query||item.title.includes(query)||item.content.includes(query));
+  const [sources, setSources] = useState<AnyValue[]>([]);
+  const [chapters, setChapters] = useState<AnyValue[]>([]);
+  const [events, setEvents] = useState<AnyValue[]>([]);
+  const [adaptation, setAdaptation] = useState<AnyValue | null>(null);
+  const [active, setActive] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [query, setQuery] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [dialog, setDialog] = useState<CreateDialog | null>(null);
+  const [sourceName, setSourceName] = useState("");
+  const [chapterTitle, setChapterTitle] = useState("第一章");
+  const [chapterContent, setChapterContent] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+  const textProviders = useMemo(
+    () => [{ id: "local", name: "本地 llama.cpp", local: true, model: "" }, ...providers.filter((provider) => !provider.kind || provider.kind === "text")],
+    [providers],
+  );
+  const [providerId, setProviderId] = useState(defaultTarget?.providerId || "local");
+  const [model, setModel] = useState(defaultTarget?.modelId || "");
+  const chapter = chapters.find((item) => item.id === active);
+  const currentPlan = adaptation?.episodePlans?.find((item: AnyValue) => item.episodeNo === episodeNo);
+  const currentReferences = new Set(episodeSourceReferences(adaptation, episodeNo));
+
+  async function load() {
+    const [nextSources, nextChapters, nextEvents, nextAdaptation] = await Promise.all([
+      request(`/productions/${productionId}/sources`),
+      request(`/productions/${productionId}/chapters`),
+      request(`/productions/${productionId}/source-events`),
+      request(`/productions/${productionId}/adaptation`),
+    ]);
+    setSources(nextSources);
+    setChapters(nextChapters);
+    setEvents(nextEvents);
+    setAdaptation(nextAdaptation);
+    setActive((value) => value && nextChapters.some((item: AnyValue) => item.id === value) ? value : nextChapters[0]?.id || "");
+  }
+
+  useEffect(() => { setSelected(new Set()); void load().catch(report); }, [productionId]);
+  useEffect(() => {
+    setProviderId(defaultTarget?.providerId || "local");
+    setModel(defaultTarget?.modelId || "");
+  }, [productionId, projectId, defaultTarget?.providerId, defaultTarget?.modelId]);
+
+  function run(action: () => Promise<void>) { void action().catch(report); }
+  function openCreateSource() {
+    setSourceName("");
+    setChapterTitle("第一章");
+    setChapterContent("");
+    setDialog({ mode: "source" });
+  }
+  function openCreateChapter() {
+    const source = sources.find((item) => item.id === chapter?.source_id) || sources[0];
+    if (!source) return;
+    setChapterTitle(`第 ${Number(source.chapter_count || 0) + 1} 章`);
+    setChapterContent("");
+    setDialog({ mode: "chapter", sourceId: source.id, sourceName: source.title });
+  }
+  async function createManualContent() {
+    if (!dialog || !chapterTitle.trim() || (dialog.mode === "source" && !sourceName.trim())) return;
+    setBusy(true);
+    try {
+      let sourceId = dialog.sourceId;
+      if (dialog.mode === "source") {
+        const source = await request(`/productions/${productionId}/sources`, {
+          method: "POST", body: JSON.stringify({ title: sourceName.trim(), type: "manual", metadata: {} }),
+        });
+        sourceId = source.id;
+      }
+      const created = await request(`/productions/${productionId}/sources/${sourceId}/chapters`, {
+        method: "POST", body: JSON.stringify({ title: chapterTitle.trim(), content: chapterContent }),
+      });
+      const mode = dialog.mode;
+      setDialog(null);
+      await load();
+      setActive(created.id);
+      notify(mode === "source" ? "原著和第一章已建立" : "章节已新增");
+    } finally { setBusy(false); }
+  }
+  async function importFile(file: File) {
+    setBusy(true);
+    try {
+      await request(`/productions/${productionId}/sources/import`, { method: "POST", body: JSON.stringify({
+        title: file.name.replace(/\.(txt|md|markdown)$/i, ""),
+        type: /\.md|\.markdown$/i.test(file.name) ? "markdown" : "txt",
+        content: await file.text(), metadata: { filename: file.name },
+      }) });
+      await load();
+      notify(`已导入 ${file.name}`);
+    } finally { setBusy(false); }
+  }
+  async function saveChapter() {
+    if (!chapter) return;
+    setBusy(true);
+    try {
+      const saved = await request(`/productions/${productionId}/chapters/${chapter.id}`, {
+        method: "PUT", body: JSON.stringify({ title: chapter.title, content: chapter.content, revision: chapter.revision }),
+      });
+      setChapters((items) => items.map((item) => item.id === saved.id ? saved : item));
+      notify("章节已保存");
+    } finally { setBusy(false); }
+  }
+  async function saveEpisodeReferences() {
+    if (!adaptation || !currentPlan) return;
+    setBusy(true);
+    try {
+      const saved = await request(`/productions/${productionId}/adaptation`, { method: "PUT", body: JSON.stringify({
+        revision: adaptation.revision,
+        adaptationPlan: adaptation.adaptationPlan,
+        episodePlans: adaptation.episodePlans,
+        monetizationPlan: adaptation.monetizationPlan,
+      }) });
+      setAdaptation(saved);
+      notify(`EP${String(episodeNo).padStart(2, "0")} 的原著章节引用已保存`);
+    } finally { setBusy(false); }
+  }
+  async function extract() {
+    if (!selected.size) return;
+    const provider = textProviders.find((item) => item.id === providerId);
+    const modelId = model || provider?.models?.text || provider?.model || "";
+    if (!modelId && providerId !== "local") throw new Error("请填写文本模型 ID");
+    if (!window.confirm(`将分析 ${selected.size} 个章节\n模型：${provider?.name || providerId} / ${modelId || "本地默认"}\n确认创建文本任务？`)) return;
+    setBusy(true);
+    try {
+      await request(`/productions/${productionId}/source-extractions`, { method: "POST", body: JSON.stringify({
+        project_id: projectId, chapter_ids: [...selected], provider: providerId, model: modelId,
+        allow_cloud: providerId !== "local" && provider?.local !== true,
+        submission_id: `source-${Date.now()}`,
+      }) });
+      notify(`已创建 ${selected.size} 个事件提取任务，可在任务中心查看`);
+    } finally { setBusy(false); }
+  }
+
+  const visible = chapters.filter((item) => !query || item.title.includes(query) || item.content.includes(query));
   return <section className="source-library-page">
-    <header className="source-library-header"><div><span className="eyebrow">SOURCE LIBRARY</span><h1>原著资料库</h1><p>长文本按章节独立保存；AI 事件提取只在你明确执行时创建文本任务。</p></div><div className="settings-actions"><button onClick={()=>run(load)} disabled={busy}><RefreshCw size={15}/>刷新</button><button onClick={()=>fileRef.current?.click()} disabled={busy}><Upload size={15}/>导入 TXT / Markdown</button><button onClick={()=>run(manual)} disabled={busy}><FilePlus2 size={15}/>手工新建</button></div></header>
-    <input ref={fileRef} hidden type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" onChange={e=>{const file=e.target.files?.[0];if(file)run(()=>importFile(file));e.target.value=""}}/>
-    <div className="source-library-grid"><aside><label className="source-search"><Search size={14}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="搜索章节"/></label><small>{sources.length} 部原著 · {chapters.length} 章</small>{visible.map(item=><button className={active===item.id?"active":""} key={item.id} onClick={()=>setActive(item.id)}><input type="checkbox" checked={selected.has(item.id)} onClick={e=>e.stopPropagation()} onChange={e=>setSelected(value=>{const next=new Set(value);e.target.checked?next.add(item.id):next.delete(item.id);return next})}/><span><b>{item.chapter_no}. {item.title}</b><small>{item.source_title}</small></span></button>)}</aside>
-      <main>{chapter?<><div className="chapter-editor-head"><input value={chapter.title} onChange={e=>setChapters(items=>items.map(item=>item.id===chapter.id?{...item,title:e.target.value}:item))}/><button disabled={busy} onClick={()=>run(saveChapter)}><Save size={14}/>保存章节</button></div><textarea className="chapter-editor" value={chapter.content} onChange={e=>setChapters(items=>items.map(item=>item.id===chapter.id?{...item,content:e.target.value}:item))}/><h3>已提取事件</h3>{events.filter(item=>item.chapter_id===chapter.id).map(item=><article className="source-event" key={item.id}><b>{item.event_order}. {item.summary}</b><small>{item.importance} · {item.emotion||"无情绪标注"} · {item.characters.join("、")||"无明确人物"}</small></article>)}</>:<div className="empty-state"><BookOpen/><h3>导入或新建原著</h3></div>}</main>
-      <aside className="source-analysis"><h3>AI 事件提取</h3><p>已选 {selected.size} 章。任务失败时保留已有事件。</p><label>文本服务<select value={providerId} onChange={e=>{setProviderId(e.target.value);const p=textProviders.find(x=>x.id===e.target.value);setModel(p?.models?.text||p?.model||"")}}>{textProviders.map(p=><option key={p.id} value={p.id}>{p.local?"本地":"云端"} · {p.name}</option>)}</select></label><label>模型 ID<input value={model} placeholder="本地留空使用默认模型" onChange={e=>setModel(e.target.value)}/></label><button disabled={busy||!selected.size} onClick={()=>run(extract)}><Sparkles size={15}/>提取所选章节事件</button></aside>
+    <header className="source-library-header">
+      <div><span className="eyebrow">PRODUCTION SOURCE LIBRARY</span><h1>整部作品原著库</h1><p>Production 共享资料 · 切换制作集不会改变原著；右侧可设置当前集引用的章节。</p></div>
+      <div className="settings-actions">
+        <button onClick={() => run(load)} disabled={busy}><RefreshCw size={15}/>刷新</button>
+        <button onClick={() => fileRef.current?.click()} disabled={busy}><Upload size={15}/>导入 TXT / Markdown</button>
+        <button onClick={openCreateSource} disabled={busy}><FilePlus2 size={15}/>新建原著</button>
+        <button onClick={openCreateChapter} disabled={busy || !sources.length}><Plus size={15}/>新增章节</button>
+      </div>
+    </header>
+    <input ref={fileRef} hidden type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" onChange={(event) => { const file = event.target.files?.[0]; if (file) run(() => importFile(file)); event.target.value = ""; }}/>
+    <div className="source-library-grid">
+      <aside>
+        <label className="source-search"><Search size={14}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索章节"/></label>
+        <small>{sources.length} 部原著 · {chapters.length} 章</small>
+        {visible.map((item) => <button className={active === item.id ? "active" : ""} key={item.id} onClick={() => setActive(item.id)}><input type="checkbox" checked={selected.has(item.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => setSelected((value) => { const next = new Set(value); event.target.checked ? next.add(item.id) : next.delete(item.id); return next; })}/><span><b>{item.chapter_no}. {item.title}</b><small>{item.source_title}</small></span></button>)}
+      </aside>
+      <main>{chapter ? <>
+        <div className="chapter-editor-head"><input value={chapter.title} onChange={(event) => setChapters((items) => items.map((item) => item.id === chapter.id ? { ...item, title: event.target.value } : item))}/><button disabled={busy} onClick={() => run(saveChapter)}><Save size={14}/>保存章节</button></div>
+        <textarea className="chapter-editor" value={chapter.content} onChange={(event) => setChapters((items) => items.map((item) => item.id === chapter.id ? { ...item, content: event.target.value } : item))}/>
+        <h3>已提取事件</h3>{events.filter((item) => item.chapter_id === chapter.id).map((item) => <article className="source-event" key={item.id}><b>{item.event_order}. {item.summary}</b><small>{item.importance} · {item.emotion || "无情绪标注"} · {item.characters.join("、") || "无明确人物"}</small></article>)}
+      </> : <div className="empty-state"><BookOpen/><h3>导入或新建原著</h3></div>}</main>
+      <aside className="source-analysis">
+        <section className="episode-source-map"><h3>当前集引用</h3><p>EP{String(episodeNo).padStart(2, "0")} · {episodeTitle}</p>
+          {currentPlan ? <><div className="episode-source-checks">{chapters.map((item) => <label className="check-label" key={item.id}><input type="checkbox" checked={currentReferences.has(item.id)} onChange={(event) => setAdaptation((value: AnyValue) => setEpisodeSourceReference(value, episodeNo, item.id, event.target.checked))}/><span>{item.source_title}<b>{item.chapter_no}. {item.title}</b></span></label>)}</div><button disabled={busy} onClick={() => run(saveEpisodeReferences)}><Save size={14}/>保存本集引用</button></> : <small>尚未建立 EP{String(episodeNo).padStart(2, "0")} 的分集规划。请先进入“改编策划”建立规划。</small>}
+        </section>
+        <hr/><h3>AI 事件提取</h3><p>已选 {selected.size} 章。任务失败时保留已有事件。</p>
+        <label>文本服务<select value={providerId} onChange={(event) => { setProviderId(event.target.value); const provider = textProviders.find((item) => item.id === event.target.value); setModel(provider?.models?.text || provider?.model || ""); }}>{textProviders.map((provider) => <option key={provider.id} value={provider.id}>{provider.local ? "本地" : "云端"} · {provider.name}</option>)}</select></label>
+        <label>模型 ID<input value={model} placeholder="本地留空使用默认模型" onChange={(event) => setModel(event.target.value)}/></label>
+        <button disabled={busy || !selected.size} onClick={() => run(extract)}><Sparkles size={15}/>提取所选章节事件</button>
+      </aside>
     </div>
-  </section>
+    {dialog && <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="source-create-title"><div className="source-create-dialog">
+      <header><div><span className="eyebrow">SOURCE</span><h2 id="source-create-title">{dialog.mode === "source" ? "手工新建原著" : `新增章节 · ${dialog.sourceName}`}</h2></div><button className="icon-button" aria-label="关闭" onClick={() => setDialog(null)}><X size={18}/></button></header>
+      {dialog.mode === "source" && <label>原著名称 *<input autoFocus maxLength={200} value={sourceName} onChange={(event) => setSourceName(event.target.value)} placeholder="例如：小球下山"/></label>}
+      <label>章节标题 *<input autoFocus={dialog.mode === "chapter"} maxLength={300} value={chapterTitle} onChange={(event) => setChapterTitle(event.target.value)} placeholder="例如：第一章 下山"/></label>
+      <label>章节正文<textarea value={chapterContent} onChange={(event) => setChapterContent(event.target.value)} placeholder="可以先留空，建立后继续编辑"/></label>
+      <footer><button onClick={() => setDialog(null)} disabled={busy}>取消</button><button className="primary" onClick={() => run(createManualContent)} disabled={busy || !chapterTitle.trim() || (dialog.mode === "source" && !sourceName.trim())}>{dialog.mode === "source" ? "建立原著和第一章" : "新增章节"}</button></footer>
+    </div></div>}
+  </section>;
 }

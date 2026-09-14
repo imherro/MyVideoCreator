@@ -2358,6 +2358,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           <SourceLibraryPage
             productionId={project.production_id}
             projectId={project.id}
+            episodeNo={project.episode_no}
+            episodeTitle={project.episode_title || project.name}
             providers={config.providers}
             defaultTarget={(doc as Any).generationPolicy?.text}
             request={api}
