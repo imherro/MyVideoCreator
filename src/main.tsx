@@ -610,6 +610,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     [preview, setPreview] = useState<Asset | null>(null);
   const [workflowDataRevision, setWorkflowDataRevision] = useState({ source: 0, adaptation: 0, script: 0 });
   const [previewTimeline, setPreviewTimeline] = useState(false);
+  const [exportSource, setExportSource] = useState<"legacy" | "editor">("legacy");
+  const [editorExportTimeline, setEditorExportTimeline] = useState<EditorDocument["timeline"] | undefined>();
   const [booted, setBooted] = useState(false);
   const [projectSetupOpen, setProjectSetupOpen] = useState(false);
   const [projectSetupKey, setProjectSetupKey] = useState(0);
@@ -2084,13 +2086,21 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setTimelineOpen(true);
     setNotice("已加入时间线");
   }
-  async function exportFilm(editorOverride?: EditorDocument["timeline"]) {
+  async function exportFilm(
+    source: "legacy" | "editor",
+    editorOverride?: EditorDocument["timeline"],
+  ) {
     if (!project || !doc) return;
     try {
-      const editorTimeline = editorOverride || doc.editor?.timeline;
-      const useEditor = Boolean(
-        editorTimeline?.tracks?.some((track) => track.elements?.length),
-      );
+      const editorTimeline = source === "editor"
+        ? editorOverride || doc.editor?.timeline
+        : undefined;
+      if (source === "editor" && !editorTimeline?.tracks?.some((track) => track.elements?.length)) {
+        throw new Error("高级剪辑中还没有可导出的轨道内容");
+      }
+      if (source === "legacy" && !doc.timeline.length) {
+        throw new Error("时间线预览中还没有可导出的镜头");
+      }
       await save();
       if (dirty.current) throw new Error("项目尚未保存，请先解决保存冲突");
       await api(
@@ -2101,8 +2111,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           submission_id: id(),
           input: {
             timeline: doc.timeline,
-            editor_timeline: useEditor ? editorTimeline : undefined,
-            render_mode: useEditor ? "editor" : "legacy",
+            editor_timeline: source === "editor" ? editorTimeline : undefined,
+            render_mode: source,
             resolution: (doc as any).export_resolution || "1280x720",
             audio_id: (doc as any).audio_id,
             subtitle_id: (doc as any).subtitle_id,
@@ -2224,9 +2234,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     doc, jobs, config.providers, system.models, "shot_videos",
   );
   const persistedEditorTimeline = doc.editor?.timeline;
-  const hasEditorTimeline = Boolean(
-    persistedEditorTimeline?.tracks?.some((track) => track.elements.length),
-  );
+  const exportEditorTimeline = editorExportTimeline || persistedEditorTimeline;
+  const exportEditorTracks = exportEditorTimeline?.tracks || [];
   const currentProduction =
     productions.find((item) => item.id === project.production_id) || null;
   const currentEpisodes = episodesForProduction(projects, project.production_id);
@@ -2539,20 +2548,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           onClick={() => save()}
         >
           <Save size={18} />
-        </button>
-        <button
-          className="primary compact"
-          onClick={() => {
-            if (!hasEditorTimeline && !doc.timeline.length) {
-              activateWorkflowStage("editor");
-              setNotice("请先在剪辑工作区加入素材");
-              return;
-            }
-            setPanel("export");
-          }}
-        >
-          <Download size={16} />
-          导出
         </button>
         <button
           className="avatar"
@@ -2871,7 +2866,11 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               onChange={(editor) =>
                 update((currentDoc) => ({ ...currentDoc, editor }))
               }
-              onExport={(timeline) => void exportFilm(timeline)}
+              onExport={(timeline) => {
+                setEditorExportTimeline(timeline);
+                setExportSource("editor");
+                setPanel("export");
+              }}
             />
           </Suspense>
         ) : view === "canvas" ? (
@@ -3097,7 +3096,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               </button>
               <span>
                 <Scissors size={16} />
-                时间线{" "}
+                时间线预览{" "}
                 <small>
                   {doc.timeline
                     .reduce((sum, t) => sum + Number(t.duration), 0)
@@ -3126,6 +3125,18 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               <button className="quiet" onClick={() => setPanel("assets")}>
                 <Plus size={14} />
                 添加镜头
+              </button>
+              <button
+                className="primary compact"
+                disabled={!doc.timeline.length}
+                onClick={() => {
+                  setEditorExportTimeline(undefined);
+                  setExportSource("legacy");
+                  setPanel("export");
+                }}
+              >
+                <Download size={14} />
+                导出成片
               </button>
               <button
                 className="icon-button"
@@ -4029,9 +4040,10 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 <div className="export-summary">
                   <Film size={30} />
                   <h3>{project.name}</h3>
+                  <strong>{exportSource === "editor" ? "高级剪辑" : "时间线预览"}</strong>
                   <p>
-                    {hasEditorTimeline
-                      ? `${persistedEditorTimeline!.tracks.length} 条编辑轨 · ${Math.max(0, ...persistedEditorTimeline!.tracks.flatMap((track) => track.elements.map((element) => Number(element.e) || 0))).toFixed(2)} 秒`
+                    {exportSource === "editor"
+                      ? `${exportEditorTracks.length} 条编辑轨 · ${Math.max(0, ...exportEditorTracks.flatMap((track) => track.elements.map((element) => Number(element.e) || 0))).toFixed(2)} 秒`
                       : `${doc.timeline.length} 个镜头 · ${doc.timeline.reduce((sum, t) => sum + Number(t.duration), 0).toFixed(2)} 秒`}
                   </p>
                 </div>
@@ -4056,7 +4068,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 <label>
                   转场
                   <select
-                    disabled={hasEditorTimeline}
+                    disabled={exportSource === "editor"}
                     value={(doc as any).transition || "cut"}
                     onChange={(e) =>
                       update((d) => ({ ...d, transition: e.target.value }))
@@ -4069,7 +4081,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 <label>
                   背景配乐
                   <select
-                    disabled={hasEditorTimeline}
+                    disabled={exportSource === "editor"}
                     value={(doc as any).audio_id || ""}
                     onChange={(e) =>
                       update((d) => ({ ...d, audio_id: e.target.value }))
@@ -4089,7 +4101,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   配乐音量 ·{" "}
                   {Math.round(((doc as any).music_volume ?? 0.3) * 100)}%
                   <input
-                    disabled={hasEditorTimeline}
+                    disabled={exportSource === "editor"}
                     type="range"
                     min="0"
                     max="1"
@@ -4106,7 +4118,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 <label>
                   烧录字幕（SRT）
                   <select
-                    disabled={hasEditorTimeline}
+                    disabled={exportSource === "editor"}
                     value={(doc as any).subtitle_id || ""}
                     onChange={(e) =>
                       update((d) => ({ ...d, subtitle_id: e.target.value }))
@@ -4130,14 +4142,16 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   上传配乐或字幕
                 </button>
                 <p className="muted">
-                  {hasEditorTimeline
+                  {exportSource === "editor"
                     ? "当前导出 Twick 多轨工程。配乐、字幕、转场和音量请在剪辑工作区中调整。输出为 24fps H.264/AAC MP4。"
                     : "MP4 / H.264 / 24fps。保留镜头原声，配乐循环填充时间线。字幕烧录进视频画面。"}
                 </p>
                 <button
                   className="primary full"
-                  disabled={!doc.timeline.length && !hasEditorTimeline}
-                  onClick={() => void exportFilm()}
+                  disabled={exportSource === "editor"
+                    ? !exportEditorTracks.some((track) => track.elements.length)
+                    : !doc.timeline.length}
+                  onClick={() => void exportFilm(exportSource, editorExportTimeline)}
                 >
                   <Download size={17} />
                   开始导出

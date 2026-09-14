@@ -69,7 +69,7 @@ export function EditorToolbar({
         </select>
       </label>
       <button className="primary" disabled={!totalDuration} onClick={() => onExport(attachAssetReferences(editor.getProject(), assets))}>
-        <Download size={14} /> 导出工程
+        <Download size={14} /> 导出成片
       </button>
     </div>
   );
