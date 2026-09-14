@@ -70,6 +70,8 @@ export function TaskDetailPage({ jobId, request }: { jobId: string; request: (pa
   const parameters = useMemo(() => jobDebugParameters(job?.input || {}), [job?.input]);
   const assets = job?.result?.assets || [];
   const text = typeof job?.result === "string" ? job.result : job?.result?.text;
+  const promptStages = job?.input?.prompt_stages || [];
+  const runtimePromptStages = job?.telemetry?.prompt_stages || [];
 
   return <main className="task-detail-page">
     <header className="task-detail-header">
@@ -94,9 +96,19 @@ export function TaskDetailPage({ jobId, request }: { jobId: string; request: (pa
       <section className="task-detail-card">
         <h2>模型请求契约</h2>
         <p className="muted">{job.input?.prompt_contract_origin === "migration" ? "旧任务按当前兼容版本补齐的提示词契约。" : "任务创建时冻结的完整提示词契约；Worker 执行时读取同一份快照。"}</p>
-        <h3>System Prompt</h3><pre className="debug-block">{job.input?.system_prompt || "此任务没有独立的 System Prompt"}</pre>
-        <h3>User Prompt</h3><pre className="debug-block">{job.input?.prompt || "未记录"}</pre>
-        <h3>Output Schema · {job.input?.schema_version || "无版本"}</h3><pre className="debug-block">{job.input?.response_schema ? JSON.stringify(job.input.response_schema, null, 2) : "此任务没有结构化输出 Schema"}</pre>
+        {promptStages.length ? promptStages.map((stage: Value) => {
+          const runtime = [...runtimePromptStages].reverse().find((item: Value) => item.id === stage.id || item.id === `${stage.id}_repair`);
+          return <article className="prompt-stage" key={stage.id}>
+            <h3>{stage.label} · {stage.schema_version}</h3>
+            <h4>System Prompt</h4><pre className="debug-block">{runtime?.system_prompt || stage.system_prompt}</pre>
+            <h4>{runtime?.user_prompt || stage.user_prompt ? "User Prompt" : "User Prompt Template"}</h4><pre className="debug-block">{runtime?.user_prompt || stage.user_prompt || stage.user_prompt_template}</pre>
+            <h4>Output Schema</h4><pre className="debug-block">{JSON.stringify(runtime?.response_schema || stage.response_schema, null, 2)}</pre>
+          </article>;
+        }) : <>
+          <h3>System Prompt</h3><pre className="debug-block">{job.input?.system_prompt || "此任务没有独立的 System Prompt"}</pre>
+          <h3>User Prompt</h3><pre className="debug-block">{job.input?.prompt || "未记录"}</pre>
+          <h3>Output Schema · {job.input?.schema_version || "无版本"}</h3><pre className="debug-block">{job.input?.response_schema ? JSON.stringify(job.input.response_schema, null, 2) : "此任务没有结构化输出 Schema"}</pre>
+        </>}
         <h3>请求参数</h3><pre className="debug-block">{JSON.stringify(parameters, null, 2)}</pre>
       </section>
       <section className="task-detail-card">

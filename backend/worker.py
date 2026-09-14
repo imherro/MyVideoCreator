@@ -236,10 +236,18 @@ class Worker:
             return {'text':s.dumps({'events':rows}),'events':rows}
         if kind=='storyboard' and inp.get('film_bible'):
             from .film_bible import extract_storyboard
+            prompt_trace=[]
+            def request_stage(system,user,schema,phase,stage_id):
+                prompt_trace.append({
+                    'id':stage_id,'phase':phase,'system_prompt':system,
+                    'user_prompt':user,'response_schema':schema,
+                })
+                s.job_update(job['id'],telemetry={'prompt_stages':prompt_trace})
+                return self._chat_text(job,p,system,user,schema,phase)
             return extract_storyboard(
                 inp['prompt'],inp.get('target_duration'),inp.get('provider','local'),
                 inp.get('model') or p.get('model','local'),
-                lambda system,user,schema,phase:self._chat_text(job,p,system,user,schema,phase),
+                request_stage,inp.get('prompt_stages'),
             )
         prompt=inp['prompt']
         if kind=='text' and inp.get('target_duration'):

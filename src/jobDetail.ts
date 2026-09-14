@@ -20,6 +20,7 @@ export function jobDebugParameters(input: Value = {}): Value {
     response_schema: _responseSchema,
     schema_version: _schemaVersion,
     prompt_contract_origin: _promptContractOrigin,
+    prompt_stages: _promptStages,
     ...parameters
   } = input;
   return redactDebugValue(parameters);

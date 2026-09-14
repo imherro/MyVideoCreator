@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { jobDebugParameters, jobElapsedSeconds, redactDebugValue, taskDetailHref } from '../src/jobDetail.ts';
 
 test('task debug data removes secrets and separates the full prompt contract from parameters',()=>{
-  const input={prompt:'生成一只猫',system_prompt:'导演',response_schema:{type:'object'},schema_version:'image/v1',prompt_contract_origin:'submission',model:'seedream',parameters:{api_key:'secret',duration:5},token:'hidden'};
+  const input={prompt:'生成一只猫',system_prompt:'导演',response_schema:{type:'object'},schema_version:'image/v1',prompt_contract_origin:'submission',prompt_stages:[{system_prompt:'资产导演'}],model:'seedream',parameters:{api_key:'secret',duration:5},token:'hidden'};
   assert.deepEqual(jobDebugParameters(input),{model:'seedream',parameters:{api_key:'••••••',duration:5},token:'••••••'});
   assert.equal(redactDebugValue({Authorization:'Bearer secret'}).Authorization,'••••••');
 });
