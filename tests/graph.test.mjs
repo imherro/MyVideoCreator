@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {patchNode,removeReference,setSingleImageReference,acceptResult} from '../src/graph.ts';
+import {patchNode,removeReference,setSingleImageReference,acceptResult,reconcileCompiledVideoResults} from '../src/graph.ts';
 const graph=()=>({nodes:['a','b','c','other'].map(id=>({id,position:{x:0,y:0},data:{prompt:'old',resultJob:'job-'+id,assetId:'asset-'+id}})),edges:[{id:'ab',source:'a',target:'b'},{id:'bc',source:'b',target:'c'}]});
 test('input edit invalidates all dependent results, preserves independent branch',()=>{
  const original=graph(),next=patchNode(original,'a',{prompt:'new'});
@@ -29,6 +29,21 @@ test('compiled Film Bible prompt does not make its fresh image stale',()=>{
  assert.equal(next.nodes[0].data.prompt,'old');
  assert.equal(next.nodes[0].data.stale,false);
  assert.deepEqual(next.nodes[0].data.generationFingerprint,{hash:'current'});
+});
+test('compiled dialogue prompt does not make its fresh video stale',()=>{
+ const original={nodes:[{id:'video',data:{kind:'video',prompt:'可编辑动作',generation_revision:2}}],edges:[]};
+ const job={id:'dialogue-video',node_id:'video',status:'succeeded',input:{prompt:'可编辑动作\n[对白与声音]\n角色说：“你好”',generation_revision:2,dialogue_projection:{version:'shot-dialogue/v1'}},result:{assets:[{id:'new-video'}]}};
+ const next=acceptResult(original,job,[]);
+ assert.equal(next.nodes[0].data.stale,false);
+ assert.equal(next.nodes[0].data.assetId,'new-video');
+});
+test('repairs persisted false stale from a compiled dialogue take but preserves real edits',()=>{
+ const job={id:'dialogue-video',node_id:'video',status:'succeeded',input:{generation_revision:2,dialogue_projection:{version:'shot-dialogue/v1'}},result:{assets:[{id:'new-video'}]}};
+ const falseStale={nodes:[{id:'video',data:{kind:'video',assetId:'new-video',resultJob:'dialogue-video',generation_revision:2,stale:true}}],edges:[]};
+ const repaired=reconcileCompiledVideoResults(falseStale,[job]);
+ assert.equal(repaired.nodes[0].data.stale,false);
+ const edited={...falseStale,nodes:[{...falseStale.nodes[0],data:{...falseStale.nodes[0].data,generation_revision:3}}]};
+ assert.equal(reconcileCompiledVideoResults(edited,[job]),edited);
 });
 test('removing an image reference removes its duplicate manual and edge sources',()=>{
  const original=graph();original.nodes[1].data.asset_ids=['asset-a','independent-image'];

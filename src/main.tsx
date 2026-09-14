@@ -83,6 +83,7 @@ import {
   setInitialStateReviewed,
   setSingleImageReference,
   acceptResult,
+  reconcileCompiledVideoResults,
 } from "./graph";
 import { PromptLibrary } from "./PromptLibrary";
 import { ModelSelector } from "./ModelSelector";
@@ -1064,10 +1065,14 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           !doc.applied?.includes(j.id),
       )
       .sort((a, b) => a.created - b.created);
-    if (!completed.length) return;
+    if (!completed.length) {
+      const repaired = reconcileCompiledVideoResults(doc, jobs);
+      if (repaired !== doc) update(() => repaired as Doc);
+      return;
+    }
     const importedStoryboard = completed.find((job) => job.kind === "storyboard" && job.result?.shots);
     update((d) => {
-      let next = d;
+      let next = reconcileCompiledVideoResults(d, jobs);
       for (const job of completed) {
         if (job.kind === "audio" && job.input?.voice_profile) {
           next = acceptVoiceResult(next, job);

@@ -96,8 +96,24 @@ export function acceptResult<T extends Graph>(graph:T,job:ResultJob,jobs:ResultJ
     text:job.result.text||node.data.text,assetId:job.result.assets?.[0]?.id||node.data.assetId,resultJob:job.id,
     generationFingerprint:job.result.assets?.[0]?.generationFingerprint||job.input.generation_fingerprint||node.data.generationFingerprint,
     stale:(
-      !job.input.reference_compiler&&node.data.prompt!==job.input.prompt
+      !job.input.reference_compiler&&!job.input.dialogue_projection&&node.data.prompt!==job.input.prompt
     )||Number(node.data.generation_revision||0)!==Number(job.input.generation_revision||0),
     ...(node.data.kind==='image'&&job.result.assets?.[0]?{state_reviewed:false}:{})
   }})};
+}
+
+export function reconcileCompiledVideoResults<T extends Graph>(graph:T,jobs:ResultJob[]):T{
+  const byId=new Map(jobs.map(job=>[job.id,job]));
+  let changed=false;
+  const nodes=graph.nodes.map(node=>{
+    if(!node.data.stale||node.data.kind!=='video'||!node.data.resultJob)return node;
+    const job=byId.get(String(node.data.resultJob));
+    const sameTake=job?.status==='succeeded'&&job.input?.dialogue_projection&&
+      job.result?.assets?.[0]?.id===node.data.assetId&&
+      Number(node.data.generation_revision||0)===Number(job.input.generation_revision||0);
+    if(!sameTake)return node;
+    changed=true;
+    return {...node,data:{...node.data,stale:false}};
+  });
+  return changed?{...graph,nodes}:graph;
 }
