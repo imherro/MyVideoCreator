@@ -1,3 +1,4 @@
+import { Fragment, type ReactNode, useEffect, useRef } from "react";
 import type { WorkflowStage } from "./workflow";
 import { WORKFLOW_STAGES } from "./workflow";
 
@@ -5,16 +6,25 @@ export function WorkflowStageNav({
   active,
   onChange,
   states = {},
+  episodeControl,
 }: {
   active: WorkflowStage;
   onChange: (stage: WorkflowStage) => void;
   states?: Partial<Record<WorkflowStage, string>>;
+  episodeControl?: ReactNode;
 }) {
+  const activeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    activeButtonRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [active]);
+
   return (
     <nav className="workflow-stage-nav" aria-label="制作流程">
-      {WORKFLOW_STAGES.map((stage) => (
+      {WORKFLOW_STAGES.map((stage) => <Fragment key={stage.id}>
+        {stage.id === "storyboard" && episodeControl && <div className="workflow-episode-boundary">{episodeControl}</div>}
         <button
-          key={stage.id}
+          ref={active === stage.id ? activeButtonRef : undefined}
           className={`${active === stage.id ? "active" : ""} workflow-nav-${stage.group}`}
           aria-current={active === stage.id ? "page" : undefined}
           title={stage.description}
@@ -24,7 +34,7 @@ export function WorkflowStageNav({
           <span>{stage.label}</span>
           {states[stage.id] && <i className={`workflow-nav-state ${states[stage.id]}`} aria-label={states[stage.id]} />}
         </button>
-      ))}
+      </Fragment>)}
     </nav>
   );
 }

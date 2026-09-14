@@ -2258,13 +2258,19 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           项目 · {currentProduction?.name || project.name}
           <ChevronDown size={14} />
         </button>
-        {currentWorkflowScope === "production" ? <span className="production-scope-badge">整部作品</span> : <EpisodeSelector
-          episode={project}
-          episodes={currentEpisodes}
-          onSelect={(projectId) => openProject(projectId).catch(report)}
-        />}
-        <button className="project-settings-button" onClick={() => { setProjectSettingsTab(currentWorkflowScope); setPanel("projectInfo"); }}>
-          <FileText size={15} />{currentWorkflowScope === "production" ? "作品设置" : "当前集设置"}
+        <WorkflowStageNav
+          active={workflowStage}
+          onChange={activateWorkflowStage}
+          states={Object.fromEntries(Object.entries(workflowGuide.stages).map(([stage, guide]: any) => [stage, guide.state]))}
+          episodeControl={<EpisodeSelector episode={project} episodes={currentEpisodes} onSelect={(projectId) => openProject(projectId).catch(report)} />}
+        />
+        <button
+          className="project-settings-button"
+          aria-label={currentWorkflowScope === "production" ? "打开作品设置" : "打开当前集设置"}
+          title={currentWorkflowScope === "production" ? "作品设置" : "当前集设置"}
+          onClick={() => { setProjectSettingsTab(currentWorkflowScope); setPanel("projectInfo"); }}
+        >
+          <FileText size={15} /><span>{currentWorkflowScope === "production" ? "作品设置" : "当前集设置"}</span>
         </button>
         <span
           className={"save-status " + (saved === "保存失败" ? "danger" : "")}
@@ -2309,7 +2315,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         onChange={activateGlobalPanel}
       />
       <main className="work-area">
-        <WorkflowStageNav active={workflowStage} onChange={activateWorkflowStage} states={Object.fromEntries(Object.entries(workflowGuide.stages).map(([stage, guide]: any) => [stage, guide.state]))} />
         <div className="viewbar">
           {workflowStage === "storyboard" ? (
             <div className="segmented" aria-label="分镜视图">
