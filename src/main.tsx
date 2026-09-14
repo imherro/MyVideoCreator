@@ -599,8 +599,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     [busy, setBusy] = useState(false),
     [timelineOpen, setTimelineOpen] = useState(false),
     [revisions, setRevisions] = useState<Any[]>([]),
-    [trashItems, setTrashItems] = useState<Any>({ projects: [], assets: [] }),
+    [trashItems, setTrashItems] = useState<Any>({ projects: [], assets: [], sources: [] }),
     [preview, setPreview] = useState<Asset | null>(null);
+  const [sourceLibraryRevision, setSourceLibraryRevision] = useState(0);
   const [previewTimeline, setPreviewTimeline] = useState(false);
   const [booted, setBooted] = useState(false);
   const [projectSetupOpen, setProjectSetupOpen] = useState(false);
@@ -1364,15 +1365,17 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     await loadTrash();
     setNotice(`素材“${asset.name}”已移入回收站`);
   }
-  async function restoreTrashItem(kind: "project" | "asset", item: Any) {
+  async function restoreTrashItem(kind: "project" | "asset" | "source", item: Any) {
     const currentProjectId = project?.id;
     await api(`/trash/${kind}/${item.id}/restore`, send("POST"));
     setProjects(await api("/projects"));
     setProductions(await api("/productions"));
     if (kind === "asset" && currentProjectId && item.production_id === project?.production_id)
       await refresh(currentProjectId);
+    if (kind === "source") setSourceLibraryRevision((value) => value + 1);
     await loadTrash();
-    setNotice(`${kind === "project" ? "项目" : "素材"}“${item.name}”已恢复`);
+    const label = kind === "project" ? "项目" : kind === "asset" ? "素材" : "原著";
+    setNotice(`${label}“${item.name}”已恢复`);
   }
   function sourceAssets(nid: string) {
     const sources =
@@ -2362,6 +2365,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             episodeTitle={project.episode_title || project.name}
             providers={config.providers}
             defaultTarget={(doc as Any).generationPolicy?.text}
+            refreshKey={sourceLibraryRevision}
             request={api}
             notify={setNotice}
             report={report}
@@ -3471,6 +3475,14 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                     <button onClick={() => restoreTrashItem("asset", item).catch(report)}><RefreshCw size={14} /> 恢复</button>
                   </div>
                 ))}
+                {!!trashItems.sources?.length && <h3>原著资料</h3>}
+                {trashItems.sources?.map((item: Any) => (
+                  <div className="trash-row" key={`source-${item.id}`}>
+                    <BookOpen size={17} />
+                    <div><b>{item.name}</b><small>{item.production_name} · {item.chapter_count} 章</small></div>
+                    <button onClick={() => restoreTrashItem("source", item).catch(report)}><RefreshCw size={14} /> 恢复</button>
+                  </div>
+                ))}
                 {!!doc.characters.filter((item) => item.deletedAt).length && <h3>当前项目角色 / 场景</h3>}
                 {doc.characters.filter((item) => item.deletedAt).map((item) => (
                   <div className="trash-row" key={`character-${item.id}`}>
@@ -3501,8 +3513,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                     }}><RefreshCw size={14} /> 恢复</button>
                   </div>
                 ))}
-                {!trashItems.projects.length && !trashItems.assets.length && !doc.characters.some((item) => item.deletedAt) && !Object.values(visualBibleOf(doc).cards).some((item) => item.deletedAt) && (
-                  <div className="empty-state"><Trash2 /><h3>回收站为空</h3><p>移入回收站的项目、素材和角色场景会显示在这里。</p></div>
+                {!trashItems.projects.length && !trashItems.assets.length && !trashItems.sources?.length && !doc.characters.some((item) => item.deletedAt) && !Object.values(visualBibleOf(doc).cards).some((item) => item.deletedAt) && (
+                  <div className="empty-state"><Trash2 /><h3>回收站为空</h3><p>移入回收站的项目、素材、原著和角色场景会显示在这里。</p></div>
                 )}
               </>
             )}

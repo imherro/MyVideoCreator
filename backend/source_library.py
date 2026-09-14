@@ -93,7 +93,8 @@ def replace_events(job, rows):
         if not active or active['status'] != 'running':
             raise ValueError('事件提取任务已失效，未写入提取结果')
         chapter = connection.execute('''SELECT c.id,c.revision,d.production_id FROM source_chapters c
-            JOIN source_documents d ON d.id=c.source_id WHERE c.id=?''',(chapter_id,)).fetchone()
+            JOIN source_documents d ON d.id=c.source_id WHERE c.id=?
+            AND NOT EXISTS(SELECT 1 FROM deleted_items x WHERE x.kind='source' AND x.item_id=d.id)''',(chapter_id,)).fetchone()
         if not chapter or chapter['production_id'] != production_id:
             raise ValueError('事件提取任务的章节归属已失效')
         if chapter['revision'] != expected_revision:

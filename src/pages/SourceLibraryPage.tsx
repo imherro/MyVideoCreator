@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BookOpen, FilePlus2, Plus, RefreshCw, Save, Search, Sparkles, Upload, X } from "lucide-react";
+import { BookOpen, FilePlus2, Plus, RefreshCw, Save, Search, Sparkles, Trash2, Upload, X } from "lucide-react";
 import { episodeSourceReferences, setEpisodeSourceReference } from "../sourceReferences";
 
 type AnyValue = any;
 type CreateDialog = { mode: "source" | "chapter"; sourceId?: string; sourceName?: string };
 
 export function SourceLibraryPage({
-  productionId, projectId, episodeNo, episodeTitle, providers, defaultTarget, request, notify, report,
+  productionId, projectId, episodeNo, episodeTitle, providers, defaultTarget, refreshKey = 0, request, notify, report,
 }: {
   productionId: string; projectId: string; episodeNo: number; episodeTitle: string;
-  providers: AnyValue[]; defaultTarget?: AnyValue;
+  providers: AnyValue[]; defaultTarget?: AnyValue; refreshKey?: number;
   request: (path: string, options?: RequestInit) => Promise<AnyValue>;
   notify: (message: string) => void; report: (error: unknown) => void;
 }) {
@@ -33,6 +33,7 @@ export function SourceLibraryPage({
   const [providerId, setProviderId] = useState(defaultTarget?.providerId || "local");
   const [model, setModel] = useState(defaultTarget?.modelId || "");
   const chapter = chapters.find((item) => item.id === active);
+  const activeSource = sources.find((item) => item.id === chapter?.source_id) || sources[0];
   const currentPlan = adaptation?.episodePlans?.find((item: AnyValue) => item.episodeNo === episodeNo);
   const currentReferences = new Set(episodeSourceReferences(adaptation, episodeNo));
 
@@ -50,7 +51,7 @@ export function SourceLibraryPage({
     setActive((value) => value && nextChapters.some((item: AnyValue) => item.id === value) ? value : nextChapters[0]?.id || "");
   }
 
-  useEffect(() => { setSelected(new Set()); void load().catch(report); }, [productionId]);
+  useEffect(() => { setSelected(new Set()); void load().catch(report); }, [productionId, refreshKey]);
   useEffect(() => {
     setProviderId(defaultTarget?.providerId || "local");
     setModel(defaultTarget?.modelId || "");
@@ -114,6 +115,17 @@ export function SourceLibraryPage({
       notify("章节已保存");
     } finally { setBusy(false); }
   }
+  async function deleteActiveSource() {
+    if (!activeSource) return;
+    if (!window.confirm(`将原著“${activeSource.title}”及其 ${activeSource.chapter_count || 0} 个章节移入回收站？\n章节和已提取事件会暂时隐藏，恢复原著后会重新出现。`)) return;
+    setBusy(true);
+    try {
+      await request(`/productions/${productionId}/sources/${activeSource.id}`, { method: "DELETE" });
+      setSelected(new Set());
+      await load();
+      notify(`原著“${activeSource.title}”已移入回收站`);
+    } finally { setBusy(false); }
+  }
   async function saveEpisodeReferences() {
     if (!adaptation || !currentPlan) return;
     setBusy(true);
@@ -154,6 +166,7 @@ export function SourceLibraryPage({
         <button onClick={() => fileRef.current?.click()} disabled={busy}><Upload size={15}/>导入 TXT / Markdown</button>
         <button onClick={openCreateSource} disabled={busy}><FilePlus2 size={15}/>新建原著</button>
         <button onClick={openCreateChapter} disabled={busy || !sources.length}><Plus size={15}/>新增章节</button>
+        <button className="danger-button" onClick={() => run(deleteActiveSource)} disabled={busy || !activeSource} title="移入回收站，可恢复"><Trash2 size={15}/>移除当前原著</button>
       </div>
     </header>
     <input ref={fileRef} hidden type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" onChange={(event) => { const file = event.target.files?.[0]; if (file) run(() => importFile(file)); event.target.value = ""; }}/>

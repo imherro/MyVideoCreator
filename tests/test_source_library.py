@@ -220,3 +220,75 @@ def test_valid_extraction_atomically_replaces_events_with_chapter_ownership(sour
     assert events[0]["chapter_id"] == chapter["id"]
     assert events[0]["extraction_job_id"] == job["id"]
     assert events[0]["characters"] == ["阿青"]
+
+
+def test_source_document_moves_to_trash_and_restores_with_chapters_and_events(source_client):
+    client = source_client
+    production, episode = new_production(client)
+    source = client.post(
+        f'/api/productions/{production["id"]}/sources',
+        json={"title": "重复导入的旧原著", "type": "manual", "metadata": {}},
+    ).json()
+    chapter = client.post(
+        f'/api/productions/{production["id"]}/sources/{source["id"]}/chapters',
+        json={"title": "旧第一章", "content": "阿青走入雨中。"},
+    ).json()
+    extraction = client.post(
+        f'/api/productions/{production["id"]}/source-extractions',
+        json={
+            "project_id": episode["id"], "chapter_ids": [chapter["id"]],
+            "provider": "local", "model": "", "allow_cloud": False,
+            "submission_id": "source-delete-running",
+        },
+    ).json()["jobs"][0]
+
+    blocked = client.delete(
+        f'/api/productions/{production["id"]}/sources/{source["id"]}'
+    )
+    assert blocked.status_code == 409
+    assert "事件提取任务" in blocked.text
+
+    now = time.time()
+    with s.db() as connection:
+        connection.execute("UPDATE jobs SET status='cancelled' WHERE id=?", (extraction["id"],))
+        connection.execute(
+            "INSERT INTO source_events VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                "source-event-soft-delete", production["id"], chapter["id"], 1,
+                s.dumps(["阿青"]), "旧事件仍可恢复", "medium", "平静", "{}",
+                extraction["id"], now, now,
+            ),
+        )
+
+    deleted = client.delete(
+        f'/api/productions/{production["id"]}/sources/{source["id"]}'
+    )
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["soft"] is True
+    assert client.get(f'/api/productions/{production["id"]}/sources').json() == []
+    assert client.get(f'/api/productions/{production["id"]}/chapters').json() == []
+    assert client.get(f'/api/productions/{production["id"]}/source-events').json() == []
+
+    rejected = client.post(
+        f'/api/productions/{production["id"]}/source-extractions',
+        json={
+            "project_id": episode["id"], "chapter_ids": [chapter["id"]],
+            "provider": "local", "model": "", "allow_cloud": False,
+            "submission_id": "source-delete-hidden",
+        },
+    )
+    assert rejected.status_code == 400
+
+    trash = client.get('/api/trash').json()
+    trashed = next(item for item in trash["sources"] if item["id"] == source["id"])
+    assert trashed["name"] == "重复导入的旧原著"
+    assert trashed["production_id"] == production["id"]
+    assert trashed["chapter_count"] == 1
+
+    restored = client.post(f'/api/trash/source/{source["id"]}/restore')
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["kind"] == "source"
+    assert client.get(f'/api/productions/{production["id"]}/sources').json()[0]["id"] == source["id"]
+    assert client.get(f'/api/productions/{production["id"]}/chapters').json()[0]["id"] == chapter["id"]
+    events = client.get(f'/api/productions/{production["id"]}/source-events').json()
+    assert events[0]["summary"] == "旧事件仍可恢复"

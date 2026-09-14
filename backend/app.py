@@ -585,11 +585,18 @@ def trash():
     with s.db() as c:
         deleted_projects=[dict(row) for row in c.execute("SELECT p.id,p.name,d.deleted_at FROM deleted_items d JOIN projects p ON p.id=d.item_id WHERE d.kind='project' ORDER BY d.deleted_at DESC")]
         deleted_assets=[dict(row) for row in c.execute("SELECT a.id,a.name,a.kind,a.category,a.project_id,a.production_id,p.name project_name,d.deleted_at FROM deleted_items d JOIN assets a ON a.id=d.item_id JOIN projects p ON p.id=a.project_id WHERE d.kind='asset' ORDER BY d.deleted_at DESC")]
-    return {'projects':deleted_projects,'assets':deleted_assets}
+        deleted_sources=[dict(row) for row in c.execute('''SELECT sd.id,sd.title name,sd.type,
+            sd.production_id,p.name production_name,
+            (SELECT COUNT(*) FROM source_chapters sc WHERE sc.source_id=sd.id) chapter_count,
+            d.deleted_at
+            FROM deleted_items d JOIN source_documents sd ON sd.id=d.item_id
+            JOIN productions p ON p.id=sd.production_id
+            WHERE d.kind='source' ORDER BY d.deleted_at DESC''')]
+    return {'projects':deleted_projects,'assets':deleted_assets,'sources':deleted_sources}
 
 @app.post('/api/trash/{kind}/{item_id}/restore')
 def restore_deleted_item(kind:str,item_id:str):
-    if kind not in ('project','asset'):raise HTTPException(400,'回收站类型无效')
+    if kind not in ('project','asset','source'):raise HTTPException(400,'回收站类型无效')
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
         row=c.execute('SELECT * FROM deleted_items WHERE kind=? AND item_id=?',(kind,item_id)).fetchone()
@@ -601,6 +608,8 @@ def restore_deleted_item(kind:str,item_id:str):
         if kind=='asset':
             asset=c.execute('SELECT production_id FROM assets WHERE id=?',(item_id,)).fetchone()
             episode_ids=[item['id'] for item in c.execute('SELECT id FROM projects WHERE production_id=?',(asset['production_id'],))] if asset and asset['production_id'] else [row['project_id']]
+        elif kind=='source':
+            episode_ids=production_event_targets(c,row['project_id'])
         else:episode_ids=[row['project_id']] if row['project_id'] else []
     for episode_id in episode_ids:s.event(episode_id,{'type':'restored','kind':kind,'id':item_id})
     return {'restored':item_id,'kind':kind}
@@ -904,7 +913,8 @@ class SourceExtractionCreate(BaseModel):
 
 def source_document_row(production_id,source_id):
     with s.db() as c:
-        row=c.execute('SELECT * FROM source_documents WHERE id=? AND production_id=?',(source_id,production_id)).fetchone()
+        row=c.execute('''SELECT * FROM source_documents WHERE id=? AND production_id=?
+            AND NOT EXISTS(SELECT 1 FROM deleted_items d WHERE d.kind='source' AND d.item_id=source_documents.id)''',(source_id,production_id)).fetchone()
     if not row:raise HTTPException(404,'原著文档不存在')
     return s.unpack(row)
 
@@ -913,7 +923,9 @@ def source_documents(production_id:str):
     production(production_id)
     with s.db() as c:
         rows=c.execute('''SELECT d.*,(SELECT COUNT(*) FROM source_chapters c WHERE c.source_id=d.id) chapter_count
-            FROM source_documents d WHERE d.production_id=? ORDER BY d.updated DESC,d.id''',(production_id,)).fetchall()
+            FROM source_documents d WHERE d.production_id=?
+            AND NOT EXISTS(SELECT 1 FROM deleted_items x WHERE x.kind='source' AND x.item_id=d.id)
+            ORDER BY d.updated DESC,d.id''',(production_id,)).fetchall()
     return [s.unpack(row) for row in rows]
 
 @app.post('/api/productions/{production_id}/sources')
@@ -948,10 +960,35 @@ def import_source_document(production_id:str,body:SourceImport):
             ))
     return {**source_document_row(production_id,source_id),'chapter_count':len(chapters)}
 
+@app.delete('/api/productions/{production_id}/sources/{source_id}')
+def delete_source_document(production_id:str,source_id:str):
+    source=source_document_row(production_id,source_id)
+    now=time.time()
+    with s.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        active=c.execute('''SELECT COUNT(*) count FROM jobs j
+            JOIN projects p ON p.id=j.project_id
+            JOIN source_chapters sc ON j.node_id='source-chapter:' || sc.id
+            WHERE p.production_id=? AND sc.source_id=? AND j.status IN ('queued','running')''',
+            (production_id,source_id)).fetchone()['count']
+        if active:raise HTTPException(409,f'该原著仍有 {active} 个事件提取任务，请等待任务结束或先取消任务。')
+        chapter_ids=[row['id'] for row in c.execute('SELECT id FROM source_chapters WHERE source_id=?',(source_id,))]
+        event_ids=[row['id'] for row in c.execute('''SELECT e.id FROM source_events e
+            JOIN source_chapters sc ON sc.id=e.chapter_id WHERE sc.source_id=?''',(source_id,))]
+        c.execute("INSERT INTO deleted_items(kind,item_id,project_id,deleted_at) VALUES('source',?,?,?)",
+            (source_id,production_id,now))
+        from .adaptation import mark_adaptation_stale
+        production_revision=mark_adaptation_stale(c,production_id,chapter_ids=chapter_ids,event_ids=event_ids)
+        targets=production_event_targets(c,production_id)
+    for target in targets:
+        s.event(target,{'type':'source_deleted','id':source_id})
+        if production_revision is not None:s.event(target,{'type':'production','revision':production_revision})
+    return {'deleted':source_id,'name':source['title'],'soft':True}
+
 @app.get('/api/productions/{production_id}/chapters')
 def source_chapters(production_id:str,source_id:str|None=None,q:str=''):
     production(production_id)
-    clauses=['d.production_id=?'];params=[production_id]
+    clauses=['d.production_id=?',"NOT EXISTS(SELECT 1 FROM deleted_items x WHERE x.kind='source' AND x.item_id=d.id)"];params=[production_id]
     if source_id:clauses.append('c.source_id=?');params.append(source_id)
     if q.strip():clauses.append('(c.title LIKE ? OR c.content LIKE ?)');term='%'+q.strip()+'%';params.extend([term,term])
     with s.db() as c:
@@ -981,7 +1018,7 @@ def save_source_chapter(production_id:str,chapter_id:str,body:ChapterSave):
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
         row=c.execute('''SELECT c.*,d.production_id FROM source_chapters c JOIN source_documents d ON d.id=c.source_id
-            WHERE c.id=?''',(chapter_id,)).fetchone()
+            WHERE c.id=? AND NOT EXISTS(SELECT 1 FROM deleted_items x WHERE x.kind='source' AND x.item_id=d.id)''',(chapter_id,)).fetchone()
         if not row or row['production_id']!=production_id:raise HTTPException(404,'章节不存在')
         if row['revision']!=body.revision:raise HTTPException(409,'章节已在其他页面更新，请重新加载。')
         c.execute('UPDATE source_chapters SET title=?,content=?,revision=revision+1,updated=? WHERE id=?',(
@@ -1001,7 +1038,9 @@ def source_events(production_id:str,chapter_id:str|None=None):
     query='''SELECT e.* FROM source_events e
         JOIN source_chapters c ON c.id=e.chapter_id
         JOIN source_documents d ON d.id=c.source_id
-        WHERE e.production_id=?''';params=[production_id]
+        WHERE e.production_id=? AND NOT EXISTS(
+            SELECT 1 FROM deleted_items x WHERE x.kind='source' AND x.item_id=d.id
+        )''';params=[production_id]
     if chapter_id:query+=' AND e.chapter_id=?';params.append(chapter_id)
     query+=' ORDER BY d.created,c.sort_order,c.chapter_no,e.event_order'
     with s.db() as c:rows=c.execute(query,params).fetchall()
@@ -1023,7 +1062,8 @@ def extract_source_events(production_id:str,body:SourceExtractionCreate):
         if not owner:raise ValueError('文本任务必须归属于当前 Production 的 Episode')
         placeholders=','.join('?' for _ in body.chapter_ids)
         chapters=c.execute(f'''SELECT c.* FROM source_chapters c JOIN source_documents d ON d.id=c.source_id
-            WHERE d.production_id=? AND c.id IN ({placeholders})''',[production_id,*body.chapter_ids]).fetchall()
+            WHERE d.production_id=? AND c.id IN ({placeholders})
+            AND NOT EXISTS(SELECT 1 FROM deleted_items x WHERE x.kind='source' AND x.item_id=d.id)''',[production_id,*body.chapter_ids]).fetchall()
         if len(chapters)!=len(body.chapter_ids):raise ValueError('所选章节不存在或不属于当前 Production')
         chapter_map={row['id']:row for row in chapters};created=[]
         for chapter_id in body.chapter_ids:
