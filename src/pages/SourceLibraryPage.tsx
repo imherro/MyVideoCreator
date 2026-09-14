@@ -3,18 +3,19 @@ import { BookOpen, FilePlus2, RefreshCw, Save, Search, Sparkles, Upload } from "
 
 type AnyValue = any;
 
-export function SourceLibraryPage({ productionId, projectId, providers, request, notify, report }:{
-  productionId:string; projectId:string; providers:AnyValue[];
+export function SourceLibraryPage({ productionId, projectId, providers, defaultTarget, request, notify, report }:{
+  productionId:string; projectId:string; providers:AnyValue[]; defaultTarget?:AnyValue;
   request:(path:string,options?:RequestInit)=>Promise<AnyValue>; notify:(message:string)=>void; report:(error:unknown)=>void;
 }) {
   const [sources,setSources]=useState<AnyValue[]>([]),[chapters,setChapters]=useState<AnyValue[]>([]),[events,setEvents]=useState<AnyValue[]>([]);
   const [active,setActive]=useState<string>(""),[selected,setSelected]=useState<Set<string>>(new Set()),[query,setQuery]=useState("");
   const [busy,setBusy]=useState(false),fileRef=useRef<HTMLInputElement>(null);
   const textProviders=useMemo(()=>[{id:"local",name:"本地 llama.cpp",local:true,model:""},...providers.filter(p=>!p.kind||p.kind==="text")],[providers]);
-  const [providerId,setProviderId]=useState("local"),[model,setModel]=useState("");
+  const [providerId,setProviderId]=useState(defaultTarget?.providerId||"local"),[model,setModel]=useState(defaultTarget?.modelId||"");
   const chapter=chapters.find(item=>item.id===active);
   async function load(){const [s,c,e]=await Promise.all([request(`/productions/${productionId}/sources`),request(`/productions/${productionId}/chapters`),request(`/productions/${productionId}/source-events`)]);setSources(s);setChapters(c);setEvents(e);setActive(value=>value&&c.some((x:AnyValue)=>x.id===value)?value:c[0]?.id||"")}
   useEffect(()=>{setSelected(new Set());void load().catch(report)},[productionId]);
+  useEffect(()=>{setProviderId(defaultTarget?.providerId||"local");setModel(defaultTarget?.modelId||"")},[productionId,projectId,defaultTarget?.providerId,defaultTarget?.modelId]);
   async function importFile(file:File){setBusy(true);try{await request(`/productions/${productionId}/sources/import`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({title:file.name.replace(/\.(txt|md|markdown)$/i,""),type:/\.md|\.markdown$/i.test(file.name)?"markdown":"txt",content:await file.text(),metadata:{filename:file.name}})});await load();notify(`已导入 ${file.name}`)}finally{setBusy(false)}}
   async function manual(){const title=window.prompt("原著名称","未命名原著");if(!title)return;setBusy(true);try{const source=await request(`/productions/${productionId}/sources`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({title,type:"manual",metadata:{}})});await request(`/productions/${productionId}/sources/${source.id}/chapters`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({title:"正文",content:""})});await load()}finally{setBusy(false)}}
   async function saveChapter(){if(!chapter)return;setBusy(true);try{const saved=await request(`/productions/${productionId}/chapters/${chapter.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({title:chapter.title,content:chapter.content,revision:chapter.revision})});setChapters(items=>items.map(item=>item.id===saved.id?saved:item));notify("章节已保存")}finally{setBusy(false)}}

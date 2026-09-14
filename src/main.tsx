@@ -2359,6 +2359,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             productionId={project.production_id}
             projectId={project.id}
             providers={config.providers}
+            defaultTarget={(doc as Any).generationPolicy?.text}
             request={api}
             notify={setNotice}
             report={report}
