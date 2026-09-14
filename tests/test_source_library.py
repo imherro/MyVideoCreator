@@ -292,3 +292,26 @@ def test_source_document_moves_to_trash_and_restores_with_chapters_and_events(so
     assert client.get(f'/api/productions/{production["id"]}/chapters').json()[0]["id"] == chapter["id"]
     events = client.get(f'/api/productions/{production["id"]}/source-events').json()
     assert events[0]["summary"] == "旧事件仍可恢复"
+
+    second_chapter = client.post(
+        f'/api/productions/{production["id"]}/sources/{source["id"]}/chapters',
+        json={"title": "旧第二章", "content": "阿青回到屋内。"},
+    ).json()
+    deleted_chapters = client.post(
+        f'/api/productions/{production["id"]}/chapters/trash',
+        json={"chapter_ids": [chapter["id"], second_chapter["id"]]},
+    )
+    assert deleted_chapters.status_code == 200, deleted_chapters.text
+    assert deleted_chapters.json()["count"] == 2
+    assert client.get(f'/api/productions/{production["id"]}/sources').json()[0]["chapter_count"] == 0
+    assert client.get(f'/api/productions/{production["id"]}/chapters').json() == []
+    assert client.get(f'/api/productions/{production["id"]}/source-events').json() == []
+    trash = client.get('/api/trash').json()
+    assert {item["id"] for item in trash["chapters"]} >= {chapter["id"], second_chapter["id"]}
+
+    restored_chapter = client.post(f'/api/trash/chapter/{chapter["id"]}/restore')
+    assert restored_chapter.status_code == 200, restored_chapter.text
+    visible_chapters = client.get(f'/api/productions/{production["id"]}/chapters').json()
+    assert [item["id"] for item in visible_chapters] == [chapter["id"]]
+    assert client.get(f'/api/productions/{production["id"]}/source-events').json()[0]["summary"] == "旧事件仍可恢复"
+    assert client.post(f'/api/trash/chapter/{second_chapter["id"]}/restore').status_code == 200

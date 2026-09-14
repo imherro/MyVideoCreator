@@ -217,6 +217,8 @@ def source_snapshot(connection, production_id):
         JOIN source_documents d ON d.id=c.source_id
         WHERE d.production_id=? AND NOT EXISTS(
             SELECT 1 FROM deleted_items x WHERE x.kind='source' AND x.item_id=d.id
+        ) AND NOT EXISTS(
+            SELECT 1 FROM deleted_items x WHERE x.kind='chapter' AND x.item_id=c.id
         ) ORDER BY d.created,c.sort_order,e.event_order,e.id''',(production_id,)).fetchall()
     result = []
     for row in rows:
@@ -505,7 +507,8 @@ def validate_source_references(connection, production_id, chapter_ids):
     rows = connection.execute(f'''SELECT c.id FROM source_chapters c
         JOIN source_documents d ON d.id=c.source_id
         WHERE d.production_id=? AND c.id IN ({placeholders})
-        AND NOT EXISTS(SELECT 1 FROM deleted_items x WHERE x.kind='source' AND x.item_id=d.id)''',[production_id,*unique]).fetchall()
+        AND NOT EXISTS(SELECT 1 FROM deleted_items x WHERE x.kind='source' AND x.item_id=d.id)
+        AND NOT EXISTS(SELECT 1 FROM deleted_items x WHERE x.kind='chapter' AND x.item_id=c.id)''',[production_id,*unique]).fetchall()
     if {row['id'] for row in rows} != set(unique):
         raise ValueError('分集规划引用了不存在或属于其他 Production 的原著章节')
 

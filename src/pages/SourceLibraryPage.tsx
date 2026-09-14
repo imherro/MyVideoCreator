@@ -126,6 +126,20 @@ export function SourceLibraryPage({
       notify(`原著“${activeSource.title}”已移入回收站`);
     } finally { setBusy(false); }
   }
+  async function deleteSelectedChapters() {
+    if (!selected.size) return;
+    if (!window.confirm(`将选中的 ${selected.size} 个章节移入回收站？\n对应的已提取事件会暂时隐藏，恢复章节后会重新出现。`)) return;
+    setBusy(true);
+    try {
+      await request(`/productions/${productionId}/chapters/trash`, {
+        method: "POST", body: JSON.stringify({ chapter_ids: [...selected] }),
+      });
+      const count = selected.size;
+      setSelected(new Set());
+      await load();
+      notify(`已将 ${count} 个章节移入回收站`);
+    } finally { setBusy(false); }
+  }
   async function saveEpisodeReferences() {
     if (!adaptation || !currentPlan) return;
     setBusy(true);
@@ -174,6 +188,7 @@ export function SourceLibraryPage({
       <aside>
         <label className="source-search"><Search size={14}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索章节"/></label>
         <small>{sources.length} 部原著 · {chapters.length} 章</small>
+        <div className="source-selection-actions"><span>已选 {selected.size} 章</span><button className="danger-button" disabled={busy || !selected.size} onClick={() => run(deleteSelectedChapters)}><Trash2 size={14}/>移除所选章节</button></div>
         {visible.map((item) => <button className={active === item.id ? "active" : ""} key={item.id} onClick={() => setActive(item.id)}><input type="checkbox" checked={selected.has(item.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => setSelected((value) => { const next = new Set(value); event.target.checked ? next.add(item.id) : next.delete(item.id); return next; })}/><span><b>{item.chapter_no}. {item.title}</b><small>{item.source_title}</small></span></button>)}
       </aside>
       <main>{chapter ? <>
