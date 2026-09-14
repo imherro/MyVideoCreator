@@ -12,6 +12,7 @@ export function ProductionLibrary({
   currentEpisodeId,
   onCreateProduction,
   onCreateEpisode,
+  onOpenProjectSettings,
   onOpenEpisode,
   onDeleteEpisode,
 }: {
@@ -20,6 +21,7 @@ export function ProductionLibrary({
   currentEpisodeId: string;
   onCreateProduction: () => void;
   onCreateEpisode: (production: ProductionSummary) => void;
+  onOpenProjectSettings: () => void;
   onOpenEpisode: (episode: EpisodeSummary) => void;
   onDeleteEpisode: (episode: EpisodeSummary) => void;
 }) {
@@ -27,8 +29,9 @@ export function ProductionLibrary({
     <div className="production-library">
       <p className="muted">一个 Production 对应一部剧或影片；每个 Episode 是独立制作、生成和剪辑的工作区。</p>
       <button className="primary full" onClick={onCreateProduction}>
-        <Plus size={16} />新建 Production
+        <Plus size={16} />新建作品
       </button>
+      {!!productions.length && <button className="full" onClick={onOpenProjectSettings}>项目设置</button>}
       {productions.map((production) => {
         const productionEpisodes = episodesForProduction(episodes, production.id);
         return (

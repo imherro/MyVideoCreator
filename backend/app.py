@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from . import store as s, runtime
 from .prompts import TEMPLATES
 from .generation_policy import default_ark_policy, validate_generation_policy
-from .project_schema import migrate_document, new_document
+from .project_schema import empty_film_bible, migrate_document, new_document
 from .production_context import (
     SHARED_DOCUMENT_KEYS,
     compose_project_document,
@@ -183,6 +183,10 @@ def productions():
 class ProductionCreate(BaseModel):
     name:str=Field(default='未命名剧集',max_length=100)
 
+class ProductionUpdate(BaseModel):
+    revision:int=Field(ge=1)
+    name:str=Field(max_length=100)
+
 @app.post('/api/productions')
 def create_production(body:ProductionCreate):
     production_id=s.uid('production-')
@@ -191,6 +195,22 @@ def create_production(body:ProductionCreate):
     with s.db() as c:
         c.execute('INSERT INTO productions(id,name,revision,shared_context,created,updated) VALUES(?,?,1,?,?,?)',(production_id,name,s.dumps(context),now,now))
     return production(production_id)
+
+@app.patch('/api/productions/{production_id}')
+def update_production(production_id:str,body:ProductionUpdate):
+    name=body.name.strip()
+    if not name:raise ValueError('作品名称不能为空')
+    now=time.time()
+    with s.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        row=c.execute('SELECT revision FROM productions WHERE id=?',(production_id,)).fetchone()
+        if not row:raise HTTPException(404,'Production 不存在')
+        if row['revision']!=body.revision:
+            raise HTTPException(409,'Production 已在其他页面更新，请重新加载后编辑。')
+        c.execute('UPDATE productions SET name=?,revision=revision+1,updated=? WHERE id=?',(
+            name,now,production_id,
+        ))
+    return {'id':production_id,'name':name,'revision':body.revision+1,'updated':now}
 
 @app.get('/api/productions/{production_id}')
 def read_production(production_id:str):
@@ -264,22 +284,62 @@ def create_episode(production_id:str,body:EpisodeCreate):
 
 class ProjectCreate(BaseModel):
     name:str=Field(default='未命名短片',max_length=100)
+    episode_title:str|None=Field(default=None,max_length=100)
+    style:str|None=Field(default=None,max_length=200)
+    ratio:str|None=None
+    duration:float|None=Field(default=None,ge=5,le=3000)
+    brief:str|None=Field(default=None,max_length=24000)
+    generation_policy:dict|None=None
+    film_bible:dict|None=None
 
 def normalized_project_name(name:str)->str:
     return name.strip() or '未命名短片'
 
+def project_create_document(body:ProjectCreate):
+    providers=s.get_setting('providers',[])
+    document=new_document(default_ark_policy(providers))
+    if body.style is not None:
+        style=body.style.strip()
+        if not style:raise ValueError('视觉风格不能为空')
+        document['style']=style
+    if body.ratio is not None:
+        if body.ratio not in ('16:9','9:16','1:1'):
+            raise ValueError('画幅只支持 16:9、9:16 或 1:1')
+        document['ratio']=body.ratio
+    if body.duration is not None:document['duration']=body.duration
+    if body.brief is not None:document['brief']=body.brief
+    if body.generation_policy is not None:
+        document['generationPolicy']=validate_generation_policy(
+            body.generation_policy,providers,allow_missing=False,
+        )
+    if body.film_bible is not None:
+        if not isinstance(body.film_bible,dict):raise ValueError('Project Bible 必须是对象')
+        unknown=set(body.film_bible)-{'story','style','continuity'}
+        if unknown:raise ValueError('Project Bible 创建参数只支持 story、style、continuity')
+        film_bible=empty_film_bible()
+        for key in ('story','style','continuity'):
+            value=body.film_bible.get(key,{})
+            if not isinstance(value,dict):raise ValueError(f'Project Bible {key} 必须是对象')
+            film_bible[key].update(value)
+        document['filmBible']=film_bible
+    return document
+
 @app.post('/api/projects')
 def create_project(body:ProjectCreate):
     pid = s.uid('project-');production_id=s.uid('production-')
-    document = new_document(default_ark_policy(s.get_setting('providers',[])))
+    # Validate and compose the complete setup before opening the transaction so
+    # invalid provider/model selections cannot leave partial Production rows.
+    document = project_create_document(body)
     context=production_context_from_document(document)
     now=time.time();name=normalized_project_name(body.name)
+    episode_title=(body.episode_title or '').strip() if body.episode_title is not None else name
+    episode_title=episode_title or '第 01 集'
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
         c.execute('INSERT INTO productions(id,name,revision,shared_context,created,updated) VALUES(?,?,1,?,?,?)',(production_id,name,s.dumps(context),now,now))
         c.execute('''INSERT INTO projects(
             id,name,revision,document,created,updated,production_id,episode_no,episode_title
-        ) VALUES(?,?,1,?,?,?,?,1,?)''',(pid,name,s.dumps(episode_document_from_document(document)),now,now,production_id,name))
+        ) VALUES(?,?,1,?,?,?,?,1,?)''',(pid,episode_title,s.dumps(episode_document_from_document(document)),now,now,production_id,episode_title))
         from .adaptation import seed_episode_scripts
         seed_episode_scripts(c)
     return project(pid)

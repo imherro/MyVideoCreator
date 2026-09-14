@@ -22,6 +22,9 @@ def validate_generation_policy(policy, providers, allow_missing=False):
             continue
         if not isinstance(target, dict) or not target.get('providerId'):
             raise ValueError(f'项目默认{kind}模型配置无效')
+        if kind == 'text' and target['providerId'] == 'local':
+            result[kind] = {'providerId': 'local', 'modelId': str(target.get('modelId', ''))}
+            continue
         provider = configured.get(target['providerId'])
         if not provider and allow_missing:
             result[kind] = {'providerId': target['providerId'], 'modelId': str(target.get('modelId', ''))}

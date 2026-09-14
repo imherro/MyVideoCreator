@@ -171,6 +171,15 @@ import {
   type ProductionSummary,
 } from "./app/production";
 import { ProductionLibrary } from "./pages/ProductionLibrary";
+import { ProjectSetupDialog } from "./pages/ProjectSetupDialog";
+import {
+  applyRatioChange,
+  applyTargetDuration,
+  bibleFields,
+  mergeBibleFields,
+  projectSetupPayload,
+  type ProjectSetupDraft,
+} from "./projectSetup";
 const EditorWorkspace = lazy(() =>
   import("./editor/EditorWorkspace").then((module) => ({
     default: module.EditorWorkspace,
@@ -589,6 +598,12 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     [trashItems, setTrashItems] = useState<Any>({ projects: [], assets: [] }),
     [preview, setPreview] = useState<Asset | null>(null);
   const [previewTimeline, setPreviewTimeline] = useState(false);
+  const [booted, setBooted] = useState(false);
+  const [projectSetupOpen, setProjectSetupOpen] = useState(false);
+  const [projectSetupKey, setProjectSetupKey] = useState(0);
+  const [projectSettingsTab, setProjectSettingsTab] = useState<"production" | "episode">("production");
+  const [productionNameDraft, setProductionNameDraft] = useState("");
+  const [visualStyleDraft, setVisualStyleDraft] = useState("");
   const [visualFocus, setVisualFocus] = useState<string | undefined>();
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [panorama, setPanorama] = useState<Asset | null>(null);
@@ -618,6 +633,14 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   const [layoutVersion, setLayoutVersion] = useState(0);
   current.current = { project, doc };
   workflowStageRef.current = workflowStage;
+  useEffect(() => {
+    if (!project) return;
+    const active = productions.find((item) => item.id === project.production_id);
+    if (active) setProductionNameDraft(active.name);
+  }, [project?.production_id, productions]);
+  useEffect(() => {
+    if (doc) setVisualStyleDraft(doc.style);
+  }, [project?.id, doc?.style]);
   function activateWorkflowStage(
     next: WorkflowStage,
     historyMode: "push" | "replace" | "none" = "push",
@@ -767,16 +790,12 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       setConfig(settings);
       if (list.length) await openProject(list[0].id);
       else {
-        const p = await api(
-          "/projects",
-          send("POST", { name: "我的第一部短片" }),
-        );
-        setProductions(await api("/productions"));
-        setProjects([p]);
-        await openProject(p.id);
+        setProjectSetupOpen(true);
       }
     } catch (e) {
       report(e);
+    } finally {
+      setBooted(true);
     }
   }
   useEffect(() => {
@@ -1243,23 +1262,21 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setProductions(productionList);
     setProjects(episodeList);
   }
-  async function createProduction(name: string) {
+  function openProjectSetup() {
+    setProjectSetupKey((value) => value + 1);
+    setProjectSetupOpen(true);
+  }
+  async function createProduction(draft: ProjectSetupDraft) {
     const preservedDraft = await prepareProjectSwitch();
-    const productionName = name.trim() || "未命名剧集";
-    const production = await api(
-      "/productions",
-      send("POST", { name: productionName }),
-    );
-    const episode = await api(
-      `/productions/${production.id}/episodes`,
-      send("POST", { title: "第 01 集" }),
-    );
+    const productionName = draft.name.trim();
+    const episode = await api("/projects", send("POST", projectSetupPayload(draft)));
     await refreshProductionHierarchy();
     await openProject(episode.id);
+    setProjectSetupOpen(false);
     setNotice(
       preservedDraft
         ? `已新建“${productionName}”；原集冲突草稿已保存在本浏览器`
-        : `已新建 Production“${productionName}”并进入 EP01`,
+        : `已新建作品“${productionName}”并进入 EP01`,
     );
   }
   async function createEpisode(production: ProductionSummary, title: string) {
@@ -1272,17 +1289,21 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     await openProject(episode.id);
     setNotice(`已在“${production.name}”中新建 EP${String(episode.episode_no).padStart(2, "0")}`);
   }
-  async function createProject(name: string) {
-    const preservedDraft = await prepareProjectSwitch();
-    const projectName = name.trim() || "未命名短片";
-    const p = await api("/projects", send("POST", { name: projectName }));
-    await refreshProductionHierarchy();
-    await openProject(p.id);
-    setNotice(
-      preservedDraft
-        ? "已进入新项目；原项目的冲突草稿已保存在本浏览器，可随时返回恢复。"
-        : `已新建并进入空白项目“${projectName}”`,
-    );
+  async function renameProduction(name: string) {
+    if (!project) return;
+    const target = productions.find((item) => item.id === project.production_id);
+    if (!target) throw new Error("当前作品信息尚未载入");
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error("作品名称不能为空");
+    const updated = await api(`/productions/${target.id}`, send("PATCH", {
+      revision: productionRevision.current,
+      name: trimmed,
+    }));
+    productionRevision.current = updated.revision;
+    setProject((value) => value ? { ...value, production_revision: updated.revision } : value);
+    setProductions((items) => items.map((item) => item.id === target.id ? { ...item, ...updated } : item));
+    setProductionNameDraft(trimmed);
+    setNotice("作品名称已保存");
   }
   async function loadTrash() {
     setTrashItems(await api("/trash"));
@@ -1313,18 +1334,20 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     if (entered.trim() !== target.name)
       throw new Error("项目名称不匹配，未执行删除。");
     await api(`/projects/${target.id}`, send("DELETE"));
-    let list = await api("/projects");
-    if (!list.length) {
-      await api("/projects", send("POST", { name: "我的第一部短片" }));
-      list = await api("/projects");
-    }
+    const list = await api("/projects");
     setProjects(list);
     setProductions(await api("/productions"));
     if (target.id === project?.id) {
       dirty.current = false;
       conflictRef.current = false;
       setConflict(false);
-      await openProject(list[0].id);
+      if (list.length) await openProject(list[0].id);
+      else {
+        current.current = { project: null, doc: null };
+        setProject(null);
+        setDoc(null);
+        setPanel(null);
+      }
     }
     await loadTrash();
     setNotice(`项目“${target.name}”已移入回收站`);
@@ -1976,9 +1999,22 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     }) || [];
   if (!doc || !project)
     return (
-      <div className="loading">
-        <LoaderCircle className="spin" />
-        {error || "正在打开工作室"}
+      <div className={booted ? "empty-workspace" : "loading"}>
+        {!booted ? <><LoaderCircle className="spin" />{error || "正在打开工作室"}</> : <>
+          <AnYingMark size={64}/>
+          <span className="eyebrow">ANYING STUDIO</span>
+          <h1>创建第一部作品</h1>
+          <p>先确认视觉风格、画幅、目标时长、默认模型与 Project Bible，再进入 EP01。</p>
+          <button className="primary" onClick={openProjectSetup}><Plus size={17}/>创建第一部作品</button>
+          {error && <div className="error">{error}</div>}
+        </>}
+        {projectSetupOpen && <ProjectSetupDialog
+          key={projectSetupKey}
+          providers={config.providers}
+          localModels={system.models}
+          onClose={projects.length ? () => setProjectSetupOpen(false) : undefined}
+          onCreate={createProduction}
+        />}
       </div>
     );
   const assetBatchPlan = planBatchGeneration(
@@ -1997,6 +2033,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   const currentProduction =
     productions.find((item) => item.id === project.production_id) || null;
   const currentEpisodes = episodesForProduction(projects, project.production_id);
+  const projectBibleFields = bibleFields(doc);
   const filmBiblePanelProps: React.ComponentProps<typeof FilmBiblePanel> = {
     visual: visualBibleOf(doc),
     shots: doc.shots,
@@ -2099,6 +2136,13 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   };
   return (
     <div className="studio-shell">
+      {projectSetupOpen && <ProjectSetupDialog
+        key={projectSetupKey}
+        providers={config.providers}
+        localModels={system.models}
+        onClose={() => setProjectSetupOpen(false)}
+        onCreate={createProduction}
+      />}
       {previewTimeline && (
         <TimelinePreview
           clips={doc.timeline}
@@ -2138,8 +2182,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           episodes={currentEpisodes}
           onSelect={(projectId) => openProject(projectId).catch(report)}
         />
-        <button className="icon-button" onClick={() => setPanel("projectInfo")} title="查看和修改当前集信息">
-          <FileText size={16} />
+        <button className="project-settings-button" onClick={() => { setProjectSettingsTab("episode"); setPanel("projectInfo"); }}>
+          <FileText size={15} />当前集设置
         </button>
         <span
           className={"save-status " + (saved === "保存失败" ? "danger" : "")}
@@ -3319,7 +3363,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 {
                   add: "添加节点",
                   projects: "项目库",
-                  projectInfo: "当前集信息",
+                  projectInfo: "项目设置",
                   assets: "资产中心",
                   jobs: "生成任务",
                   settings: "设置",
@@ -3390,10 +3434,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 productions={productions}
                 episodes={projects}
                 currentEpisodeId={project.id}
-                onCreateProduction={() => {
-                  const name = window.prompt("请输入新 Production 名称。系统会同时建立 EP01。", "未命名剧集");
-                  if (name !== null) createProduction(name).catch(report);
-                }}
+                onCreateProduction={openProjectSetup}
+                onOpenProjectSettings={() => { setProjectSettingsTab("production"); setPanel("projectInfo"); }}
                 onCreateEpisode={(production) => {
                   const next = episodesForProduction(projects, production.id).length + 1;
                   const title = window.prompt(`在“${production.name}”中新增 EP${String(next).padStart(2, "0")}，可填写集名：`, `第 ${String(next).padStart(2, "0")} 集`);
@@ -3462,9 +3504,13 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 <div className="current-project-card">
                   <AnYingMark size={30} />
                   <div>
-                    <small>当前项目</small>
-                    <b>{project.name}</b>
+                    <small>{projectSettingsTab === "production" ? "整部作品" : "当前制作集"}</small>
+                    <b>{currentProduction?.name || project.name} · {episodeLabel(project)}</b>
                   </div>
+                </div>
+                <div className="settings-tabs" role="tablist" aria-label="项目设置范围">
+                  <button className={projectSettingsTab === "production" ? "active" : ""} onClick={() => setProjectSettingsTab("production")}>整部作品</button>
+                  <button className={projectSettingsTab === "episode" ? "active" : ""} onClick={() => setProjectSettingsTab("episode")}>当前制作集</button>
                 </div>
                 {sessionStorage.getItem("yingxu-conflict-" + project.id) && (
                   <div className="error">
@@ -3491,86 +3537,31 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                     </button>
                   </div>
                 )}
-                <label>
-                  项目名称
-                  <input
-                    value={project.name}
-                    onChange={(e) => {
-                      setProject({ ...project, name: e.target.value });
-                      dirty.current = true;
-                      setSaved("未保存");
-                    }}
-                  />
-                </label>
-                <div className="two-fields">
-                  <label>
-                    画幅
-                    <select
-                      value={doc.ratio}
-                      onChange={(e) =>
-                        update((d) => ({ ...d, ratio: e.target.value }))
-                      }
-                    >
-                      <option>16:9</option>
-                      <option>9:16</option>
-                      <option>1:1</option>
-                    </select>
-                  </label>
-                  <label>
-                    目标时长
-                    <input
-                      type="number"
-                      min="5"
-                      value={doc.duration}
-                      onChange={(e) =>
-                        update((d) => ({
-                          ...d,
-                          duration: Number(e.target.value),
-                        }))
-                      }
-                    />
-                  </label>
-                </div>
-                <div className="project-bible-heading">
-                  <div>
-                    <span className="eyebrow">PROJECT BIBLE</span>
-                    <h3>项目 Bible</h3>
+                {projectSettingsTab === "production" ? <>
+                  <h3>整部作品设置</h3>
+                  <label>作品名称<div className="inline-save-field"><input maxLength={100} value={productionNameDraft} onChange={(event)=>setProductionNameDraft(event.target.value)}/><button disabled={!productionNameDraft.trim() || productionNameDraft.trim() === currentProduction?.name} onClick={()=>renameProduction(productionNameDraft).catch(report)}>保存名称</button></div><small>修改作品名称不会改变任何 Episode 标题，也不会触发生成。</small></label>
+                  <label>高层视觉风格<div className="inline-save-field"><input maxLength={200} value={visualStyleDraft} onChange={(event)=>setVisualStyleDraft(event.target.value)}/><button disabled={!visualStyleDraft.trim() || visualStyleDraft.trim() === doc.style} onClick={()=>{update((document)=>setProjectVisualStyle(document,visualStyleDraft.trim()));setNotice("视觉风格已应用；旧媒体保留，相关生成结果已标记为待更新");}}>应用风格</button></div><small>修改后会把已生成的分镜图和视频标记为待更新；旧媒体和剪辑内容会保留，不会自动生成。</small></label>
+                  <GenerationPolicyPanel value={doc.generationPolicy} providers={config.providers} localModels={system.models} onChange={(generationPolicy)=>update((document)=>({...document,generationPolicy}))}/>
+                  <div className="project-bible-heading"><div><span className="eyebrow">PROJECT BIBLE</span><h3>创作约束</h3></div><button className="quiet" onClick={()=>setPanel("filmBible")}><BookOpen size={15}/>打开塑角造景 {Object.keys(visualBibleOf(doc).cards).length || ""}<ChevronRight size={14}/></button></div>
+                  <p className="muted">这里只修改文字约束，不会覆盖已有 VisualCard、VisualVersion 或锁定参考图。</p>
+                  <label>世界 / 时代<input value={projectBibleFields.worldEra} onChange={(event)=>update((document)=>mergeBibleFields(document,{...bibleFields(document),worldEra:event.target.value}))}/></label>
+                  <div className="two-fields">
+                    <label>视觉基调<input value={projectBibleFields.visualTone} onChange={(event)=>update((document)=>mergeBibleFields(document,{...bibleFields(document),visualTone:event.target.value}))}/></label>
+                    <label>色彩 / 光线<input value={projectBibleFields.colorLighting} onChange={(event)=>update((document)=>mergeBibleFields(document,{...bibleFields(document),colorLighting:event.target.value}))}/></label>
                   </div>
-                  <button
-                    className="quiet"
-                    onClick={() => setPanel("filmBible")}
-                  >
-                    <BookOpen size={15} />
-                    视觉圣经 {Object.keys(visualBibleOf(doc).cards).length || ""}
-                    <ChevronRight size={14} />
-                  </button>
-                </div>
-                <label>
-                  视觉风格
-                  <input
-                    value={doc.style}
-                    onChange={(e) =>
-                      update((d) => setProjectVisualStyle(d, e.target.value))
-                    }
-                  />
-                </label>
-                <label>
-                  故事概要
-                  <textarea
-                    value={doc.brief}
-                    onChange={(e) =>
-                      update((d) => ({ ...d, brief: e.target.value }))
-                    }
-                  />
-                </label>
-                <GenerationPolicyPanel
-                  value={doc.generationPolicy}
-                  providers={config.providers}
-                  localModels={system.models}
-                  onChange={(generationPolicy) =>
-                    update((d) => ({ ...d, generationPolicy }))
-                  }
-                />
+                  <label>镜头语言<input value={projectBibleFields.cameraLanguage} onChange={(event)=>update((document)=>mergeBibleFields(document,{...bibleFields(document),cameraLanguage:event.target.value}))}/></label>
+                  <label>角色 / 场景一致性<textarea value={projectBibleFields.characterSceneConsistency} onChange={(event)=>update((document)=>mergeBibleFields(document,{...bibleFields(document),characterSceneConsistency:event.target.value}))}/></label>
+                  <label>避免项（每行一项）<textarea value={projectBibleFields.avoidItems} onChange={(event)=>update((document)=>mergeBibleFields(document,{...bibleFields(document),avoidItems:event.target.value}))}/></label>
+                </> : <>
+                  <h3>当前制作集设置</h3>
+                  <label>Episode 标题<input maxLength={100} value={project.name} onChange={(event)=>{setProject({...project,name:event.target.value,episode_title:event.target.value});dirty.current=true;setSaved("未保存");}}/><small>只修改当前 EP{String(project.episode_no).padStart(2,"0")}，不会改变整部作品名称。</small></label>
+                  <label>创作简介<textarea value={doc.brief} onChange={(event)=>update((document)=>({...document,brief:event.target.value}))}/></label>
+                  <div className="two-fields">
+                    <label>画幅<select value={doc.ratio} onChange={(event)=>{update((document)=>applyRatioChange(document,event.target.value));setNotice("画幅已修改；已有分镜图和视频保留并标记为待更新");}}><option>16:9</option><option>9:16</option><option>1:1</option></select><small>修改后保留镜头、资产和 Timeline。</small></label>
+                    <label>目标时长（秒）<input type="number" min="5" max="3000" value={doc.duration} onChange={(event)=>update((document)=>applyTargetDuration(document,Number(event.target.value)))}/><small>策划目标，不会裁剪已有镜头或成片。</small></label>
+                  </div>
+                  <div className="duration-impact"><span>目标 {doc.duration} 秒</span><span>镜头合计 {doc.shots.reduce((sum,shot)=>sum+Number(shot.duration||0),0).toFixed(1)} 秒</span><span>剪辑 {Math.max(0,...(doc.editor?.timeline?.tracks||[]).flatMap((track)=>track.elements.map((element)=>Number(element.e)||0))).toFixed(1)} 秒</span></div>
+                </>}
                 <button
                   className="full danger-button"
                   onClick={() => deleteProject(project).catch(report)}
