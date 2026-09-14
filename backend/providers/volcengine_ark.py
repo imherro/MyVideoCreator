@@ -306,9 +306,12 @@ def generate_video(worker, job, provider):
                 'content': content,
                 'duration': int(params.get('duration', 5)),
                 'resolution': str(params.get('resolution', '720p')),
-                'ratio': str(job['input'].get('ratio') or params.get('ratio') or '16:9'),
                 'generate_audio': bool(params.get('generate_audio', True)),
             }
+            # Seedance derives image-to-video output ratio from the first frame
+            # and rejects an explicit ratio for first-frame/first-last-frame jobs.
+            if not assets:
+                body['ratio'] = str(job['input'].get('ratio') or params.get('ratio') or '16:9')
             if worker.cancelled(job):
                 raise InterruptedError()
             value = common.checked(client.post(root + '/contents/generations/tasks', json=body))

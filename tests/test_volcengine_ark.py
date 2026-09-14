@@ -116,6 +116,7 @@ def test_seedance_persists_task_and_resume_only_queries(monkeypatch):
         if request.method=='POST':
             body=json.loads(request.read())
             assert body['model']=='seedance-video' and body['content'][0]['type']=='text'
+            assert body['ratio']=='16:9'
             return httpx.Response(200,json={'id':'ark-task-1','status':'queued'})
         return httpx.Response(200,json={'id':'ark-task-1','status':'succeeded','content':{'video_url':'https://result.example/movie.mp4'}})
     monkeypatch.setattr(ark.httpx,'Client',lambda **kw:original(**kw,transport=httpx.MockTransport(handle)))
@@ -153,6 +154,7 @@ def test_seedance_sends_one_local_image_as_first_frame(monkeypatch):
         if request.method=='POST':
             body=json.loads(request.read())
             assert body['content'][0]=={'type':'text','text':item['input']['prompt']}
+            assert 'ratio' not in body
             frame=body['content'][1]
             assert frame['type']=='image_url' and frame['role']=='first_frame'
             assert base64.b64decode(frame['image_url']['url'].split(',',1)[1])==expected
@@ -182,6 +184,7 @@ def test_seedance_sends_first_and_last_frames_in_role_order(monkeypatch):
         if request.method=='POST':
             body=json.loads(request.read())
             assert [part.get('role') for part in body['content']]==[None,'first_frame','last_frame']
+            assert 'ratio' not in body
             images=[base64.b64decode(part['image_url']['url'].split(',',1)[1]) for part in body['content'][1:]]
             assert images==[first_bytes,last_bytes]
             return httpx.Response(200,json={'id':'fl2v-task'})
