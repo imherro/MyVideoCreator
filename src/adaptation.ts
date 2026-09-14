@@ -1,4 +1,7 @@
 export const PAYWALL_ROLES = ["none", "setup", "conversion", "retention", "major_cliffhanger"] as const;
+export const DURATION_OPTIONS = [15, 30, 45, 60, 90, 120, 180] as const;
+export const RATIO_OPTIONS = ["16:9", "9:16", "1:1"] as const;
+export const PLATFORM_OPTIONS = ["通用短视频", "抖音", "快手", "红果短剧", "微信视频号", "小红书", "B站", "YouTube"] as const;
 
 export const STATUS_LABELS: Record<string, string> = {
   draft: "草稿",

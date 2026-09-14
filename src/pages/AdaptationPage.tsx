@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, RefreshCw, Save, Sparkles } from "lucide-react";
 import {
+  DURATION_OPTIONS,
   PAYWALL_LABELS,
   PAYWALL_ROLES,
+  PLATFORM_OPTIONS,
+  RATIO_OPTIONS,
   STATUS_LABELS,
   createEpisodePlans,
   type EpisodePlan,
@@ -16,12 +19,13 @@ const storyGroups = [
 ] as const;
 
 export function AdaptationPage({
-  productionId, projectId, providers, defaultTarget, request, notify, report, onRevision,
+  productionId, projectId, providers, defaultTarget, request, notify, report, onRevision, onOpenSource,
 }: {
   productionId: string; projectId: string; providers: Value[]; defaultTarget?: Value;
   request: (path: string, options?: RequestInit) => Promise<any>;
   notify: (message: string) => void; report: (error: unknown) => void;
   onRevision: (revision: number) => void;
+  onOpenSource: () => void;
 }) {
   const [draft, setDraft] = useState<Value | null>(null);
   const [chapters, setChapters] = useState<Value[]>([]);
@@ -82,6 +86,13 @@ export function AdaptationPage({
     const modelId = model || provider?.models?.text || provider?.model || "";
     if (providerId !== "local" && !modelId) throw new Error("请填写文本模型 ID");
     if (!window.confirm(`将依据 ${draft.sourceEventCount} 条原著事件重新生成完整改编策划。\n服务：${provider?.name || providerId}\n模型：${modelId || "本地默认"}\n生成结果会进入待审核状态。确认创建文本任务？`)) return;
+    const episodePlans = createEpisodePlans(draft.adaptationPlan.format.episodeCount, draft.adaptationPlan.format.targetDuration, draft.episodePlans);
+    const saved = await request(`/productions/${productionId}/adaptation`, {
+      method: "PUT",
+      body: JSON.stringify({ revision: draft.revision, adaptationPlan: draft.adaptationPlan, episodePlans, monetizationPlan: draft.monetizationPlan }),
+    });
+    setDraft({ ...saved, sourceEventCount: draft.sourceEventCount });
+    onRevision(saved.revision);
     await request(`/productions/${productionId}/adaptation/generate`, {
       method: "POST",
       body: JSON.stringify({ project_id: projectId, provider: providerId, model: modelId, allow_cloud: providerId !== "local" && provider?.local !== true, submission_id: `adaptation-${Date.now()}` }),
@@ -105,9 +116,9 @@ export function AdaptationPage({
     <div className="adaptation-layout"><main className="adaptation-main">
       <article className="domain-card"><h2>成片规格</h2><div className="domain-fields four">
         <label>总集数<input type="number" min="1" max="500" value={format.episodeCount} onChange={(e) => setFormat("episodeCount", Number(e.target.value))} /></label>
-        <label>单集秒数<input type="number" min="1" max="3000" value={format.targetDuration} onChange={(e) => setFormat("targetDuration", Number(e.target.value))} /></label>
-        <label>画幅<input value={format.ratio} onChange={(e) => setFormat("ratio", e.target.value)} /></label>
-        <label>平台<input value={format.platform} onChange={(e) => setFormat("platform", e.target.value)} /></label>
+        <label>单集秒数<input list="adaptation-duration-options" type="number" min="1" max="3000" value={format.targetDuration} onChange={(e) => setFormat("targetDuration", Number(e.target.value))} /><datalist id="adaptation-duration-options">{DURATION_OPTIONS.map((value)=><option value={value} key={value}/>)}</datalist></label>
+        <label>画幅<select value={format.ratio} onChange={(e) => setFormat("ratio", e.target.value)}>{RATIO_OPTIONS.map((value)=><option value={value} key={value}>{value}</option>)}</select></label>
+        <label>平台<select value={format.platform} onChange={(e) => setFormat("platform", e.target.value)}>{!PLATFORM_OPTIONS.includes(format.platform) && <option value={format.platform}>{format.platform}</option>}{PLATFORM_OPTIONS.map((value)=><option value={value} key={value}>{value}</option>)}</select><small>用于 AI 决定节奏、钩子与商业卡点。</small></label>
       </div><button onClick={() => setDraft((current) => current && ({ ...current, episodePlans: createEpisodePlans(current.adaptationPlan.format.episodeCount, current.adaptationPlan.format.targetDuration, current.episodePlans) }))}>按规格建立 / 调整分集规划</button></article>
       {storyGroups.map(([key, title, fields]) => <article className="domain-card" key={key}><h2>{title}</h2><div className="domain-fields">{fields.map(([field, label]) => <label key={field}>{label}<textarea rows={2} value={draft.adaptationPlan[key]?.[field] || ""} onChange={(e) => setStory(key, field, e.target.value)} /></label>)}</div></article>)}
       <article className="domain-card"><div className="domain-card-heading"><div><h2>分集规划</h2><small>{draft.episodePlans.length} 集 · 当前 EP{String(active).padStart(2, "0")}</small></div></div>
@@ -123,7 +134,7 @@ export function AdaptationPage({
       </article>
       <MonetizationEditor draft={draft} setDraft={setDraft} />
     </main><aside className="episode-plan-list"><h3>分集导航</h3>{draft.episodePlans.map((item: EpisodePlan) => <button key={item.episodeNo} className={active === item.episodeNo ? "active" : ""} onClick={() => setActive(item.episodeNo)}><span>EP{String(item.episodeNo).padStart(2, "0")}</span><small className={item.status}>{STATUS_LABELS[item.status] || item.status}</small></button>)}</aside></div>
-    <footer className="domain-generation-bar"><div><b>AI 生成完整改编策划</b><small>{draft.sourceEventCount} 条原著事件 · 只在点击后创建文本任务</small></div><label>服务<select value={providerId} onChange={(e) => { setProviderId(e.target.value); const p = textProviders.find((x) => x.id === e.target.value); setModel(p?.models?.text || p?.model || ""); }}>{textProviders.map((item) => <option key={item.id} value={item.id}>{item.local ? "本地" : "云端"} · {item.name}</option>)}</select></label><label>模型<input value={model} placeholder="本地默认" onChange={(e) => setModel(e.target.value)} /></label><button className="primary" disabled={busy || !draft.sourceEventCount} onClick={() => run(generate)}><Sparkles size={15} />生成策划</button></footer>
+    <footer className="domain-generation-bar"><div><b>AI 基于原著生成整个改编工作台</b><small>{draft.sourceEventCount ? `${draft.sourceEventCount} 条原著事件 · 将生成故事骨架、策略、分集规划和商业卡点` : "尚未提取原著事件，请先完成原著分析"}</small></div><label>服务<select value={providerId} onChange={(e) => { setProviderId(e.target.value); const p = textProviders.find((x) => x.id === e.target.value); setModel(p?.models?.text || p?.model || ""); }}>{textProviders.map((item) => <option key={item.id} value={item.id}>{item.local ? "本地" : "云端"} · {item.name}</option>)}</select></label><label>模型<input value={model} placeholder="本地默认" onChange={(e) => setModel(e.target.value)} /></label>{draft.sourceEventCount ? <button className="primary" disabled={busy} onClick={() => run(generate)}><Sparkles size={15} />生成整个工作台</button> : <button className="primary" disabled={busy} onClick={onOpenSource}>先提取原著事件</button>}</footer>
   </section>;
 }
 

@@ -19,6 +19,8 @@ export type ProjectSetupDraft = {
   style: string;
   ratio: "16:9" | "9:16" | "1:1";
   duration: number;
+  episodeCount: number;
+  platform: string;
   brief: string;
   generationPolicy: GenerationPolicy;
   bible: ProjectBibleFields;
@@ -42,6 +44,8 @@ export function defaultProjectSetupDraft(providers: Value[]): ProjectSetupDraft 
     style: "电影写实",
     ratio: "16:9",
     duration: 15,
+    episodeCount: 1,
+    platform: "通用短视频",
     brief: "",
     generationPolicy: defaultGenerationPolicy(providers),
     bible: {
@@ -64,6 +68,9 @@ export function validateProjectSetupDraft(draft: ProjectSetupDraft): string[] {
   if (!(["16:9", "9:16", "1:1"] as string[]).includes(draft.ratio)) errors.push("请选择有效画幅");
   if (!Number.isFinite(draft.duration) || draft.duration < 5 || draft.duration > 3000)
     errors.push("目标时长应为 5–3000 秒");
+  if (!Number.isInteger(draft.episodeCount) || draft.episodeCount < 1 || draft.episodeCount > 500)
+    errors.push("总集数应为 1–500 的整数");
+  if (!draft.platform.trim()) errors.push("请选择发布平台");
   return errors;
 }
 
@@ -81,6 +88,8 @@ export function projectSetupPayload(draft: ProjectSetupDraft) {
     style: draft.style.trim(),
     ratio: draft.ratio,
     duration: draft.duration,
+    episode_count: draft.episodeCount,
+    platform: draft.platform,
     brief: draft.brief,
     generation_policy: draft.generationPolicy,
     film_bible: {

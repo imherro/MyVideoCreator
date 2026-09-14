@@ -13,6 +13,9 @@ SCRIPT_FIELDS = {
     'title', 'synopsis', 'body', 'estimatedDuration', 'sourceChapterRefs',
     'storyGoal', 'paywallBeat', 'characters', 'scenes', 'props',
 }
+LEGACY_DEFAULT_FORMAT = {
+    'episodeCount': 60, 'targetDuration': 60, 'ratio': '9:16', 'platform': '红果短剧',
+}
 
 
 def empty_adaptation_context():
@@ -20,10 +23,10 @@ def empty_adaptation_context():
         'adaptationPlan': {
             'status': 'draft',
             'format': {
-                'episodeCount': 60,
-                'targetDuration': 60,
-                'ratio': '9:16',
-                'platform': '红果短剧',
+                'episodeCount': 1,
+                'targetDuration': 15,
+                'ratio': '16:9',
+                'platform': '通用短视频',
             },
             'storyCore': {},
             'storyArc': {},
@@ -33,11 +36,45 @@ def empty_adaptation_context():
         'episodePlans': [],
         'monetizationPlan': {
             'mode': 'free_then_paid',
-            'freeEpisodes': 3,
-            'firstPaywallEpisode': 4,
+            'freeEpisodes': 1,
+            'firstPaywallEpisode': 2,
             'beats': [],
         },
     }
+
+
+def configure_adaptation_format(context, episode_count, target_duration, ratio, platform):
+    """Initialize a complete editable plan from the user's production setup."""
+    result = normalize_adaptation_context(context)
+    count = max(1, min(500, int(episode_count)))
+    duration = max(1, min(3000, float(target_duration)))
+    result['adaptationPlan']['format'] = {
+        'episodeCount': count, 'targetDuration': duration,
+        'ratio': str(ratio), 'platform': str(platform),
+    }
+    initially_empty = not result['episodePlans'] and not result['monetizationPlan'].get('beats')
+    old = {item.get('episodeNo'): item for item in result['episodePlans'] if isinstance(item, dict)}
+    result['episodePlans'] = [copy.deepcopy(old.get(number) or {
+        'episodeNo': number, 'sourceChapterRefs': [], 'logline': '', 'coreConflict': '',
+        'emotionalBeat': '', 'hook': '', 'cliffhanger': '', 'paywallRole': 'none',
+        'targetDuration': duration, 'status': 'draft',
+    }) for number in range(1, count + 1)]
+    money = result['monetizationPlan']
+    money['freeEpisodes'] = min(3, count) if initially_empty else min(int(money.get('freeEpisodes', 0)), count)
+    money['firstPaywallEpisode'] = min(4, count + 1) if initially_empty else min(max(1, int(money.get('firstPaywallEpisode', 1))), count + 1)
+    money['beats'] = [beat for beat in money.get('beats', []) if beat.get('episodeNo', 0) <= count]
+    return result
+
+
+def has_legacy_default_format(context):
+    result = normalize_adaptation_context(context)
+    adaptation = result['adaptationPlan']
+    return (
+        adaptation['format'] == LEGACY_DEFAULT_FORMAT
+        and not result['episodePlans'] and not adaptation.get('sourceEventIds')
+        and all(not adaptation.get(group) for group in ('storyCore', 'storyArc', 'adaptationStrategy'))
+        and not result['monetizationPlan'].get('beats')
+    )
 
 
 def normalize_adaptation_context(value):
@@ -562,6 +599,8 @@ def apply_adaptation_generation(job, generated):
     marker = job['input'].get('adaptation_generation') or {}
     production_id = marker.get('productionId')
     allowed_events = set(marker.get('sourceEventIds') or [])
+    if bundle['adaptationPlan']['format'] != marker.get('format'):
+        raise ValueError('模型返回的成片规格与任务提交规格不一致')
     if not set(bundle['adaptationPlan']['sourceEventIds']) <= allowed_events:
         raise ValueError('模型返回了任务快照中不存在的原著事件编号')
     allowed_chapters = set(marker.get('sourceChapterIds') or [])

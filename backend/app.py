@@ -288,6 +288,8 @@ class ProjectCreate(BaseModel):
     style:str|None=Field(default=None,max_length=200)
     ratio:str|None=None
     duration:float|None=Field(default=None,ge=5,le=3000)
+    episode_count:int=Field(default=1,ge=1,le=500)
+    platform:str=Field(default='通用短视频',min_length=1,max_length=100)
     brief:str|None=Field(default=None,max_length=24000)
     generation_policy:dict|None=None
     film_bible:dict|None=None
@@ -331,6 +333,10 @@ def create_project(body:ProjectCreate):
     # invalid provider/model selections cannot leave partial Production rows.
     document = project_create_document(body)
     context=production_context_from_document(document)
+    from .adaptation import configure_adaptation_format
+    context.update(configure_adaptation_format(
+        context,body.episode_count,document['duration'],document['ratio'],body.platform.strip(),
+    ))
     now=time.time();name=normalized_project_name(body.name)
     episode_title=(body.episode_title or '').strip() if body.episode_title is not None else name
     episode_title=episode_title or '第 01 集'
@@ -1187,10 +1193,29 @@ def production_event_targets(connection,production_id):
 
 @app.get('/api/productions/{production_id}/adaptation')
 def read_adaptation(production_id:str):
-    from .adaptation import adaptation_bundle,source_snapshot
+    from .adaptation import (
+        _persist_production_context,adaptation_bundle,configure_adaptation_format,
+        has_legacy_default_format,source_snapshot,
+    )
     value=production(production_id)
-    with s.db() as c:sources=source_snapshot(c,production_id)
-    return {**adaptation_bundle(value['context']),'revision':value['revision'],'sourceEventCount':len(sources)}
+    revision=value['revision'];context=value['context'];targets=[]
+    with s.db() as c:
+        if has_legacy_default_format(context):
+            c.execute('BEGIN IMMEDIATE')
+            episodes=c.execute('''SELECT document FROM projects p WHERE p.production_id=?
+                AND NOT EXISTS(SELECT 1 FROM deleted_items d WHERE d.kind='project' AND d.item_id=p.id)
+                ORDER BY p.episode_no,p.id''',(production_id,)).fetchall()
+            episode_document=json.loads(episodes[0]['document']) if episodes else {}
+            context.update(configure_adaptation_format(
+                context,max(1,len(episodes)),episode_document.get('duration',15),
+                episode_document.get('ratio','16:9'),'通用短视频',
+            ))
+            row=c.execute('SELECT * FROM productions WHERE id=?',(production_id,)).fetchone()
+            revision=_persist_production_context(c,row,context)
+            targets=production_event_targets(c,production_id)
+        sources=source_snapshot(c,production_id)
+    for target in targets:s.event(target,{'type':'production','revision':revision})
+    return {**adaptation_bundle(context),'revision':revision,'sourceEventCount':len(sources)}
 
 @app.put('/api/productions/{production_id}/adaptation')
 def save_adaptation(production_id:str,body:AdaptationSave):
@@ -1268,6 +1293,7 @@ def generate_adaptation(production_id:str,body:TextGenerationCreate):
                 'productionId':production_id,'adaptationFingerprint':adaptation_fingerprint(context),
                 'sourceFingerprint':source_fingerprint(sources),'sourceEventIds':[item['id'] for item in sources],
                 'sourceChapterIds':list(dict.fromkeys(item['chapterId'] for item in sources)),
+                'format':format_value,
             },
         })
         result=create_job_record(c,body.project_id,job_body)

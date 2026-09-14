@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BookOpen, FilePlus2, Plus, RefreshCw, Save, Search, Sparkles, Trash2, Upload, X } from "lucide-react";
+import { BookOpen, CheckSquare2, FilePlus2, Plus, RefreshCw, Save, Search, Sparkles, Square, Trash2, Upload, X } from "lucide-react";
 import { episodeSourceReferences, setEpisodeSourceReference } from "../sourceReferences";
 
 type AnyValue = any;
@@ -188,7 +188,7 @@ export function SourceLibraryPage({
       <aside>
         <label className="source-search"><Search size={14}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索章节"/></label>
         <small>{sources.length} 部原著 · {chapters.length} 章</small>
-        <div className="source-selection-actions"><span>已选 {selected.size} 章</span><button className="danger-button" disabled={busy || !selected.size} onClick={() => run(deleteSelectedChapters)}><Trash2 size={14}/>移除所选章节</button></div>
+        <div className="source-selection-actions"><span>已选 {selected.size} 章</span><div><button disabled={busy || !visible.length} onClick={() => setSelected(new Set(visible.map((item) => item.id)))}><CheckSquare2 size={14}/>全选</button><button disabled={busy || !selected.size} onClick={() => setSelected(new Set())}><Square size={14}/>全不选</button><button className="danger-button icon-button" title="移除所选章节" aria-label="移除所选章节" disabled={busy || !selected.size} onClick={() => run(deleteSelectedChapters)}><Trash2 size={14}/></button></div></div>
         {visible.map((item) => <button className={active === item.id ? "active" : ""} key={item.id} onClick={() => setActive(item.id)}><input type="checkbox" checked={selected.has(item.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => setSelected((value) => { const next = new Set(value); event.target.checked ? next.add(item.id) : next.delete(item.id); return next; })}/><span><b>{item.display_no ?? item.chapter_no}. {item.title}</b><small>{item.source_title}</small></span></button>)}
       </aside>
       <main>{chapter ? <>

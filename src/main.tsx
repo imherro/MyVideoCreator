@@ -2379,6 +2379,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             request={api}
             notify={setNotice}
             report={report}
+            onOpenSource={() => activateWorkflowStage("source")}
             onRevision={(nextRevision) => {
               productionRevision.current = nextRevision;
               setProject((currentProject) => currentProject ? { ...currentProject, production_revision: nextRevision } : currentProject);

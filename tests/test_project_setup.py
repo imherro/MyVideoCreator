@@ -41,6 +41,8 @@ def test_project_create_with_setup_fields_owns_data_and_has_no_generation_side_e
         "style": "国风电影写实",
         "ratio": "9:16",
         "duration": 60,
+        "episode_count": 12,
+        "platform": "抖音",
         "brief": "十五秒概念扩展",
         "generation_policy": {
             kind: {"providerId": configured_provider["id"], "modelId": configured_provider["models"][kind]}
@@ -75,6 +77,11 @@ def test_project_create_with_setup_fields_owns_data_and_has_no_generation_side_e
     assert production["name"] == "花信未迟"
     assert stored_context["style"] == payload["style"]
     assert stored_context["generationPolicy"] == payload["generation_policy"]
+    assert stored_context["adaptationPlan"]["format"] == {
+        "episodeCount": 12, "targetDuration": 60.0, "ratio": "9:16", "platform": "抖音",
+    }
+    assert len(stored_context["episodePlans"]) == 12
+    assert all(plan["targetDuration"] == 60 for plan in stored_context["episodePlans"])
 
 
 def test_project_create_name_only_remains_backward_compatible(client):
@@ -85,6 +92,30 @@ def test_project_create_name_only_remains_backward_compatible(client):
     assert project["document"]["style"] == "电影写实"
     assert project["document"]["ratio"] == "16:9"
     assert project["document"]["duration"] == 15
+    adaptation = client.get(f'/api/productions/{project["production_id"]}/adaptation').json()
+    assert adaptation["adaptationPlan"]["format"] == {
+        "episodeCount": 1, "targetDuration": 15.0, "ratio": "16:9", "platform": "通用短视频",
+    }
+    assert len(adaptation["episodePlans"]) == 1
+
+
+def test_legacy_fixed_adaptation_defaults_follow_existing_episode_when_untouched(client):
+    project = client.post("/api/projects", json={
+        "name": "旧项目规格修复", "ratio": "16:9", "duration": 30,
+    }).json()
+    with s.db() as db:
+        row = db.execute("SELECT shared_context FROM productions WHERE id=?", (project["production_id"],)).fetchone()
+        context = json.loads(row["shared_context"])
+        context["adaptationPlan"]["format"] = {
+            "episodeCount": 60, "targetDuration": 60, "ratio": "9:16", "platform": "红果短剧",
+        }
+        context["episodePlans"] = []
+        db.execute("UPDATE productions SET shared_context=? WHERE id=?", (s.dumps(context), project["production_id"]))
+    adaptation = client.get(f'/api/productions/{project["production_id"]}/adaptation').json()
+    assert adaptation["adaptationPlan"]["format"] == {
+        "episodeCount": 1, "targetDuration": 30.0, "ratio": "16:9", "platform": "通用短视频",
+    }
+    assert len(adaptation["episodePlans"]) == 1
 
 
 def test_invalid_generation_policy_leaves_no_partial_rows(client, configured_provider):

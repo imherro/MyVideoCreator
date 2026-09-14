@@ -13,10 +13,12 @@ import {
 test('project setup validates required fields and creates the reviewed API payload',()=>{
   const draft=defaultProjectSetupDraft([{id:'ark',type:'volcengine_ark',models:{text:'t',image:'i',video:'v'}}]);
   assert.deepEqual(validateProjectSetupDraft(draft),['请输入作品名称']);
-  draft.name=' 花信未迟 ';draft.ratio='9:16';draft.duration=60;draft.bible.worldEra='江南';draft.bible.avoidItems='高饱和\n\n磨皮';
+  draft.name=' 花信未迟 ';draft.ratio='9:16';draft.duration=60;draft.episodeCount=12;draft.platform='抖音';draft.bible.worldEra='江南';draft.bible.avoidItems='高饱和\n\n磨皮';
   const payload=projectSetupPayload(draft);
   assert.equal(payload.name,'花信未迟');
   assert.equal(payload.episode_title,'第 01 集');
+  assert.equal(payload.episode_count,12);
+  assert.equal(payload.platform,'抖音');
   assert.deepEqual(payload.generation_policy.text,{providerId:'ark',modelId:'t'});
   assert.deepEqual(payload.film_bible.story,{worldEra:'江南'});
   assert.deepEqual(payload.film_bible.style.avoidItems,['高饱和','磨皮']);
