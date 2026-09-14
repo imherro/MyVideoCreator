@@ -15,6 +15,7 @@ export type TaskCenterRow = {
   shot?: Value;
   providerName: string;
   modelName: string;
+  scope: "production" | "episode";
 };
 
 export type TaskCenterFilters = {
@@ -53,6 +54,9 @@ export function deriveTaskCenterRows(
       const provider = providerMap.get(providerId);
       return {
         job,
+        scope: job.scope === "production" || ["source_analysis", "adaptation_generation"].includes(job.input?.stage)
+          ? "production"
+          : "episode",
         episode: episodeMap.get(job.project_id),
         node,
         shot,
@@ -63,14 +67,19 @@ export function deriveTaskCenterRows(
 }
 
 export function filterTaskCenterRows(rows: TaskCenterRow[], filters: TaskCenterFilters) {
-  return rows.filter(({ job }) =>
-    (!filters.episodeId || job.project_id === filters.episodeId) &&
+  return rows.filter(({ job, scope }) =>
+    (!filters.episodeId || (filters.episodeId === "production" ? scope === "production" : scope === "episode" && job.project_id === filters.episodeId)) &&
     (!filters.kind || job.kind === filters.kind) &&
     (!filters.status || job.status === filters.status),
   );
 }
 
 export function taskShotLabel(row: TaskCenterRow) {
+  if (row.job.input?.stage === "source_analysis") {
+    const title = String(row.job.input?.prompt || "").match(/^章节标题：([^\n]+)/)?.[1]?.trim();
+    return title ? `原著事件提取 · ${title}` : "原著事件提取";
+  }
+  if (row.job.input?.stage === "adaptation_generation") return "整部作品改编策划";
   if (!row.shot) return row.node?.data?.label || row.job.node_id || "未关联节点";
   const raw = row.shot.shot_id || row.shot.id || row.shot.uid;
   return `SHOT ${String(raw || "").replace(/^shot[-_ ]?/i, "") || "?"}`;

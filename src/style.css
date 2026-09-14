@@ -73,6 +73,7 @@
 .episode-selector{position:relative;display:flex;align-items:center;min-width:170px;max-width:270px;margin:0}
 .episode-selector select{height:36px;margin:0;padding:6px 31px 6px 10px;border-color:#343a3d;background:#111517;color:#d7dad8;font-size:12px;appearance:none;white-space:nowrap;text-overflow:ellipsis}
 .episode-selector>svg{position:absolute;right:9px;pointer-events:none;color:#8e9799}
+.production-scope-badge{display:inline-flex;align-items:center;height:36px;padding:0 13px;border:1px solid #4a4437;border-radius:7px;background:#28251f;color:#dfbe83;font-size:12px;white-space:nowrap}
 .sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
 .production-library{display:grid;gap:14px}
 .production-group{overflow:hidden;border:1px solid #394145;border-radius:10px;background:#202629}

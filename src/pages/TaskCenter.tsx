@@ -120,7 +120,7 @@ export function TaskCenter({
       <button className="quiet" disabled={loading} onClick={() => void load()}><RefreshCw className={loading ? "spin" : ""} size={15}/>刷新</button>
     </header>
     <div className="task-center-filters" aria-label="任务筛选">
-      <label>制作集<select value={filters.episodeId} onChange={(event) => setFilters((value) => ({ ...value, episodeId: event.target.value }))}><option value="">全部制作集</option>{episodes.map((episode) => <option key={episode.id} value={episode.id}>EP{String(episode.episode_no).padStart(2,"0")} · {episode.episode_title || episode.name}</option>)}</select></label>
+      <label>任务范围<select value={filters.episodeId} onChange={(event) => setFilters((value) => ({ ...value, episodeId: event.target.value }))}><option value="">全部范围</option><option value="production">整部作品</option>{episodes.map((episode) => <option key={episode.id} value={episode.id}>EP{String(episode.episode_no).padStart(2,"0")} · {episode.episode_title || episode.name}</option>)}</select></label>
       <label>类型<select value={filters.kind} onChange={(event) => setFilters((value) => ({ ...value, kind: event.target.value }))}><option value="">全部类型</option>{kinds.map((kind) => <option key={kind} value={kind}>{kindLabels[kind] || kind}</option>)}</select></label>
       <label>状态<select value={filters.status} onChange={(event) => setFilters((value) => ({ ...value, status: event.target.value }))}><option value="">全部状态</option>{statuses.map((status) => <option key={status} value={status}>{statusLabels[status] || status}</option>)}</select></label>
       <span>{visible.length} / {rows.length} 个任务</span>
@@ -133,7 +133,7 @@ export function TaskCenter({
         <header>{job.status === "interrupted"
           ? <button className={`job-state ${job.status} task-resume-state`} title={job.provider_job_id ? "继续查询原上游任务" : "使用已保存的输入重新排队"} onClick={() => void resumeJob(job)}><StatusIcon status={job.status}/>{statusLabels[job.status]}</button>
           : <span className={`job-state ${job.status}`}><StatusIcon status={job.status}/>{statusLabels[job.status] || job.status}</span>}<small>{new Date(job.created * 1000).toLocaleString()}</small></header>
-        <div className="task-card-title"><b>{kindLabels[job.kind] || job.kind} · {taskShotLabel(row)}</b><span>EP{String(row.episode?.episode_no || 1).padStart(2,"0")} · {row.episode?.episode_title || row.episode?.name || job.project_id}</span></div>
+        <div className="task-card-title"><b>{kindLabels[job.kind] || job.kind} · {taskShotLabel(row)}</b><span>{row.scope === "production" ? `整部作品 · ${productionName}` : `EP${String(row.episode?.episode_no || 1).padStart(2,"0")} · ${row.episode?.episode_title || row.episode?.name || job.project_id}`}</span></div>
         <dl><div><dt>Provider</dt><dd>{row.providerName}</dd></div><div><dt>Model</dt><dd>{row.modelName}</dd></div><div><dt>Node</dt><dd>{job.node_id}</dd></div>{job.provider_job_id && <div><dt>上游任务</dt><dd>{job.provider_job_id}</dd></div>}</dl>
         {job.phase && <p>{job.phase}</p>}
         <JobProgress job={job}/>

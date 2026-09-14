@@ -102,6 +102,8 @@ def test_import_120_chapters_and_create_recoverable_text_jobs_only(source_client
     jobs = first.json()["jobs"]
     assert len(jobs) == 120
     assert {item["kind"] for item in jobs} == {"text"}
+    assert {item["scope"] for item in jobs} == {"production"}
+    assert {item["production_id"] for item in jobs} == {production["id"]}
     assert all(item["input"]["stage"] == "source_analysis" for item in jobs)
     assert all(item["input"]["source_event_extraction"]["chapterId"] in body["chapter_ids"] for item in jobs)
     with s.db() as connection:

@@ -11,6 +11,13 @@ export const WORKFLOW_STAGES = [
 ] as const;
 
 export type WorkflowStage = (typeof WORKFLOW_STAGES)[number]["id"];
+export type WorkflowScope = "production" | "episode";
+
+const productionStages = new Set<WorkflowStage>(["overview", "source", "adaptation", "art"]);
+
+export function workflowStageScope(stage: WorkflowStage): WorkflowScope {
+  return productionStages.has(stage) ? "production" : "episode";
+}
 
 const stageIds = new Set<string>(WORKFLOW_STAGES.map((stage) => stage.id));
 

@@ -60,8 +60,19 @@ def init():
         CREATE INDEX IF NOT EXISTS deleted_items_project ON deleted_items(project_id,deleted_at);
         ''')
         columns={row['name'] for row in c.execute('PRAGMA table_info(jobs)')}
-        for column,definition in (('started','REAL'),('finished','REAL'),('telemetry','TEXT')):
+        for column,definition in (
+            ('started','REAL'),('finished','REAL'),('telemetry','TEXT'),
+            ('scope',"TEXT NOT NULL DEFAULT 'episode'"),('production_id','TEXT'),
+        ):
             if column not in columns:c.execute(f'ALTER TABLE jobs ADD COLUMN {column} {definition}')
+        c.execute('''UPDATE jobs SET production_id=(SELECT production_id FROM projects WHERE projects.id=jobs.project_id)
+            WHERE production_id IS NULL''')
+        for job in c.execute("SELECT id,input FROM jobs WHERE scope='episode'").fetchall():
+            try: stage=json.loads(job['input']).get('stage')
+            except (TypeError,ValueError): stage=None
+            if stage in ('source_analysis','adaptation_generation'):
+                c.execute("UPDATE jobs SET scope='production' WHERE id=?",(job['id'],))
+        c.execute('CREATE INDEX IF NOT EXISTS jobs_production_created ON jobs(production_id,created)')
         asset_columns={row['name'] for row in c.execute('PRAGMA table_info(assets)')}
         if 'category' not in asset_columns:c.execute("ALTER TABLE assets ADD COLUMN category TEXT NOT NULL DEFAULT 'other'")
         if 'source' not in asset_columns:c.execute("ALTER TABLE assets ADD COLUMN source TEXT NOT NULL DEFAULT 'uploaded'")

@@ -4,6 +4,7 @@ import {
   WORKFLOW_STAGES,
   defaultViewForStage,
   parseWorkflowStage,
+  workflowStageScope,
   workflowStageUrl,
 } from '../src/app/workflow.ts';
 import {planGlobalPanelAction} from '../src/app/globalNavigation.ts';
@@ -30,6 +31,11 @@ test('workflow stages mount the existing workspace views',()=>{
   assert.equal(defaultViewForStage('storyboard'),'shots');
   assert.equal(defaultViewForStage('editor'),'editor');
   assert.equal(defaultViewForStage('canvas'),'canvas');
+});
+
+test('workflow stages separate production planning from episode making',()=>{
+  for (const stage of ['overview','source','adaptation','art']) assert.equal(workflowStageScope(stage),'production');
+  for (const stage of ['script','storyboard','video','editor','canvas']) assert.equal(workflowStageScope(stage),'episode');
 });
 
 test('global trash navigation requests fresh server state before display',()=>{

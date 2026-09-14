@@ -855,8 +855,12 @@ def create_job_record(c,pid,body):
         if selected and selected['type']=='minimax':
             from .minimax_video import first_frame
             first_frame(asset)
+    owner=c.execute('SELECT production_id FROM projects WHERE id=?',(pid,)).fetchone()
+    if not owner:raise HTTPException(404,'制作集不存在')
+    scope='production' if body.input.get('stage') in ('source_analysis','adaptation_generation') else 'episode'
     jid=s.uid('job-'); now=time.time()
-    c.execute('INSERT INTO jobs(id,submission_id,project_id,node_id,kind,status,input,created,updated) VALUES(?,?,?,?,?,?,?,?,?)',(jid,body.submission_id,pid,body.node_id,body.kind,'queued',s.dumps(body.input),now,now))
+    c.execute('''INSERT INTO jobs(id,submission_id,project_id,node_id,kind,status,input,created,updated,scope,production_id)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?)''',(jid,body.submission_id,pid,body.node_id,body.kind,'queued',s.dumps(body.input),now,now,scope,owner['production_id']))
     if selected:
         c.execute('INSERT INTO job_private VALUES(?,?)',(jid,s.dumps(selected)))
     return s.unpack(c.execute('SELECT * FROM jobs WHERE id=?',(jid,)).fetchone())

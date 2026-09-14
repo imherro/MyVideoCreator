@@ -88,7 +88,7 @@ export function TaskDetailPage({ jobId, request }: { jobId: string; request: (pa
       </section>
       <section className="task-detail-card">
         <h2>运行状态</h2><JobProgress job={job}/>
-        <dl className="task-detail-times"><div><dt>创建</dt><dd>{displayTime(job.created)}</dd></div><div><dt>开始</dt><dd>{displayTime(job.started)}</dd></div><div><dt>更新</dt><dd>{displayTime(job.updated)}</dd></div><div><dt>完成</dt><dd>{displayTime(job.finished)}</dd></div><div><dt>节点</dt><dd>{job.node_id}</dd></div><div><dt>远程任务 ID</dt><dd>{job.provider_job_id || "—"}</dd></div></dl>
+        <dl className="task-detail-times"><div><dt>创建</dt><dd>{displayTime(job.created)}</dd></div><div><dt>开始</dt><dd>{displayTime(job.started)}</dd></div><div><dt>更新</dt><dd>{displayTime(job.updated)}</dd></div><div><dt>完成</dt><dd>{displayTime(job.finished)}</dd></div><div><dt>任务范围</dt><dd>{job.scope === "production" ? "整部作品" : "单集制作"}</dd></div><div><dt>节点</dt><dd>{job.node_id}</dd></div><div><dt>远程任务 ID</dt><dd>{job.provider_job_id || "—"}</dd></div></dl>
         {job.error && <div className="error"><b>错误信息</b><pre>{job.error}</pre></div>}
       </section>
       <section className="task-detail-card">

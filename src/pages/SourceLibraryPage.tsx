@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BookOpen, CheckSquare2, FilePlus2, Plus, RefreshCw, Save, Search, Sparkles, Square, Trash2, Upload, X } from "lucide-react";
-import { episodeSourceReferences, setEpisodeSourceReference } from "../sourceReferences";
 
 type AnyValue = any;
 type CreateDialog = { mode: "source" | "chapter"; sourceId?: string; sourceName?: string };
 
 export function SourceLibraryPage({
-  productionId, projectId, episodeNo, episodeTitle, providers, defaultTarget, refreshKey = 0, request, notify, report,
+  productionId, projectId, providers, defaultTarget, refreshKey = 0, request, notify, report,
 }: {
-  productionId: string; projectId: string; episodeNo: number; episodeTitle: string;
+  productionId: string; projectId: string;
   providers: AnyValue[]; defaultTarget?: AnyValue; refreshKey?: number;
   request: (path: string, options?: RequestInit) => Promise<AnyValue>;
   notify: (message: string) => void; report: (error: unknown) => void;
@@ -16,7 +15,6 @@ export function SourceLibraryPage({
   const [sources, setSources] = useState<AnyValue[]>([]);
   const [chapters, setChapters] = useState<AnyValue[]>([]);
   const [events, setEvents] = useState<AnyValue[]>([]);
-  const [adaptation, setAdaptation] = useState<AnyValue | null>(null);
   const [active, setActive] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
@@ -34,20 +32,16 @@ export function SourceLibraryPage({
   const [model, setModel] = useState(defaultTarget?.modelId || "");
   const chapter = chapters.find((item) => item.id === active);
   const activeSource = sources.find((item) => item.id === chapter?.source_id) || sources[0];
-  const currentPlan = adaptation?.episodePlans?.find((item: AnyValue) => item.episodeNo === episodeNo);
-  const currentReferences = new Set(episodeSourceReferences(adaptation, episodeNo));
 
   async function load() {
-    const [nextSources, nextChapters, nextEvents, nextAdaptation] = await Promise.all([
+    const [nextSources, nextChapters, nextEvents] = await Promise.all([
       request(`/productions/${productionId}/sources`),
       request(`/productions/${productionId}/chapters`),
       request(`/productions/${productionId}/source-events`),
-      request(`/productions/${productionId}/adaptation`),
     ]);
     setSources(nextSources);
     setChapters(nextChapters);
     setEvents(nextEvents);
-    setAdaptation(nextAdaptation);
     setActive((value) => value && nextChapters.some((item: AnyValue) => item.id === value) ? value : nextChapters[0]?.id || "");
   }
 
@@ -140,20 +134,6 @@ export function SourceLibraryPage({
       notify(`已将 ${count} 个章节移入回收站`);
     } finally { setBusy(false); }
   }
-  async function saveEpisodeReferences() {
-    if (!adaptation || !currentPlan) return;
-    setBusy(true);
-    try {
-      const saved = await request(`/productions/${productionId}/adaptation`, { method: "PUT", body: JSON.stringify({
-        revision: adaptation.revision,
-        adaptationPlan: adaptation.adaptationPlan,
-        episodePlans: adaptation.episodePlans,
-        monetizationPlan: adaptation.monetizationPlan,
-      }) });
-      setAdaptation(saved);
-      notify(`EP${String(episodeNo).padStart(2, "0")} 的原著章节引用已保存`);
-    } finally { setBusy(false); }
-  }
   async function extract() {
     if (!selected.size) return;
     const provider = textProviders.find((item) => item.id === providerId);
@@ -174,7 +154,7 @@ export function SourceLibraryPage({
   const visible = chapters.filter((item) => !query || item.title.includes(query) || item.content.includes(query));
   return <section className="source-library-page">
     <header className="source-library-header">
-      <div><span className="eyebrow">PRODUCTION SOURCE LIBRARY</span><h1>整部作品原著库</h1><p>Production 共享资料 · 切换制作集不会改变原著；右侧可设置当前集引用的章节。</p></div>
+      <div><span className="eyebrow">PRODUCTION SOURCE LIBRARY</span><h1>整部作品原著库</h1><p>Production 共享资料 · 章节与分集的对应关系在改编策划和单集剧本中设置。</p></div>
       <div className="settings-actions">
         <button onClick={() => run(load)} disabled={busy}><RefreshCw size={15}/>刷新</button>
         <button onClick={() => fileRef.current?.click()} disabled={busy}><Upload size={15}/>导入 TXT / Markdown</button>
@@ -197,10 +177,7 @@ export function SourceLibraryPage({
         <h3>已提取事件</h3>{events.filter((item) => item.chapter_id === chapter.id).map((item) => <article className="source-event" key={item.id}><b>{item.event_order}. {item.summary}</b><small>{item.importance} · {item.emotion || "无情绪标注"} · {item.characters.join("、") || "无明确人物"}</small></article>)}
       </> : <div className="empty-state"><BookOpen/><h3>导入或新建原著</h3></div>}</main>
       <aside className="source-analysis">
-        <section className="episode-source-map"><h3>当前集引用</h3><p>EP{String(episodeNo).padStart(2, "0")} · {episodeTitle}</p>
-          {currentPlan ? <><div className="episode-source-checks">{chapters.map((item) => <label className="check-label" key={item.id}><input type="checkbox" checked={currentReferences.has(item.id)} onChange={(event) => setAdaptation((value: AnyValue) => setEpisodeSourceReference(value, episodeNo, item.id, event.target.checked))}/><span>{item.source_title}<b>{item.display_no ?? item.chapter_no}. {item.title}</b></span></label>)}</div><button disabled={busy} onClick={() => run(saveEpisodeReferences)}><Save size={14}/>保存本集引用</button></> : <small>尚未建立 EP{String(episodeNo).padStart(2, "0")} 的分集规划。请先进入“改编策划”建立规划。</small>}
-        </section>
-        <hr/><h3>AI 事件提取</h3><p>已选 {selected.size} 章。任务失败时保留已有事件。</p>
+        <h3>AI 事件提取</h3><p>作品级分析 · 已选 {selected.size} 章。任务失败时保留已有事件。</p>
         <label>文本服务<select value={providerId} onChange={(event) => { setProviderId(event.target.value); const provider = textProviders.find((item) => item.id === event.target.value); setModel(provider?.models?.text || provider?.model || ""); }}>{textProviders.map((provider) => <option key={provider.id} value={provider.id}>{provider.local ? "本地" : "云端"} · {provider.name}</option>)}</select></label>
         <label>模型 ID<input value={model} placeholder="本地留空使用默认模型" onChange={(event) => setModel(event.target.value)}/></label>
         <button disabled={busy || !selected.size} onClick={() => run(extract)}><Sparkles size={15}/>提取所选章节事件</button>

@@ -126,6 +126,7 @@ def test_script_generation_requires_explicit_approval_and_selected_set_isolated(
     assert first.status_code == second.status_code == 200, first.text
     assert [job["id"] for job in first.json()["jobs"]] == [job["id"] for job in second.json()["jobs"]]
     assert {job["kind"] for job in first.json()["jobs"]} == {"text"}
+    assert {job["scope"] for job in first.json()["jobs"]} == {"episode"}
     assert {job["input"]["episode_script_generation"]["episodeNo"] for job in first.json()["jobs"]} == {5, 8, 12}
 
     worker = Worker()

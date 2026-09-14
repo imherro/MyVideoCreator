@@ -59,3 +59,16 @@ test("task center filters reuse the six persisted job states", () => {
     ["failed"],
   );
 });
+
+test("production jobs are labelled and filtered independently from their storage episode", () => {
+  const jobs = [{
+    id: "source", project_id: "ep-2", node_id: "source-chapter:c1", kind: "text",
+    status: "succeeded", created: 3, scope: "production",
+    input: { stage: "source_analysis", prompt: "章节标题：第五章\n\n原文：内容" },
+  }];
+  const rows = deriveTaskCenterRows(jobs, episodes, documents, []);
+  assert.equal(rows[0].scope, "production");
+  assert.equal(taskShotLabel(rows[0]), "原著事件提取 · 第五章");
+  assert.deepEqual(filterTaskCenterRows(rows, { episodeId: "production", kind: "", status: "" }).length, 1);
+  assert.deepEqual(filterTaskCenterRows(rows, { episodeId: "ep-2", kind: "", status: "" }).length, 0);
+});

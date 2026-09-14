@@ -156,6 +156,7 @@ import { WorkflowStageNav } from "./app/WorkflowStageNav";
 import {
   defaultViewForStage,
   parseWorkflowStage,
+  workflowStageScope,
   workflowStageUrl,
   type WorkflowStage,
 } from "./app/workflow";
@@ -2040,6 +2041,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   const currentProduction =
     productions.find((item) => item.id === project.production_id) || null;
   const currentEpisodes = episodesForProduction(projects, project.production_id);
+  const currentWorkflowScope = workflowStageScope(workflowStage);
   const projectBibleFields = bibleFields(doc);
   const filmBiblePanelProps: React.ComponentProps<typeof FilmBiblePanel> = {
     visual: visualBibleOf(doc),
@@ -2184,13 +2186,13 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           项目 · {currentProduction?.name || project.name}
           <ChevronDown size={14} />
         </button>
-        <EpisodeSelector
+        {currentWorkflowScope === "production" ? <span className="production-scope-badge">整部作品</span> : <EpisodeSelector
           episode={project}
           episodes={currentEpisodes}
           onSelect={(projectId) => openProject(projectId).catch(report)}
-        />
-        <button className="project-settings-button" onClick={() => { setProjectSettingsTab("episode"); setPanel("projectInfo"); }}>
-          <FileText size={15} />当前集设置
+        />}
+        <button className="project-settings-button" onClick={() => { setProjectSettingsTab(currentWorkflowScope); setPanel("projectInfo"); }}>
+          <FileText size={15} />{currentWorkflowScope === "production" ? "作品设置" : "当前集设置"}
         </button>
         <span
           className={"save-status " + (saved === "保存失败" ? "danger" : "")}
@@ -2346,7 +2348,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         </div>
         {workflowStage === "overview" ? (
           <WorkflowOverview
-            projectName={project.name}
+            projectName={currentProduction?.name || project.name}
             duration={doc.duration}
             ratio={doc.ratio}
             style={doc.style}
@@ -2361,8 +2363,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           <SourceLibraryPage
             productionId={project.production_id}
             projectId={project.id}
-            episodeNo={project.episode_no}
-            episodeTitle={project.episode_title || project.name}
             providers={config.providers}
             defaultTarget={(doc as Any).generationPolicy?.text}
             refreshKey={sourceLibraryRevision}
@@ -2389,6 +2389,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         ) : workflowStage === "script" ? (
           <ScriptRoomPage
             productionId={project.production_id}
+            currentEpisodeNo={project.episode_no}
             providers={config.providers}
             defaultTarget={(doc as Any).generationPolicy?.text}
             request={api}
@@ -2397,6 +2398,10 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             onChanged={async (changedProjectId) => {
               await refreshProductionHierarchy();
               if (changedProjectId === project.id) await openProject(project.id);
+            }}
+            onSelectEpisode={async (episodeNo) => {
+              const episode = currentEpisodes.find((item) => item.episode_no === episodeNo);
+              if (episode && episode.id !== project.id) await openProject(episode.id);
             }}
           />
         ) : workflowStage === "art" ? (

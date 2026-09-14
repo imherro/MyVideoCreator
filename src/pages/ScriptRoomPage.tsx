@@ -5,16 +5,17 @@ import { STATUS_LABELS, normalizeEpisodeSelection, splitList } from "../adaptati
 type Value = Record<string, any>;
 
 export function ScriptRoomPage({
-  productionId, providers, defaultTarget, request, notify, report, onChanged,
+  productionId, currentEpisodeNo, providers, defaultTarget, request, notify, report, onChanged, onSelectEpisode,
 }: {
-  productionId: string; providers: Value[]; defaultTarget?: Value;
+  productionId: string; currentEpisodeNo: number; providers: Value[]; defaultTarget?: Value;
   request: (path: string, options?: RequestInit) => Promise<any>;
   notify: (message: string) => void; report: (error: unknown) => void;
   onChanged: (projectId?: string) => void | Promise<void>;
+  onSelectEpisode: (episodeNo: number) => void | Promise<void>;
 }) {
   const [items, setItems] = useState<Value[]>([]);
   const [chapters, setChapters] = useState<Value[]>([]);
-  const [active, setActive] = useState(1);
+  const [active, setActive] = useState(currentEpisodeNo);
   const [draft, setDraft] = useState<Value | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -39,7 +40,10 @@ export function ScriptRoomPage({
     setActive(episodeNo);
     setDraft(await request(`/productions/${productionId}/episode-scripts/${episodeNo}`));
   }
-  useEffect(() => { setItems([]); setDraft(null); setSelected(new Set()); void loadList(1).catch(report); }, [productionId]);
+  useEffect(() => { setItems([]); setDraft(null); setSelected(new Set()); void loadList(currentEpisodeNo).catch(report); }, [productionId]);
+  useEffect(() => {
+    if (currentEpisodeNo !== active) void selectEpisode(currentEpisodeNo).catch(report);
+  }, [currentEpisodeNo]);
   useEffect(() => {
     setProviderId(defaultTarget?.providerId || "local");
     setModel(defaultTarget?.modelId || "");
@@ -97,7 +101,7 @@ export function ScriptRoomPage({
     <div className="script-room-layout">
       <aside className="script-episode-list"><header><b>分集</b><small>勾选后批量生成</small></header>{items.map((value) => <div className={active === value.episodeNo ? "active" : ""} key={value.episodeNo}>
         <input type="checkbox" checked={selected.has(value.episodeNo)} onChange={(e) => setSelected((current) => { const next = new Set(current); e.target.checked ? next.add(value.episodeNo) : next.delete(value.episodeNo); return next; })} />
-        <button onClick={() => run(() => selectEpisode(value.episodeNo))}><b>EP{String(value.episodeNo).padStart(2, "0")}</b><span>{value.episodeTitle}</span><small className={value.script?.status || value.plan.status}>{STATUS_LABELS[value.script?.status || value.plan.status]}</small></button>
+        <button onClick={() => run(async () => { await onSelectEpisode(value.episodeNo); await selectEpisode(value.episodeNo); })}><b>EP{String(value.episodeNo).padStart(2, "0")}</b><span>{value.episodeTitle}</span><small className={value.script?.status || value.plan.status}>{STATUS_LABELS[value.script?.status || value.plan.status]}</small></button>
       </div>)}</aside>
       <main>{draft && plan ? <>
         <div className="script-summary-strip"><span className={`workflow-status ${draft.status}`}>{STATUS_LABELS[draft.status]}</span><span>目标 {plan.targetDuration} 秒</span><span>{plan.paywallRole}</span><span>{draft.project_id ? "已建立 Episode" : "首次保存或生成时建立 Episode"}</span></div>
