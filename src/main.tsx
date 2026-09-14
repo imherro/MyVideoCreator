@@ -830,6 +830,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       setSyncFailure((previous) =>
         previous?.kind === "sse" ? null : previous,
       );
+      const pid = current.current.project?.id;
+      if (pid) refresh(pid).catch(() => {});
     };
     events.onmessage = (e) => {
       try {

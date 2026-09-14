@@ -1659,12 +1659,25 @@ def resume(jid:str):
     s.event(job['project_id'],{'type':'job','id':jid})
     return read_job(jid)
 
+def _event_cursor(latest, after=None, last_event_id=None, backlog_limit=500):
+    """Start live clients near the head instead of replaying an unbounded log."""
+    candidates = []
+    for value in (after, last_event_id):
+        try:
+            if value is not None:
+                candidates.append(max(0, int(value)))
+        except (TypeError, ValueError):
+            pass
+    requested = max(candidates, default=latest)
+    return latest if latest - requested > backlog_limit else min(requested, latest)
+
+
 @app.get('/api/events')
-async def events(request:Request,after:int=0):
+async def events(request:Request,after:int|None=None):
     async def stream():
-        cursor=after
-        try: cursor=max(cursor,int(request.headers.get('last-event-id','0')))
-        except ValueError: pass
+        with s.db() as c:
+            latest = c.execute('SELECT COALESCE(MAX(id),0) latest FROM events').fetchone()['latest']
+        cursor = _event_cursor(latest, after, request.headers.get('last-event-id'))
         while not await request.is_disconnected():
             with s.db() as c:
                 rows=c.execute('SELECT * FROM events WHERE id>? ORDER BY id LIMIT 100',(cursor,)).fetchall()
