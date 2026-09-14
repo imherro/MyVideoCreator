@@ -61,12 +61,6 @@ export function RunWorkflow({
       wanted.has(node.id) &&
       ["text", "storyboard", "image", "video"].includes(node.data.kind),
   );
-  const cloudNodes = planned.filter(
-    (node) =>
-      node.data.provider &&
-      node.data.provider !== "local" &&
-      !providers.find((provider) => provider.id === node.data.provider)?.local,
-  );
   return (
     <>
       <p className="muted">
@@ -108,7 +102,6 @@ export function RunWorkflow({
             await onRun({
               node_ids: scope === "all" ? undefined : [selection],
               include_descendants: scope === "branch",
-              allow_cloud: cloudNodes.length > 0,
             });
           } catch (reason: any) {
             setError(reason.message);

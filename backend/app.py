@@ -41,9 +41,6 @@ async def lifespan(app):
 app = FastAPI(title='安影 AI 视频工作室',lifespan=lifespan,docs_url=None,redoc_url=None)
 PUBLIC = {'/api/health','/api/auth/status','/api/auth/setup','/api/auth/login'}
 
-def local(request):
-    return request.client and request.client.host in ('127.0.0.1','::1','testclient')
-
 @app.middleware('http')
 async def auth(request: Request, call_next):
     if request.url.path.startswith('/api/'):
@@ -77,7 +74,7 @@ def auth_status(request: Request):
     token = hashlib.sha256(request.cookies.get('mvc_session','').encode()).hexdigest()
     with s.db() as c:
         row = c.execute('SELECT expires FROM sessions WHERE token=?',(token,)).fetchone()
-    return {'configured':bool(s.get_setting('password')),'authenticated':bool(row and row['expires']>time.time()),'can_setup':bool(local(request))}
+    return {'configured':bool(s.get_setting('password')),'authenticated':bool(row and row['expires']>time.time()),'can_setup':True}
 
 class Password(BaseModel):
     password: str = Field(min_length=8,max_length=128)
@@ -94,8 +91,6 @@ def session(response, request):
 
 @app.post('/api/auth/setup')
 def setup(body:Password,request:Request,response:Response):
-    if not local(request):
-        raise HTTPException(403,'请先在 GPU 主机上创建工作室密码。')
     salt = secrets.token_hex(16)
     encoded = s.dumps({'salt':salt,'hash':password_hash(body.password,salt)})
     with s.db() as c:
@@ -837,7 +832,6 @@ def create_job_record(c,pid,body):
         if selected.get('type')=='volcengine_ark':
             from .providers.volcengine_ark import model_for
             if not model_for(selected,body.kind):raise ValueError('请先配置火山方舟对应类型的模型 ID')
-        if not selected.get('local',False) and body.input.get('allow_cloud') is not True: raise ValueError('请选择允许使用此云端服务后再提交')
     if selected and selected['type']=='minimax':
         from .minimax_video import payload
         if body.kind!='video':raise ValueError('MiniMax 原生服务仅支持视频节点')
@@ -946,7 +940,6 @@ class SourceExtractionCreate(BaseModel):
     chapter_ids:list[str]=Field(min_length=1,max_length=500)
     provider:str
     model:str
-    allow_cloud:bool=False
     submission_id:str=Field(min_length=8,max_length=80)
 
 def source_document_row(production_id,source_id):
@@ -1156,7 +1149,7 @@ def extract_source_events(production_id:str,body:SourceExtractionCreate):
             chapter=chapter_map[chapter_id]
             job_body=JobCreate(node_id='source-chapter:'+chapter_id,kind='text',
                 submission_id=body.submission_id+':'+chapter_id[:24],input={
-                    'provider':body.provider,'model':body.model,'allow_cloud':body.allow_cloud,
+                    'provider':body.provider,'model':body.model,
                     'stage':'source_analysis','prompt':f'章节标题：{chapter["title"]}\n\n原文：\n{chapter["content"]}',
                     'source_event_extraction':{'productionId':production_id,'chapterId':chapter_id,'chapterRevision':chapter['revision']},
                 })
@@ -1178,7 +1171,6 @@ class TextGenerationCreate(BaseModel):
     project_id:str
     provider:str
     model:str=''
-    allow_cloud:bool=False
     submission_id:str=Field(min_length=8,max_length=100)
 
 class ScriptSave(BaseModel):
@@ -1198,7 +1190,6 @@ class ScriptGenerationCreate(BaseModel):
     episode_nos:list[int]=Field(min_length=1,max_length=500)
     provider:str
     model:str=''
-    allow_cloud:bool=False
     submission_id:str=Field(min_length=8,max_length=100)
 
 def production_event_targets(connection,production_id):
@@ -1303,7 +1294,7 @@ def generate_adaptation(production_id:str,body:TextGenerationCreate):
         prompt='''请依据原著事件生成完整改编策划。所有 sourceEventIds/sourceChapterRefs 只能使用输入中已有 ID。
 目标规格：'''+s.dumps(format_value)+'\n原著事件：\n'+s.dumps(sources)
         job_body=JobCreate(node_id='adaptation:'+production_id,kind='text',submission_id=body.submission_id,input={
-            'provider':body.provider,'model':body.model,'allow_cloud':body.allow_cloud,
+            'provider':body.provider,'model':body.model,
             'stage':'adaptation_generation','prompt':prompt,'max_tokens':12000,
             'adaptation_generation':{
                 'productionId':production_id,'adaptationFingerprint':adaptation_fingerprint(context),
@@ -1431,7 +1422,7 @@ def generate_episode_scripts(production_id:str,body:ScriptGenerationCreate):
                 '\n原著章节：'+s.dumps(chapters)+'\n本集现有剧本（为空则首次生成）：'+s.dumps(script_to_api(script))
             job_body=JobCreate(node_id='episode-script:'+project_row['id'],kind='text',
                 submission_id=body.submission_id+f':{episode_no:03d}',input={
-                    'provider':body.provider,'model':body.model,'allow_cloud':body.allow_cloud,
+                    'provider':body.provider,'model':body.model,
                     'stage':'script_generation','prompt':prompt,'max_tokens':12000,
                     'episode_script_generation':{
                         'productionId':production_id,'episodeNo':episode_no,
@@ -1461,7 +1452,6 @@ async def run_workflow(pid:str,request:Request):
         if data.get('kind') not in ('text','storyboard','image','video'): continue
         provider=providers.get(data.get('provider','local'))
         if data.get('provider','local')!='local' and not provider: raise ValueError('部分节点的模型服务未配置')
-        if provider and not provider.get('local') and not body.get('allow_cloud'): raise ValueError('批次包含云端模型，请明确允许云端调用或更换为本地模型')
     for node,parents in plan:
         data=node.get('data',{})
         if data.get('kind') not in ('text','storyboard','image','video'): continue
@@ -1567,7 +1557,6 @@ async def run_workflow(pid:str,request:Request):
         if not data.get('prompt','').strip():
             if not parents: raise ValueError(f'节点 {data.get("label",node["id"])} 缺少输入')
             data['prompt']={'text':'根据上游信息编写剧本','storyboard':'将上游剧本拆解为结构化分镜','image':'生成上游描述的电影画面','video':'根据上游画面与描述生成动态镜头'}[kind]
-        data['allow_cloud']=bool(body.get('allow_cloud'))
         data['project_style']=p['document'].get('style','')
         data['ratio']=p['document'].get('ratio','16:9')
         if kind in ('text','storyboard'):

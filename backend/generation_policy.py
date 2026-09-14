@@ -60,10 +60,13 @@ def resolve_generation_target(kind, override, project_policy, providers, local_m
             raise ValueError(f'{source} 配置的模型服务不支持 {kind}')
         model = candidate.get('modelId') or (provider.get('models') or {}).get(kind) or provider.get('model', '')
         return {'providerId': provider_id, 'modelId': model, 'source': source}
+    provider = next((p for p in providers if not p.get('local') and (not p.get('kind') or p.get('kind') == kind)), None)
+    if provider:
+        return {'providerId': provider['id'], 'modelId': (provider.get('models') or {}).get(kind) or provider.get('model', ''), 'source': 'system'}
     if kind == 'text':
         model = (local_models or [{}])[0].get('id', '') if local_models else ''
         return {'providerId': 'local', 'modelId': model, 'source': 'system'}
-    provider = next((p for p in providers if p.get('local') and p.get('kind') == kind), None) or next((p for p in providers if p.get('kind') == kind), None)
+    provider = next((p for p in providers if p.get('kind') == kind), None)
     if not provider:
         return {'providerId': '', 'modelId': '', 'source': 'system'}
     return {'providerId': provider['id'], 'modelId': (provider.get('models') or {}).get(kind) or provider.get('model', ''), 'source': 'system'}

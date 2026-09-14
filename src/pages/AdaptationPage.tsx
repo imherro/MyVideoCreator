@@ -35,8 +35,11 @@ export function AdaptationPage({
     () => [{ id: "local", name: "本地 llama.cpp", local: true, model: "" }, ...providers.filter((p) => !p.kind || p.kind === "text")],
     [providers],
   );
-  const [providerId, setProviderId] = useState(defaultTarget?.providerId || "local");
-  const [model, setModel] = useState(defaultTarget?.modelId || "");
+  const fallbackTextProvider = textProviders.find((provider) => !provider.local) || textProviders[0];
+  const defaultProviderId = defaultTarget?.providerId || fallbackTextProvider.id;
+  const defaultModelId = defaultTarget?.modelId || fallbackTextProvider.models?.text || fallbackTextProvider.model || "";
+  const [providerId, setProviderId] = useState(defaultProviderId);
+  const [model, setModel] = useState(defaultModelId);
 
   async function load() {
     const [value, sourceChapters] = await Promise.all([
@@ -50,8 +53,8 @@ export function AdaptationPage({
   }
   useEffect(() => { setDraft(null); setActive(1); void load().catch(report); }, [productionId, refreshKey]);
   useEffect(() => {
-    setProviderId(defaultTarget?.providerId || "local");
-    setModel(defaultTarget?.modelId || "");
+    setProviderId(defaultProviderId);
+    setModel(defaultModelId);
   }, [productionId, defaultTarget?.providerId, defaultTarget?.modelId]);
   function run(action: () => Promise<void>) {
     setBusy(true);
@@ -95,7 +98,7 @@ export function AdaptationPage({
     onRevision(saved.revision);
     await request(`/productions/${productionId}/adaptation/generate`, {
       method: "POST",
-      body: JSON.stringify({ project_id: projectId, provider: providerId, model: modelId, allow_cloud: providerId !== "local" && provider?.local !== true, submission_id: `adaptation-${Date.now()}` }),
+      body: JSON.stringify({ project_id: projectId, provider: providerId, model: modelId, submission_id: `adaptation-${Date.now()}` }),
     });
     notify("已创建改编策划任务；完成后本页会自动刷新");
   }

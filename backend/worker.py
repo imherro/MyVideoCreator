@@ -179,7 +179,6 @@ class Worker:
         else:
             provider=json.loads(snapshot['provider']) if snapshot else None
             if not provider: raise ValueError('模型服务配置不存在')
-            if not provider.get('local') and not inp.get('allow_cloud'): raise ValueError('未允许使用云端模型')
         if provider['type']=='replicate':
             from .replicate_api import execute
             return execute(self,job,provider)

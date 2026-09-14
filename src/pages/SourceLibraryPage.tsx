@@ -28,8 +28,11 @@ export function SourceLibraryPage({
     () => [{ id: "local", name: "本地 llama.cpp", local: true, model: "" }, ...providers.filter((provider) => !provider.kind || provider.kind === "text")],
     [providers],
   );
-  const [providerId, setProviderId] = useState(defaultTarget?.providerId || "local");
-  const [model, setModel] = useState(defaultTarget?.modelId || "");
+  const fallbackTextProvider = textProviders.find((provider) => !provider.local) || textProviders[0];
+  const defaultProviderId = defaultTarget?.providerId || fallbackTextProvider.id;
+  const defaultModelId = defaultTarget?.modelId || fallbackTextProvider.models?.text || fallbackTextProvider.model || "";
+  const [providerId, setProviderId] = useState(defaultProviderId);
+  const [model, setModel] = useState(defaultModelId);
   const chapter = chapters.find((item) => item.id === active);
   const activeSource = sources.find((item) => item.id === chapter?.source_id) || sources[0];
 
@@ -47,8 +50,8 @@ export function SourceLibraryPage({
 
   useEffect(() => { setSelected(new Set()); void load().catch(report); }, [productionId, refreshKey]);
   useEffect(() => {
-    setProviderId(defaultTarget?.providerId || "local");
-    setModel(defaultTarget?.modelId || "");
+    setProviderId(defaultProviderId);
+    setModel(defaultModelId);
   }, [productionId, projectId, defaultTarget?.providerId, defaultTarget?.modelId]);
 
   function run(action: () => Promise<void>) { void action().catch(report); }
@@ -144,7 +147,6 @@ export function SourceLibraryPage({
     try {
       await request(`/productions/${productionId}/source-extractions`, { method: "POST", body: JSON.stringify({
         project_id: projectId, chapter_ids: [...selected], provider: providerId, model: modelId,
-        allow_cloud: providerId !== "local" && provider?.local !== true,
         submission_id: `source-${Date.now()}`,
       }) });
       notify(`已创建 ${selected.size} 个事件提取任务，可在任务中心查看`);

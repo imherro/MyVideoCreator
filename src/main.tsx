@@ -503,7 +503,7 @@ function Auth({ onLogin }: { onLogin: () => void }) {
         </h1>
         <p>你的故事，你的模型，你的工作室。</p>
         <div className="auth-meta">
-          <Monitor size={18} /> 浏览器创作 · 本地模型运行
+          <Monitor size={18} /> 浏览器创作 · 云端与本地模型
         </div>
       </div>
       <form onSubmit={submit} className="auth-form">
@@ -512,7 +512,7 @@ function Auth({ onLogin }: { onLogin: () => void }) {
         <p>
           {status?.configured
             ? "在任意电脑上使用同一个工作室密码登录。"
-            : "先在这台主机设置密码，之后可从其他电脑的浏览器访问。"}
+            : "设置工作室密码后，即可从当前浏览器开始创作。"}
         </p>
         <label>
           工作室密码
@@ -533,9 +533,7 @@ function Auth({ onLogin }: { onLogin: () => void }) {
         {error && <div className="error">{error}</div>}
         <button
           className="primary"
-          disabled={
-            busy || !status || (!status.configured && !status.can_setup)
-          }
+          disabled={busy || !status}
         >
           {busy ? (
             <LoaderCircle className="spin" size={17} />
@@ -544,9 +542,6 @@ function Auth({ onLogin }: { onLogin: () => void }) {
           )}{" "}
           {status?.configured ? "进入工作室" : "设置并进入"}
         </button>
-        {status && !status.configured && !status.can_setup && (
-          <p className="error">请在 GPU 主机上访问本机地址，完成首次设置。</p>
-        )}
       </form>
     </div>
   );
@@ -1552,7 +1547,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         ...n.data,
         provider: n.data.provider || "local",
         asset_ids: sourceAssets(n.id),
-        allow_cloud: Boolean(targetProvider && !targetProvider.local),
         parameters: n.data.kind === "video" && targetProvider?.type === "volcengine_ark"
           ? { resolution: doc?.videoResolution || "720p", ...(n.data.parameters || {}) }
           : n.data.parameters,
@@ -1733,20 +1727,12 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     try {
       await save();
       if (dirty.current) throw new Error("请先解决保存冲突再生成分镜图");
-      const allowCloud = nodeIds.some((nodeId) => {
-        const node = prepared.nodes.find((item) => item.id === nodeId);
-        const provider = config.providers.find(
-          (item: Any) => item.id === node?.data?.provider,
-        );
-        return provider && !provider.local;
-      });
       const result = await api(
         `/projects/${snapshot.project.id}/run`,
         send("POST", {
           submission_id: id(),
           node_ids: nodeIds,
           exact: true,
-          allow_cloud: allowCloud,
         }),
       );
       await refresh(snapshot.project.id);
@@ -1798,14 +1784,12 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     try {
       await save();
       if (dirty.current) throw new Error("请先解决保存冲突再生成视频");
-      const allowCloud = targets.some((row) => row.provider && !row.provider.local);
       const result = await api(
         `/projects/${snapshot.project.id}/run`,
         send("POST", {
           submission_id: id(),
           node_ids: nodeIds,
           exact: true,
-          allow_cloud: allowCloud,
         }),
       );
       await refresh(snapshot.project.id);
@@ -1914,7 +1898,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           prompt: plan.prompt,
           asset_ids: plan.assetIds,
           asset_category: plan.assetCategory,
-          allow_cloud: !provider.local,
           ratio: snapshot.doc.ratio || "16:9",
           size: "2K",
           visual_reference: {
@@ -1996,7 +1979,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             submission_id: id(),
             node_ids: plan.readyIds,
             exact: true,
-            allow_cloud: plan.cloudCount > 0,
           }),
         );
         submitted = result.count;
@@ -4500,9 +4482,7 @@ function SettingsPanel({
         卸载空闲文本模型
       </button>
       <h3>模型服务</h3>
-      <p className="muted">
-        本地模型默认不调用云端。图像和视频请选择配置好的服务。
-      </p>
+      <p className="muted">配置文本、图像和视频服务，并在项目设置中选择默认模型。</p>
       {value.providers.map((p: Any, i: number) => (
         <article className="provider-card" key={p.id}>
           <div className="field-heading">
@@ -4614,7 +4594,7 @@ function SettingsPanel({
                 onVerify={() => void verifyArk(p.id)}
                 onTest={(kind) => void testArkModel(p.id, kind)}
               />
-              <p className="muted">一个 ARK API Key 统一调用豆包文本、Seedream 图片与 Seedance 视频。云端生成节点仍需明确允许调用。</p>
+              <p className="muted">一个 ARK API Key 统一调用豆包文本、Seedream 图片与 Seedance 视频。</p>
             </>
           ) : (
             <label className="check-label">

@@ -29,6 +29,10 @@ def project(c):
     assert response.status_code==200,response.text
     return response.json()
 
+def test_first_setup_is_available_to_remote_browsers(client):
+    with TestClient(app,client=('192.0.2.10',43120)) as remote:
+        assert remote.get('/api/auth/status').json()['can_setup'] is True
+
 def test_production_can_own_multiple_episode_projects(authenticated):
     c=authenticated
     created=c.post('/api/productions',json={'name':'六十集测试剧'})
@@ -653,11 +657,12 @@ def test_volcengine_ark_unified_settings_and_connection(authenticated,monkeypatc
     c.post('/api/jobs/'+accepted.json()['id']+'/cancel')
     c.post('/api/jobs/'+accepted_video.json()['id']+'/cancel')
     c.post('/api/jobs/'+accepted_transition.json()['id']+'/cancel')
-    rejected=c.post('/api/projects/'+p['id']+'/jobs',json={
+    cloud_without_extra_authorization=c.post('/api/projects/'+p['id']+'/jobs',json={
         'node_id':'ark-image','kind':'image','submission_id':'ark-cloud-gate',
         'input':{'provider':'ark','prompt':'一只猫'},
     })
-    assert rejected.status_code==400 and '允许使用此云端服务' in rejected.text
+    assert cloud_without_extra_authorization.status_code==200,cloud_without_extra_authorization.text
+    c.post('/api/jobs/'+cloud_without_extra_authorization.json()['id']+'/cancel')
     queued=c.post('/api/projects/'+p['id']+'/jobs',json={
         'node_id':'ark-video','kind':'video','submission_id':'ark-cancel-cost-warning',
         'input':{'provider':'ark','prompt':'一只猫走过窗前','allow_cloud':True},
@@ -762,11 +767,9 @@ def test_projects_and_assets_move_to_trash_and_restore(authenticated):
     assert c.post(f'/api/trash/asset/{asset["id"]}/restore').status_code==200
     assert c.get(f'/api/assets/{asset["id"]}/file').status_code==200
 
-def test_cloud_opt_in_idempotency_and_frozen_provider(authenticated):
+def test_cloud_submission_needs_no_extra_authorization_and_freezes_provider(authenticated):
     c=authenticated;p=project(c)
     payload={'node_id':'n1','kind':'text','submission_id':'stable-submission-001','input':{'provider':'cloud','prompt':'编写短片'}}
-    assert c.post('/api/projects/'+p['id']+'/jobs',json=payload).status_code==400
-    payload['input']['allow_cloud']=True
     first=c.post('/api/projects/'+p['id']+'/jobs',json=payload).json()
     second=c.post('/api/projects/'+p['id']+'/jobs',json=payload).json()
     assert first['id']==second['id']

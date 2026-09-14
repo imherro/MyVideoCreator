@@ -11,7 +11,7 @@ test('generation target resolves override then project then system fallback',()=
  const policy={...emptyGenerationPolicy(),image:{providerId:'ark',modelId:'seedream-custom'}};
  assert.deepEqual(resolveGenerationTarget('image',undefined,policy,providers),{providerId:'ark',modelId:'seedream-custom',source:'project'});
  assert.deepEqual(resolveGenerationTarget('image',{mode:'override',providerId:'local-image',modelId:'flux-special'},policy,providers),{providerId:'local-image',modelId:'flux-special',source:'override'});
- assert.deepEqual(resolveGenerationTarget('image',undefined,emptyGenerationPolicy(),providers),{providerId:'local-image',modelId:'flux',source:'system'});
+ assert.deepEqual(resolveGenerationTarget('image',undefined,emptyGenerationPolicy(),providers),{providerId:'ark',modelId:'seedream',source:'system'});
 });
 
 test('deleted project provider is invalid and never falls back silently',()=>{

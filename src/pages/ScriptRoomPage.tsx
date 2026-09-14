@@ -24,8 +24,11 @@ export function ScriptRoomPage({
     () => [{ id: "local", name: "本地 llama.cpp", local: true, model: "" }, ...providers.filter((p) => !p.kind || p.kind === "text")],
     [providers],
   );
-  const [providerId, setProviderId] = useState(defaultTarget?.providerId || "local");
-  const [model, setModel] = useState(defaultTarget?.modelId || "");
+  const fallbackTextProvider = textProviders.find((provider) => !provider.local) || textProviders[0];
+  const defaultProviderId = defaultTarget?.providerId || fallbackTextProvider.id;
+  const defaultModelId = defaultTarget?.modelId || fallbackTextProvider.models?.text || fallbackTextProvider.model || "";
+  const [providerId, setProviderId] = useState(defaultProviderId);
+  const [model, setModel] = useState(defaultModelId);
 
   async function loadList(preferred = active) {
     const [scripts, sourceChapters] = await Promise.all([
@@ -46,8 +49,8 @@ export function ScriptRoomPage({
     if (currentEpisodeNo !== active) void selectEpisode(currentEpisodeNo).catch(report);
   }, [currentEpisodeNo]);
   useEffect(() => {
-    setProviderId(defaultTarget?.providerId || "local");
-    setModel(defaultTarget?.modelId || "");
+    setProviderId(defaultProviderId);
+    setModel(defaultModelId);
   }, [productionId, defaultTarget?.providerId, defaultTarget?.modelId]);
   function run(action: () => Promise<void>) {
     setBusy(true);
@@ -86,7 +89,7 @@ export function ScriptRoomPage({
     if (!window.confirm(`将生成 ${normalized.length} 集剧本：${normalized.map((no) => `EP${String(no).padStart(2, "0")}`).join("、")}\n服务：${provider?.name || providerId}\n模型：${modelId || "本地默认"}\n确认创建 ${normalized.length} 个文本任务？`)) return;
     const result = await request(`/productions/${productionId}/script-generations`, {
       method: "POST",
-      body: JSON.stringify({ episode_nos: normalized, provider: providerId, model: modelId, allow_cloud: providerId !== "local" && provider?.local !== true, submission_id: `scripts-${Date.now()}` }),
+      body: JSON.stringify({ episode_nos: normalized, provider: providerId, model: modelId, submission_id: `scripts-${Date.now()}` }),
     });
     await onChanged(); await loadList(active);
     notify(`已创建 ${result.count} 个剧本任务，可在任务中心查看`);

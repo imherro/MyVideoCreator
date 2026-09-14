@@ -34,7 +34,7 @@ def test_generation_policy_precedence_fallback_and_deleted_provider():
     assert resolve_generation_target('image',None,policy,providers)['modelId']=='seedream'
     override={'mode':'override','providerId':'local-image','modelId':'flux-special'}
     assert resolve_generation_target('image',override,policy,providers)=={'providerId':'local-image','modelId':'flux-special','source':'override'}
-    assert resolve_generation_target('image',None,{'text':None,'image':None,'video':None},providers)['providerId']=='local-image'
+    assert resolve_generation_target('image',None,{'text':None,'image':None,'video':None},providers)['providerId']=='ark'
     with pytest.raises(ValueError,match='自动切换'):
         resolve_generation_target('video',None,{'video':{'providerId':'deleted','modelId':'paid'}},providers)
     with pytest.raises(ValueError,match='已不存在'):
