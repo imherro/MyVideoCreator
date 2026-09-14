@@ -1118,7 +1118,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             kind: n.kind,
             label: n.label || titles[n.kind],
             prompt: n.prompt,
-            ...nodeDefaults(n.kind, config.providers, system.models),
+            ...nodeDefaults(n.kind, config.providers, system.models, current.current.doc?.generationPolicy),
           },
         }));
         update((d) => ({ ...d, nodes: [...d.nodes, ...nodes] }));
@@ -1156,6 +1156,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   }
   function changeModel(patch: Any) {
     if (!selected) return;
+    if (data.canonicalScriptProjection)
+      patch = { ...patch, generationPolicyInherited: false };
     const provider = patch.provider
       ? config.providers.find((item: Any) => item.id === patch.provider)
       : undefined;
@@ -1193,7 +1195,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             kind,
             label: titles[kind],
             prompt,
-            ...nodeDefaults(kind, config.providers, system.models),
+            ...nodeDefaults(kind, config.providers, system.models, doc?.generationPolicy),
             ...extra,
           },
         },

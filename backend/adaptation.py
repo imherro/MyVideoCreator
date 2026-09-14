@@ -443,13 +443,28 @@ def project_script_to_document(connection, project_id, document):
         value['edges'] = [edge for edge in value.get('edges', [])
             if edge.get('source') not in projection_ids and edge.get('target') not in projection_ids]
         return value
+    text_target = (value.get('generationPolicy') or {}).get('text') or {}
+    inherited_target = {}
+    if text_target.get('providerId'):
+        inherited_target = {
+            'provider': text_target['providerId'],
+            'model': text_target.get('modelId', ''),
+            'generationPolicyInherited': True,
+        }
     data = {
         'kind': 'text', 'label': '剧本（剧本工作区投影）', 'text': row['body'],
         'canonicalScriptProjection': True, 'scriptRevision': row['revision'],
-        'scriptStatus': row['status'],
+        'scriptStatus': row['status'], **inherited_target,
     }
     node = existing or {'id': node_id, 'type': 'media', 'position': {'x': 80, 'y': 80}, 'data': {}}
-    node = {**node, 'id': node_id, 'data': {**node.get('data', {}), **data}}
+    # Preserve a deliberate node override.  Older projections had neither
+    # field, so they inherit the production policy on their next read.
+    old_data = node.get('data', {})
+    if old_data.get('provider') and old_data.get('generationPolicyInherited') is not True:
+        data['provider'] = old_data['provider']
+        data['model'] = old_data.get('model', '')
+        data['generationPolicyInherited'] = False
+    node = {**node, 'id': node_id, 'data': {**old_data, **data}}
     nodes.append(node)
     removed_ids = projection_ids - {node_id}
     if removed_ids:

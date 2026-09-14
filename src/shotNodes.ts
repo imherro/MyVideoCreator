@@ -79,13 +79,13 @@ export function ensureShotNodes<
           kind: "image",
           label: `${shot.id} · 分镜图`,
           prompt: shot.image_prompt,
-          ...nodeDefaults("image", providers, models),
+          ...nodeDefaults("image", providers, models, (doc as Value).generationPolicy),
         },
       };
       nodes.push(image);
     }
     if (!video) {
-      const defaults = nodeDefaults("video", providers, models);
+      const defaults = nodeDefaults("video", providers, models, (doc as Value).generationPolicy);
       video = {
         id: newId(),
         type: "media",

@@ -9,4 +9,10 @@ test('all creation paths prefer local models and never send media to text runtim
  assert.equal(nodeDefaults('image',providers,[]).provider,'native-image');
  assert.equal(nodeDefaults('storyboard',providers,[{id:'qwen'}]).model,'qwen');
  assert.equal(nodeDefaults('video',[],[]).provider,'');
+ const policy={text:{providerId:'ark',modelId:'doubao-seed'},image:{providerId:'native-image',modelId:'flux-cloud'},video:null};
+ const withArk=[...providers,{id:'ark',type:'volcengine_ark',local:false,models:{text:'doubao-seed'}}];
+ assert.deepEqual(nodeDefaults('storyboard',withArk,[{id:'qwen'}],policy),{
+  provider:'ark',model:'doubao-seed',resolution:'832x480',frames:121,seed:-1,
+ });
+ assert.equal(nodeDefaults('image',withArk,[],policy).model,'flux-cloud');
 });

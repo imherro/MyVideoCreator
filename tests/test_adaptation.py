@@ -157,6 +157,11 @@ def test_script_generation_requires_explicit_approval_and_selected_set_isolated(
 def test_canonical_script_projects_to_canvas_and_canvas_edit_cannot_replace_it(adaptation_client):
     client = adaptation_client
     production, _, _, adaptation = setup_production(client, count=2)
+    with s.db() as connection:
+        row = connection.execute("SELECT shared_context FROM productions WHERE id=?", (production["id"],)).fetchone()
+        context = json.loads(row["shared_context"])
+        context["generationPolicy"]["text"] = {"providerId": "ark-for-script", "modelId": "doubao-seed"}
+        connection.execute("UPDATE productions SET shared_context=? WHERE id=?", (s.dumps(context), production["id"]))
     approved = save_and_approve(client, production, adaptation)
     virtual = client.get(f'/api/productions/{production["id"]}/episode-scripts/2').json()
     payload = {
@@ -173,6 +178,9 @@ def test_canonical_script_projects_to_canvas_and_canvas_edit_cannot_replace_it(a
     projected = client.get(f'/api/projects/{project_id}').json()
     node = next(item for item in projected["document"]["nodes"] if item["data"].get("canonicalScriptProjection"))
     assert node["data"]["text"] == payload["body"]
+    assert node["data"]["provider"] == "ark-for-script"
+    assert node["data"]["model"] == "doubao-seed"
+    assert node["data"]["generationPolicyInherited"] is True
     node["data"]["text"] = "从画布篡改"
     put = client.put(f'/api/projects/{project_id}',json={
         "name": projected["name"], "revision": projected["revision"],
