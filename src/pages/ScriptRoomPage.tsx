@@ -96,7 +96,7 @@ export function ScriptRoomPage({
   }
 
   return <section className="script-room-page workflow-domain-page">
-    <header className="domain-header"><div><span className="eyebrow">SCRIPT ROOM</span><h1>剧本室</h1><p>逐集剧本是正式数据；高级画布中的剧本文本由这里投影，不会反向覆盖。</p></div><div className="settings-actions">
+    <header className="domain-header"><div><span className="eyebrow">SCRIPT ROOM</span><h1>剧本室</h1><p>逐集剧本是正式数据；画布草稿设为正式剧本后，会在这里统一修订并同步回画布。</p></div><div className="settings-actions">
       <button disabled={busy} onClick={() => run(() => loadList(active))}><RefreshCw size={15} />刷新</button>
       <button disabled={busy || !draft} onClick={() => run(save)}><Save size={15} />保存草稿</button>
       <button disabled={busy || !draft} onClick={() => run(() => transition("review"))}>提交审核</button>
@@ -108,6 +108,7 @@ export function ScriptRoomPage({
         <button onClick={() => run(async () => { await onSelectEpisode(value.episodeNo); await selectEpisode(value.episodeNo); })}><b>EP{String(value.episodeNo).padStart(2, "0")}</b><span>{value.episodeTitle}</span><small className={value.script?.status || value.plan.status}>{STATUS_LABELS[value.script?.status || value.plan.status]}</small></button>
       </div>)}</aside>
       <main>{draft && plan ? <>
+        {draft.metadata?.origin === "canvas" && <div className="notice"><b>来自画布快速创作</b><span>这里保存的是同一份正式剧本；修改后画布投影会同步更新。</span></div>}
         <div className="script-summary-strip"><span className={`workflow-status ${draft.status}`}>{STATUS_LABELS[draft.status]}</span><span>目标 {plan.targetDuration} 秒</span><span>{plan.paywallRole}</span><span>{draft.project_id ? "已建立 Episode" : "首次保存或生成时建立 Episode"}</span></div>
         <article className="domain-card"><div className="domain-fields">
           <label>标题<input value={draft.title} onChange={(e) => patch({ title: e.target.value })} /></label>

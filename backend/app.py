@@ -1185,6 +1185,7 @@ class ScriptSave(BaseModel):
     characters:list[str]
     scenes:list[str]
     props:list[str]
+    canvasNodeId:str|None=Field(default=None,min_length=1,max_length=160)
 
 class ScriptGenerationCreate(BaseModel):
     episode_nos:list[int]=Field(min_length=1,max_length=500)
@@ -1346,7 +1347,7 @@ def read_episode_script(production_id:str,episode_no:int):
 
 @app.put('/api/productions/{production_id}/episode-scripts/{episode_no}')
 def save_episode_script(production_id:str,episode_no:int,body:ScriptSave):
-    from .adaptation import ensure_episode_for_plan,save_script_row,validate_source_references
+    from .adaptation import ensure_episode_for_plan,save_script_row,script_row,validate_source_references
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
         _,_,plan=episode_plan_context(c,production_id,episode_no)
@@ -1355,9 +1356,18 @@ def save_episode_script(production_id:str,episode_no:int,body:ScriptSave):
         row=c.execute('SELECT * FROM episode_scripts WHERE project_id=?',(project_row['id'],)).fetchone()
         compatible_revision=row['revision'] if not existed and body.revision==0 else body.revision
         if row['revision']!=compatible_revision:raise HTTPException(409,'本集剧本已在其他页面更新，请重新加载。')
-        payload=body.model_dump(exclude={'revision'})
+        payload=body.model_dump(exclude={'revision','canvasNodeId'})
         validate_source_references(c,production_id,payload['sourceChapterRefs'])
         saved=save_script_row(c,row,payload,status='draft')
+        if body.canvasNodeId:
+            document=json.loads(project_row['document'])
+            source_node=next((node for node in document.get('nodes',[]) if node.get('id')==body.canvasNodeId),None)
+            if not source_node or source_node.get('data',{}).get('kind')!='text':
+                raise ValueError('画布剧本节点不存在或类型无效')
+            metadata=json.loads(row['metadata'])
+            metadata.update({'origin':'canvas','projectionNodeId':body.canvasNodeId})
+            c.execute('UPDATE episode_scripts SET metadata=? WHERE project_id=?',(s.dumps(metadata),project_row['id']))
+            saved=script_row(c,project_row['id'])
     s.event(project_row['id'],{'type':'script','revision':saved['revision']})
     return saved
 
@@ -1370,8 +1380,9 @@ def transition_script(production_id,episode_no,expected_revision,target):
         row=c.execute('SELECT * FROM episode_scripts WHERE project_id=?',(project_row['id'],)).fetchone()
         if row['revision']!=expected_revision:raise HTTPException(409,'本集剧本已在其他页面更新，请重新加载。')
         if target in ('review','approved') and not row['body'].strip():raise ValueError('剧本正文为空，不能提交审核或批准')
+        quick_canvas=json.loads(row['metadata']).get('origin')=='canvas'
         if target=='approved':
-            if context['adaptationPlan']['status']!='approved' or plan['status']!='approved':raise ValueError('请先批准改编策划和本集分集规划')
+            if not quick_canvas and (context['adaptationPlan']['status']!='approved' or plan['status']!='approved'):raise ValueError('请先批准改编策划和本集分集规划')
             if row['status']!='review':raise ValueError('请先将本集剧本提交审核')
         if target=='review' and row['status']=='stale':raise ValueError('剧本已过期，请先修订后再提交审核')
         now=time.time()

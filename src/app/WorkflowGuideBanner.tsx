@@ -3,7 +3,7 @@ import type { WorkflowStageGuide } from "./workflowGuide";
 
 const labels: Record<string, string> = {
   unstarted: "未开始", ready: "可开始", running: "进行中", review: "待审核",
-  complete: "已完成", stale: "需更新", blocked: "前置条件未完成",
+  complete: "已完成", skipped: "已跳过", stale: "需更新", blocked: "前置条件未完成",
 };
 
 export function WorkflowGuideBanner({ guide, onNavigate, onOpenTasks }: {

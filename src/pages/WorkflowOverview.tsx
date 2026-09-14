@@ -4,7 +4,7 @@ import {
   Film,
   Images,
   ListChecks,
-  Scissors,
+  Workflow,
 } from "lucide-react";
 import type { WorkflowStage } from "../app/workflow";
 import type { WorkflowGuide } from "../app/workflowGuide";
@@ -65,7 +65,7 @@ export function WorkflowOverview(props: OverviewProps) {
           <span className="eyebrow">RUNNING</span>
           <h2>{props.activeJobs ? `${props.activeJobs} 个任务执行中` : "当前没有执行中的任务"}</h2>
           <p>生成任务继续在主机运行，关闭当前页面不会中断。</p>
-          <button onClick={() => props.onOpenStage("canvas")}><Scissors size={15} />查看完整创作链路</button>
+          <button onClick={() => props.onOpenStage("canvas")}><Workflow size={15} />基于画布创作</button>
         </article>
       </div>
     </section>

@@ -216,6 +216,38 @@ def test_canonical_script_projects_to_canvas_and_canvas_edit_cannot_replace_it(a
     assert not any(item["data"].get("text") == payload["body"] for item in after_stale_put["document"]["nodes"])
 
 
+def test_canvas_script_becomes_the_canonical_episode_script_and_can_bypass_planning(adaptation_client):
+    client = adaptation_client
+    project = client.post('/api/projects',json={'name':'画布快速创作','duration':15}).json()
+    node_id='canvas-script-draft'
+    project['document']['nodes'].append({
+        'id':node_id,'type':'media','position':{'x':80,'y':80},
+        'data':{'kind':'text','label':'画布剧本','text':'内景 日\n女孩推开门。'},
+    })
+    stored=client.put(f'/api/projects/{project["id"]}',json={
+        'name':project['name'],'revision':project['revision'],
+        'production_revision':project['production_revision'],'document':project['document'],
+    })
+    assert stored.status_code==200,stored.text
+    script=client.get(f'/api/productions/{project["production_id"]}/episode-scripts/1').json()
+    saved=client.put(f'/api/productions/{project["production_id"]}/episode-scripts/1',json={
+        'revision':script['revision'],'title':'第一集','synopsis':'','body':'内景 日\n女孩推开门。',
+        'estimatedDuration':15,'sourceChapterRefs':[],'storyGoal':'','paywallBeat':{},
+        'characters':[],'scenes':[],'props':[],'canvasNodeId':node_id,
+    })
+    assert saved.status_code==200,saved.text
+    assert saved.json()['metadata']['origin']=='canvas'
+    projected=client.get(f'/api/projects/{project["id"]}').json()
+    projection=next(node for node in projected['document']['nodes'] if node['id']==node_id)
+    assert projection['data']['canonicalScriptProjection'] is True
+    assert projection['data']['scriptOrigin']=='canvas'
+    reviewed=client.post(f'/api/productions/{project["production_id"]}/episode-scripts/1/review',json={'revision':saved.json()['revision']})
+    assert reviewed.status_code==200,reviewed.text
+    approved=client.post(f'/api/productions/{project["production_id"]}/episode-scripts/1/approve',json={'revision':reviewed.json()['revision']})
+    assert approved.status_code==200,approved.text
+    assert approved.json()['status']=='approved'
+
+
 def test_project_put_cannot_persist_a_second_copy_of_production_adaptation(adaptation_client):
     client = adaptation_client
     production, episode, _, adaptation = setup_production(client, count=2)

@@ -177,3 +177,5 @@
 .workflow-nav-state.complete{background:#69ad78}.workflow-nav-state.blocked,.workflow-nav-state.attention{background:#ca675e}.workflow-nav-state.running{background:#d2a45e}
 .side-panel-scrim{position:fixed;left:70px;right:0;top:66px;bottom:0;z-index:17;background:transparent}
 @media(max-width:800px){.side-panel-scrim{left:54px;top:58px}}
+.canvas-script-editor{min-height:260px;margin:12px 0}
+.workflow-nav-state.skipped{background:#747b7d}.workflow-guide-banner.skipped{border-color:#465055;background:#1b2225}

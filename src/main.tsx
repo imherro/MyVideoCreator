@@ -1313,6 +1313,36 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setNotice(existingId ? "正在使用已有分镜规划节点提交任务" : "已建立并连接分镜规划节点，正在提交任务");
     setTimeout(() => fitView({ nodes: [{ id: storyboardId }], padding: 0.8 }), 80);
   }
+  async function promoteCanvasScript(sourceNode: Any) {
+    const snapshot = current.current;
+    const body = String(sourceNode?.data?.text || "").trim();
+    if (!snapshot.project || !snapshot.doc || sourceNode?.data?.kind !== "text" || !body)
+      throw new Error("请先生成或填写剧本正文");
+    await save();
+    if (dirty.current) throw new Error("请先解决保存冲突，再保存正式剧本");
+    const episodeNo = snapshot.project.episode_no || 1;
+    const currentScript = await api(`/productions/${snapshot.project.production_id}/episode-scripts/${episodeNo}`);
+    await api(
+      `/productions/${snapshot.project.production_id}/episode-scripts/${episodeNo}`,
+      send("PUT", {
+        revision: currentScript.revision,
+        title: currentScript.title || sourceNode.data.label || snapshot.project.episode_title || snapshot.project.name,
+        synopsis: currentScript.synopsis || "",
+        body,
+        estimatedDuration: Number(currentScript.estimatedDuration || snapshot.doc.duration || 15),
+        sourceChapterRefs: currentScript.sourceChapterRefs || [],
+        storyGoal: currentScript.storyGoal || "",
+        paywallBeat: currentScript.paywallBeat || {},
+        characters: currentScript.characters || [],
+        scenes: currentScript.scenes || [],
+        props: currentScript.props || [],
+        canvasNodeId: sourceNode.id,
+      }),
+    );
+    setWorkflowDataRevision((value) => ({ ...value, script: value.script + 1 }));
+    await openProject(snapshot.project.id);
+    setNotice("画布剧本已保存为本集正式剧本；可进入剧本页继续修订和审核");
+  }
   function startStoryboardPlanning() {
     if (!doc) return;
     const scriptNode = doc.nodes.find((node) =>
@@ -2509,7 +2539,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             duration={doc.duration}
             ratio={doc.ratio}
             style={doc.style}
-            scriptCount={(workflowContext.scripts || []).filter((item: Any) => item.script?.status === "approved").length}
+            scriptCount={(workflowContext.scripts || []).filter((item: Any) => String(item.script?.body || "").trim()).length}
             visualCount={Object.values(visualBibleOf(doc).cards).filter((card) => !card.deletedAt).length}
             shotCount={doc.shots.length}
             videoCount={doc.nodes.filter((node) => node.data?.kind === "video" && node.data?.assetId).length}
@@ -3409,17 +3439,33 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             )}
             {data.text && (
               <details open>
-                <summary>生成结果</summary>
-                <div className="generated-text">{data.text}</div>
-                {data.kind === "text" && (
-                  <button
-                    className="secondary"
-                    disabled={busy}
-                    onClick={() => generateStoryboardFromScript(node)}
-                  >
-                    <Layers size={15} />
-                    生成分镜规划
+                <summary>{data.kind === "text" ? "剧本正文" : "生成结果"}</summary>
+                {data.kind === "text" && !data.canonicalScriptProjection ? (
+                  <textarea
+                    className="prompt-input canvas-script-editor"
+                    value={data.text}
+                    onChange={(event) => editNode({ text: event.target.value })}
+                    aria-label="画布剧本正文"
+                  />
+                ) : (
+                  <div className="generated-text">{data.text}</div>
+                )}
+                {data.kind === "text" && !data.canonicalScriptProjection && (
+                  <button className="primary full" disabled={busy} onClick={() => void promoteCanvasScript(node).catch(report)}>
+                    <FileText size={15} />保存为本集正式剧本
                   </button>
+                )}
+                {data.kind === "text" && data.canonicalScriptProjection && (
+                  <>
+                    <button className="secondary full" onClick={() => activateWorkflowStage("script")}>
+                      <FileText size={15} />编辑正式剧本
+                    </button>
+                    {data.scriptStatus === "approved" && (
+                      <button className="secondary full" disabled={busy} onClick={() => generateStoryboardFromScript(node)}>
+                        <Layers size={15} />生成分镜规划
+                      </button>
+                    )}
+                  </>
                 )}
                 {data.kind === "storyboard" && activeJob?.result?.shots && (
                   <button

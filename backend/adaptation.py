@@ -454,7 +454,7 @@ def project_script_to_document(connection, project_id, document):
     data = {
         'kind': 'text', 'label': '剧本（剧本工作区投影）', 'text': row['body'],
         'canonicalScriptProjection': True, 'scriptRevision': row['revision'],
-        'scriptStatus': row['status'], **inherited_target,
+        'scriptStatus': row['status'], 'scriptOrigin': metadata.get('origin','workflow'), **inherited_target,
     }
     node = existing or {'id': node_id, 'type': 'media', 'position': {'x': 80, 'y': 80}, 'data': {}}
     # Preserve a deliberate node override.  Older projections had neither

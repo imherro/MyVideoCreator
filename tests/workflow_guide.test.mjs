@@ -32,3 +32,12 @@ test('guide advances from completed images to video',()=>{
   assert.equal(guide.stages.images.state,'complete');
   assert.equal(guide.stages.video.state,'ready');
 });
+
+test('canvas-first script skips optional planning and becomes the recommended formal step',()=>{
+  const script={status:'draft',body:'内景 日\n女孩推开门。',metadata:{origin:'canvas'}};
+  const guide=deriveWorkflowGuide({...base,scripts:[{episodeNo:1,projectId:'ep1',script}]});
+  assert.equal(guide.stages.source.state,'skipped');
+  assert.equal(guide.stages.adaptation.state,'skipped');
+  assert.equal(guide.stages.script.state,'ready');
+  assert.equal(guide.recommendedStage,'script');
+});

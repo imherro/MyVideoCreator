@@ -6,6 +6,7 @@ export type WorkflowStageState =
   | "running"
   | "review"
   | "complete"
+  | "skipped"
   | "stale"
   | "blocked";
 
@@ -65,6 +66,7 @@ export function deriveWorkflowGuide(input: {
   const sourceEventCount = Number(adaptation.sourceEventCount || 0);
   const adaptationStatus = adaptation.adaptationPlan?.status;
   const currentScript = scripts.find((item) => item.projectId === project.id || item.episodeNo === project.episode_no)?.script;
+  const quickCanvasScript = currentScript?.metadata?.origin === "canvas" && Boolean(String(currentScript?.body || "").trim());
   const scriptApproved = currentScript?.status === "approved";
   const approvedScripts = scripts.filter((item) => item.script?.status === "approved").length;
   const requiredVersionIds = bindingIds(shots);
@@ -83,10 +85,14 @@ export function deriveWorkflowGuide(input: {
   const timelineReady = Boolean(document.editor?.timeline?.tracks?.some((track: Value) => track.elements?.length) || document.timeline?.length);
 
   const stages: WorkflowGuide["stages"] = {
-    source: sourceEventCount
+    source: quickCanvasScript && !sourceEventCount
+      ? { stage: "source", state: "skipped", headline: "画布快速创作未使用原著", reasons: ["需要时仍可导入原著，现有正式剧本不会丢失。"] }
+      : sourceEventCount
       ? { stage: "source", state: "complete", headline: `已提取 ${sourceEventCount} 条原著事件`, reasons: [], action: { label: "进入改编策划", stage: "adaptation" } }
       : { stage: "source", state: "ready", headline: "导入原著并提取事件", reasons: ["改编策划需要可追溯的原著事件。"] },
-    adaptation: adaptationStatus === "approved"
+    adaptation: quickCanvasScript && adaptationStatus !== "approved"
+      ? { stage: "adaptation", state: "skipped", headline: "画布快速创作已跳过改编策划", reasons: ["可以直接完善本集正式剧本，也可以稍后补充改编策划。"] }
+      : adaptationStatus === "approved"
       ? { stage: "adaptation", state: "complete", headline: "改编策划已批准", reasons: [], action: { label: "进入剧本", stage: "script" } }
       : adaptationStatus === "review"
         ? { stage: "adaptation", state: "review", headline: "改编策划等待审核", reasons: ["批准后才可生成逐集剧本。"] }
@@ -95,7 +101,13 @@ export function deriveWorkflowGuide(input: {
           : sourceEventCount
             ? { stage: "adaptation", state: "ready", headline: "可以建立改编策划", reasons: [] }
             : { stage: "adaptation", state: "blocked", headline: "先完成原著事件提取", reasons: ["当前没有可供改编引用的原著事件。"], action: { label: "前往原著", stage: "source" } },
-    script: approvedScripts === scripts.length && scripts.length
+    script: quickCanvasScript && currentScript?.status === "approved"
+      ? { stage: "script", state: "complete", headline: "本集画布剧本已批准", reasons: [] }
+      : quickCanvasScript && currentScript?.status === "review"
+        ? { stage: "script", state: "review", headline: "本集画布剧本等待审核", reasons: ["批准后即可进入分镜规划。"] }
+        : quickCanvasScript
+          ? { stage: "script", state: "ready", headline: "画布剧本已进入剧本室", reasons: ["继续修订并提交审核，画布将同步同一份正式剧本。"] }
+          : approvedScripts === scripts.length && scripts.length
       ? { stage: "script", state: "complete", headline: `${approvedScripts} 集剧本已批准`, reasons: [] }
       : scripts.some((item) => item.script?.status === "review")
         ? { stage: "script", state: "review", headline: "有剧本等待审核", reasons: ["逐集批准后即可进入该集制作。"] }
@@ -143,6 +155,6 @@ export function deriveWorkflowGuide(input: {
       : { stage: "editor", state: "unstarted", headline: "把生成的视频加入时间线", reasons: ["剪辑页始终可进入；导出前需要有效时间线。"] },
   };
   const order: WorkflowStage[] = ["source", "adaptation", "script", "storyboard", "art", "images", "video", "editor"];
-  const recommendedStage = order.find((stage) => !["complete"].includes(stages[stage]?.state || "")) || "editor";
+  const recommendedStage = order.find((stage) => !["complete","skipped"].includes(stages[stage]?.state || "")) || "editor";
   return { stages, recommendedStage };
 }
