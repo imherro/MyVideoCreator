@@ -21,6 +21,7 @@ import type {
 } from "./types.ts";
 import { defaultVoiceProfile } from "./voices.ts";
 import { catalogVoice, CUSTOM_VOICE_ID, DOUBAO_TTS2_VOICES } from "./voiceCatalog.ts";
+import { projectCharacterDialogueRows } from "./dialogueAssets.ts";
 import { visualKindLabels, visualStatusLabels } from "./types.ts";
 import {
   isVersionBound,
@@ -145,6 +146,16 @@ export function FilmBiblePanel({
   );
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [voiceError, setVoiceError] = useState("");
+  const dialogueRows = useMemo(
+    () => projectCharacterDialogueRows({
+      shots,
+      assets,
+      jobs,
+      cardId: card?.id || "",
+      voiceVersion: storedVoice?.version,
+    }),
+    [shots, assets, jobs, card?.id, storedVoice?.version],
+  );
   useEffect(() => {
     if (focusVersionId && visual.versions[focusVersionId])
       setSelectedId(focusVersionId);
@@ -386,6 +397,21 @@ export function FilmBiblePanel({
               {storedVoice?.status === "locked" && <button className="primary" disabled={voiceBusy} onClick={()=>{setVoiceBusy(true);setVoiceError("");void onGenerateCharacterDialogue(card.id).catch((reason)=>setVoiceError(reason?.message||String(reason))).finally(()=>setVoiceBusy(false));}}><Volume2 size={14}/>生成本集全部对白</button>}
             </div>
             <p className="muted">{storedVoice ? `声音 V${storedVoice.version} · ${storedVoice.status === "locked" ? "已锁定" : "草稿"}` : "保存并试听后可锁定为角色主音色。"}</p>
+            <div className="voice-dialogue-heading">
+              <b>本集对白</b>
+              <small>{dialogueRows.length ? `${dialogueRows.filter((item)=>item.status==="ready").length}/${dialogueRows.length} 已生成` : "分镜中暂无该角色对白"}</small>
+            </div>
+            {dialogueRows.length > 0 && <div className="voice-dialogue-list">{dialogueRows.map((row)=>{
+              const statusLabel = {missing:"未生成",queued:"排队中",running:"生成中",failed:"生成失败",interrupted:"待恢复",syncing:"正在同步",ready:"已生成"}[row.status];
+              return <div className="voice-dialogue-row" key={row.id}>
+                <div className="voice-dialogue-copy">
+                  <div><b>第 {row.shotOrder} 镜</b>{row.emotion && <small>{row.emotion}</small>}</div>
+                  <p title={row.text}>{row.text}</p>
+                  {row.status === "failed" && row.job?.error && <small className="error" title={row.job.error}>{row.job.error}</small>}
+                </div>
+                <div className="voice-dialogue-state"><span className={`voice-state ${row.status}`}>{statusLabel}</span>{row.asset && <button className="secondary" onClick={()=>onPreviewAsset(row.asset!)}><Volume2 size={13}/>试听</button>}</div>
+              </div>;
+            })}</div>}
             {voiceError && <p className="error">{voiceError}</p>}
           </>}
         </>}
