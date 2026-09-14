@@ -243,7 +243,7 @@ def test_high_consistency_blocks_unlocked_or_missing_primary_references():
         )
 
 
-def test_non_shot_and_unbound_shot_inputs_are_not_rewritten():
+def test_non_shot_is_untouched_and_film_bible_unbound_shot_is_rejected():
     value = input_value()
     assert compile_shot_image_input(
         document(), 'other-image', 'image', value, PROVIDERS,
@@ -251,10 +251,11 @@ def test_non_shot_and_unbound_shot_inputs_are_not_rewritten():
     ) == value
     unbound = document()
     unbound['shots'][0]['assetBindings'] = {'characters': [], 'scene': None, 'props': []}
-    assert compile_shot_image_input(
-        unbound, 'image-1', 'image', value, PROVIDERS,
-        lambda *_: (_ for _ in ()).throw(AssertionError('must not resolve')),
-    ) == value
+    with pytest.raises(ValueError, match='尚未绑定'):
+        compile_shot_image_input(
+            unbound, 'image-1', 'image', value, PROVIDERS,
+            lambda *_: (_ for _ in ()).throw(AssertionError('must not resolve')),
+        )
 
 
 def test_deprecated_previously_locked_version_remains_resolvable_for_old_shot():

@@ -5,9 +5,9 @@ import { STATUS_LABELS, normalizeEpisodeSelection, splitList } from "../adaptati
 type Value = Record<string, any>;
 
 export function ScriptRoomPage({
-  productionId, currentEpisodeNo, providers, defaultTarget, request, notify, report, onChanged, onSelectEpisode, onEnterEpisode,
+  productionId, currentEpisodeNo, providers, defaultTarget, refreshKey = 0, request, notify, report, onChanged, onSelectEpisode, onEnterEpisode,
 }: {
-  productionId: string; currentEpisodeNo: number; providers: Value[]; defaultTarget?: Value;
+  productionId: string; currentEpisodeNo: number; providers: Value[]; defaultTarget?: Value; refreshKey?: number;
   request: (path: string, options?: RequestInit) => Promise<any>;
   notify: (message: string) => void; report: (error: unknown) => void;
   onChanged: (projectId?: string) => void | Promise<void>;
@@ -41,7 +41,7 @@ export function ScriptRoomPage({
     setActive(episodeNo);
     setDraft(await request(`/productions/${productionId}/episode-scripts/${episodeNo}`));
   }
-  useEffect(() => { setItems([]); setDraft(null); setSelected(new Set()); void loadList(currentEpisodeNo).catch(report); }, [productionId]);
+  useEffect(() => { setItems([]); setDraft(null); setSelected(new Set()); void loadList(currentEpisodeNo).catch(report); }, [productionId, refreshKey]);
   useEffect(() => {
     if (currentEpisodeNo !== active) void selectEpisode(currentEpisodeNo).catch(report);
   }, [currentEpisodeNo]);

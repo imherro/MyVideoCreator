@@ -19,9 +19,9 @@ const storyGroups = [
 ] as const;
 
 export function AdaptationPage({
-  productionId, projectId, providers, defaultTarget, request, notify, report, onRevision, onOpenSource,
+  productionId, projectId, providers, defaultTarget, refreshKey = 0, request, notify, report, onRevision, onOpenSource,
 }: {
-  productionId: string; projectId: string; providers: Value[]; defaultTarget?: Value;
+  productionId: string; projectId: string; providers: Value[]; defaultTarget?: Value; refreshKey?: number;
   request: (path: string, options?: RequestInit) => Promise<any>;
   notify: (message: string) => void; report: (error: unknown) => void;
   onRevision: (revision: number) => void;
@@ -48,7 +48,7 @@ export function AdaptationPage({
     setChapters(sourceChapters);
     setActive((current) => Math.min(Math.max(1, current), Math.max(1, value.episodePlans.length)));
   }
-  useEffect(() => { setDraft(null); setActive(1); void load().catch(report); }, [productionId]);
+  useEffect(() => { setDraft(null); setActive(1); void load().catch(report); }, [productionId, refreshKey]);
   useEffect(() => {
     setProviderId(defaultTarget?.providerId || "local");
     setModel(defaultTarget?.modelId || "");
@@ -97,7 +97,7 @@ export function AdaptationPage({
       method: "POST",
       body: JSON.stringify({ project_id: projectId, provider: providerId, model: modelId, allow_cloud: providerId !== "local" && provider?.local !== true, submission_id: `adaptation-${Date.now()}` }),
     });
-    notify("已创建改编策划任务，可在任务中心查看；完成后请刷新本页");
+    notify("已创建改编策划任务；完成后本页会自动刷新");
   }
   if (!draft) return <div className="loading"><RefreshCw className="spin" />加载改编策划…</div>;
   const plan: EpisodePlan | undefined = draft.episodePlans.find((item: EpisodePlan) => item.episodeNo === active);

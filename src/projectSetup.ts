@@ -19,6 +19,7 @@ export type ProjectSetupDraft = {
   style: string;
   ratio: "16:9" | "9:16" | "1:1";
   duration: number;
+  videoResolution: "480p" | "720p" | "1080p";
   episodeCount: number;
   platform: string;
   brief: string;
@@ -44,6 +45,7 @@ export function defaultProjectSetupDraft(providers: Value[]): ProjectSetupDraft 
     style: "电影写实",
     ratio: "16:9",
     duration: 15,
+    videoResolution: "720p",
     episodeCount: 1,
     platform: "通用短视频",
     brief: "",
@@ -68,6 +70,8 @@ export function validateProjectSetupDraft(draft: ProjectSetupDraft): string[] {
   if (!(["16:9", "9:16", "1:1"] as string[]).includes(draft.ratio)) errors.push("请选择有效画幅");
   if (!Number.isFinite(draft.duration) || draft.duration < 5 || draft.duration > 3000)
     errors.push("目标时长应为 5–3000 秒");
+  if (!(["480p", "720p", "1080p"] as string[]).includes(draft.videoResolution))
+    errors.push("请选择有效的视频分辨率");
   if (!Number.isInteger(draft.episodeCount) || draft.episodeCount < 1 || draft.episodeCount > 500)
     errors.push("总集数应为 1–500 的整数");
   if (!draft.platform.trim()) errors.push("请选择发布平台");
@@ -88,6 +92,7 @@ export function projectSetupPayload(draft: ProjectSetupDraft) {
     style: draft.style.trim(),
     ratio: draft.ratio,
     duration: draft.duration,
+    video_resolution: draft.videoResolution,
     episode_count: draft.episodeCount,
     platform: draft.platform,
     brief: draft.brief,
@@ -158,4 +163,10 @@ export function applyStyleChange<T extends Value>(document: T, style: string): T
 
 export function applyTargetDuration<T extends Value>(document: T, duration: number): T {
   return document.duration === duration ? document : { ...document, duration };
+}
+
+export function applyVideoResolution<T extends Value & { nodes: any[]; edges: any[]; shots: any[] }>(document: T, resolution: string): T {
+  if (document.videoResolution === resolution) return document;
+  const videoNodes = (document.nodes || []).filter((node) => node.data?.kind === "video").map((node) => node.id);
+  return invalidate({ ...document, videoResolution: resolution }, videoNodes) as unknown as T;
 }

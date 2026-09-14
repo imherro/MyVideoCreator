@@ -3,6 +3,10 @@ from __future__ import annotations
 
 import copy
 
+IMAGE_SYSTEM_PROMPT = """你是安影的影视分镜美术生成器。严格依据用户提示词、项目视觉风格和按顺序提供的独立参考图生成单张画面。参考图用于锁定角色身份、服装、场景结构和道具外观；只改变镜头明确要求的动作、表情、构图与光线。不要添加提示词未要求的文字、水印或拼贴。"""
+
+VIDEO_SYSTEM_PROMPT = """你是安影的影视镜头生成器。严格依据用户提示词和首帧/尾帧参考生成连续视频，保持人物身份、服装、场景、道具和空间关系稳定。动作与摄影机运动应符合镜头描述，避免闪烁、形变、身份漂移、额外人物、文字和水印。"""
+
 
 def freeze_prompt_contract(kind: str, value: dict, *, origin: str = 'submission') -> dict:
     result = copy.deepcopy(value)
@@ -47,6 +51,10 @@ def freeze_prompt_contract(kind: str, value: dict, *, origin: str = 'submission'
         system_prompt = TEMPLATES[kind]
         if kind == 'storyboard':
             response_schema, schema_version = SHOT_SCHEMA, 'storyboard/v1'
+    elif kind == 'image':
+        system_prompt, schema_version = IMAGE_SYSTEM_PROMPT, 'image-generation/v1'
+    elif kind == 'video':
+        system_prompt, schema_version = VIDEO_SYSTEM_PROMPT, 'video-generation/v1'
 
     if system_prompt is not None:
         result.setdefault('system_prompt', system_prompt)

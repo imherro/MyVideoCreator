@@ -19,6 +19,7 @@ test('project setup validates required fields and creates the reviewed API paylo
   assert.equal(payload.episode_title,'第 01 集');
   assert.equal(payload.episode_count,12);
   assert.equal(payload.platform,'抖音');
+  assert.equal(payload.video_resolution,'720p');
   assert.deepEqual(payload.generation_policy.text,{providerId:'ark',modelId:'t'});
   assert.deepEqual(payload.film_bible.story,{worldEra:'江南'});
   assert.deepEqual(payload.film_bible.style.avoidItems,['高饱和','磨皮']);

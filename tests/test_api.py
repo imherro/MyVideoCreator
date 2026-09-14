@@ -422,6 +422,10 @@ def test_visual_reference_queue_validates_server_capability_and_persists_ownersh
         monkeypatch.setattr(visual_references,'resolve_image_model_capabilities',lambda provider,model_id:{'image_reference':True})
         accepted=c.post(f'/api/projects/{p["id"]}/jobs',json=payload)
         assert accepted.status_code==200,accepted.text
+        duplicate_payload={**payload,'submission_id':'phase3-state-reference-duplicate'}
+        duplicate=c.post(f'/api/projects/{p["id"]}/jobs',json=duplicate_payload)
+        assert duplicate.status_code==409
+        assert '已有任务' in duplicate.text
         job=accepted.json();generation=(
             job['project_document']['filmBible']['visual']['versions'][state_version]
             ['provenance']['referenceGeneration']

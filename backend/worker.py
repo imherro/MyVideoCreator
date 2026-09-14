@@ -1,4 +1,4 @@
-"""A serial GPU queue with immutable job inputs and durable provider handles."""
+"""A durable queue: local inference is serialized while Ark jobs may run concurrently."""
 import base64
 import json
 import mimetypes
@@ -17,10 +17,14 @@ from .editor_renderer import EditorRenderCompiler
 from .providers.common import RecoverableProviderError,assets_for,checked,download_result,register
 
 class Worker:
-    def __init__(self):
+    def __init__(self, concurrency=4):
         self.halt=threading.Event()
-        self.thread=None
+        self.threads=[]
         self.busy=False
+        self.concurrency=max(1,int(concurrency))
+        self.activity_lock=threading.Lock()
+        self.active_count=0
+        self.local_execution_lock=threading.Lock()
         self.process_lock=ProcessLock(s.DATA/'worker.lock')
     def start(self):
         self.process_lock.acquire()
@@ -35,17 +39,36 @@ class Worker:
                     WHERE status='interrupted' AND provider_job_id IS NULL
                     AND phase='服务已重启，可凭上游任务编号恢复查询'""")
             self.halt.clear()
-            self.thread=threading.Thread(target=self.run_owned,daemon=True,name='studio-worker')
-            self.thread.start()
+            self.threads=[
+                threading.Thread(target=self.loop,daemon=True,name=f'studio-worker-{index + 1}')
+                for index in range(self.concurrency)
+            ]
+            for thread in self.threads:thread.start()
         except BaseException:
             self.process_lock.release()
             raise
-    def run_owned(self):
-        try:self.loop()
-        finally:self.process_lock.release()
     def stop(self):
         self.halt.set()
-        if self.thread: self.thread.join(timeout=3)
+        for thread in self.threads:thread.join(timeout=3)
+        stopped=not any(thread.is_alive() for thread in self.threads)
+        self.threads=[]
+        # If an HTTP provider is still unwinding, retain process ownership;
+        # the OS releases the lock at process exit and no second worker can
+        # start against the same queue in the meantime.
+        if stopped:self.process_lock.release()
+
+    def mark_active(self,delta):
+        with self.activity_lock:
+            self.active_count=max(0,self.active_count+delta)
+            self.busy=self.active_count>0
+
+    def ark_job(self,job):
+        if job.get('input',{}).get('provider','local')=='local':return False
+        with s.db() as c:
+            row=c.execute('SELECT provider FROM job_private WHERE job_id=?',(job['id'],)).fetchone()
+        if not row:return False
+        try:return json.loads(row['provider']).get('type')=='volcengine_ark'
+        except (TypeError,ValueError):return False
     def loop(self):
         while not self.halt.is_set():
             failed=[]
@@ -67,9 +90,13 @@ class Worker:
             if not row:
                 self.halt.wait(1)
                 continue
-            job=s.unpack(row); self.busy=True
+            job=s.unpack(row); self.mark_active(1)
             try:
-                result=self.execute(job)
+                if self.ark_job(job):
+                    result=self.execute(job)
+                else:
+                    # Local GPU runtimes and legacy providers remain serialized.
+                    with self.local_execution_lock:result=self.execute(job)
                 if not self.cancelled(job): s.job_update(job['id'],status='succeeded',result=result,progress=100,phase='已完成')
             except InterruptedError:
                 if self.halt.is_set():
@@ -88,7 +115,7 @@ class Worker:
                 else:
                     s.job_update(job['id'],status='failed',error=message[:1200],phase='生成失败')
             finally:
-                self.busy=False
+                self.mark_active(-1)
     def cancelled(self,job):
         with s.db() as c:
             row=c.execute('SELECT status FROM jobs WHERE id=?',(job['id'],)).fetchone()

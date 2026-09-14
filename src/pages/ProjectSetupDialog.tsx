@@ -55,6 +55,7 @@ export function ProjectSetupDialog({
             <div className="two-fields">
               <label>画幅 *<select value={draft.ratio} onChange={(event)=>patch({ratio:event.target.value as ProjectSetupDraft["ratio"]})}><option>16:9</option><option>9:16</option><option>1:1</option></select></label>
               <label>单集目标时长（秒）*<input list="project-duration-options" type="number" min={5} max={3000} value={draft.duration} onChange={(event)=>patch({duration:Number(event.target.value)})}/><datalist id="project-duration-options">{DURATION_OPTIONS.map((value)=><option value={value} key={value}/>)}</datalist></label>
+              <label>默认视频分辨率 *<select value={draft.videoResolution} onChange={(event)=>patch({videoResolution:event.target.value as ProjectSetupDraft["videoResolution"]})}><option value="480p">480p（测试）</option><option value="720p">720p</option><option value="1080p">1080p</option></select><small>用于新建视频任务；仍可在单个镜头中覆盖。</small></label>
               <label>总集数 *<input type="number" min={1} max={500} value={draft.episodeCount} onChange={(event)=>patch({episodeCount:Number(event.target.value)})}/><small>原著章节数不等于成片集数，可按改编节奏设置。</small></label>
               <label>发布平台 *<select value={draft.platform} onChange={(event)=>patch({platform:event.target.value})}>{PLATFORM_OPTIONS.map((value)=><option value={value} key={value}>{value}</option>)}</select><small>用于 AI 判断节奏、钩子和付费卡点。</small></label>
             </div>
@@ -78,7 +79,7 @@ export function ProjectSetupDialog({
           </section>
         </div>
         <footer>
-          <div className="setup-summary"><b>{draft.name.trim() || "未填写作品名"}</b><span>{draft.episodeCount || 0} 集 · {draft.platform} · {draft.ratio} · 单集 {draft.duration || 0} 秒</span></div>
+          <div className="setup-summary"><b>{draft.name.trim() || "未填写作品名"}</b><span>{draft.episodeCount || 0} 集 · {draft.platform} · {draft.ratio} · {draft.videoResolution} · 单集 {draft.duration || 0} 秒</span></div>
           <div>{onClose && <button onClick={onClose} disabled={busy}>取消</button>}<button className="primary" onClick={create} disabled={busy}>{busy?<LoaderCircle size={16} className="spin"/>:null}创建并进入 EP01</button></div>
           {!!errors.length && <div className="error setup-errors">{errors.join("；")}</div>}
         </footer>

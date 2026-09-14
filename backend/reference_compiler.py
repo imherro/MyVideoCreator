@@ -159,12 +159,18 @@ def compile_shot_image_input(
     if not shot:
         return result
     rows = _binding_rows(shot)
+    visual = ((document.get('filmBible') or {}).get('visual') or {})
+    active_cards = [
+        card for card in (visual.get('cards') or {}).values()
+        if isinstance(card, dict) and not card.get('deletedAt') and card.get('status') != 'deprecated'
+    ]
+    if active_cards and not rows:
+        raise ValueError('项目已有 Film Bible，所选分镜尚未绑定角色、场景或道具视觉版本')
     if not rows:
         return result
     result.pop('model_capabilities', None)
     result.pop('allow_reference_text_fallback', None)
 
-    visual = ((document.get('filmBible') or {}).get('visual') or {})
     cards = visual.get('cards') or {}
     versions = visual.get('versions') or {}
     compiled = []
@@ -203,6 +209,8 @@ def compile_shot_image_input(
         })
         constraint_lines.extend(_constraint_lines(index, group, chain))
 
+    if active_cards and not compiled:
+        raise ValueError('项目已有 Film Bible，但所选分镜没有可用的视觉绑定')
     if not compiled:
         return result
 

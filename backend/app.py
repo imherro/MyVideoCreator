@@ -288,6 +288,7 @@ class ProjectCreate(BaseModel):
     style:str|None=Field(default=None,max_length=200)
     ratio:str|None=None
     duration:float|None=Field(default=None,ge=5,le=3000)
+    video_resolution:str=Field(default='720p')
     episode_count:int=Field(default=1,ge=1,le=500)
     platform:str=Field(default='通用短视频',min_length=1,max_length=100)
     brief:str|None=Field(default=None,max_length=24000)
@@ -309,6 +310,9 @@ def project_create_document(body:ProjectCreate):
             raise ValueError('画幅只支持 16:9、9:16 或 1:1')
         document['ratio']=body.ratio
     if body.duration is not None:document['duration']=body.duration
+    if body.video_resolution not in ('480p','720p','1080p'):
+        raise ValueError('视频分辨率只支持 480p、720p 或 1080p')
+    document['videoResolution']=body.video_resolution
     if body.brief is not None:document['brief']=body.brief
     if body.generation_policy is not None:
         document['generationPolicy']=validate_generation_policy(
@@ -800,6 +804,12 @@ def create_job_record(c,pid,body):
         if old['node_id']!=body.node_id or old['kind']!=body.kind or json.loads(old['input'])!=body.input:
             raise HTTPException(409,'同一提交标识不能对应不同输入')
         return s.unpack(old)
+    if body.input.get('visual_reference') is not None:
+        active=c.execute("""SELECT * FROM jobs
+            WHERE project_id=? AND node_id=? AND kind=? AND status IN ('queued','running')
+            ORDER BY created DESC LIMIT 1""",(pid,body.node_id,body.kind)).fetchone()
+        if active:
+            raise HTTPException(409,'该资产参考图已有任务排队或运行中，请等待完成后再生成')
     if body.kind!='export' and not body.input.get('prompt','').strip(): raise ValueError('请输入生成描述')
     if body.kind=='video':
         from .state_review import require_video_source_reviews
@@ -1536,6 +1546,11 @@ async def run_workflow(pid:str,request:Request):
             reference_asset(pid,aid)
         provider=providers.get(data.get('provider','local'))
         if provider and provider.get('type')=='volcengine_ark':
+            if kind=='video':
+                data['parameters']={
+                    'resolution':p['document'].get('videoResolution','720p'),
+                    **(data.get('parameters') or {}),
+                }
             from .providers.volcengine_ark import max_image_references
             reference_count=len(data['asset_ids'])+generated_image_parents
             if kind=='video' and reference_count>1:

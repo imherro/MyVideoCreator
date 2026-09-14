@@ -180,6 +180,7 @@ import { ProjectSetupDialog } from "./pages/ProjectSetupDialog";
 import {
   applyRatioChange,
   applyTargetDuration,
+  applyVideoResolution,
   bibleFields,
   mergeBibleFields,
   projectSetupPayload,
@@ -233,6 +234,7 @@ type Doc = {
   style: string;
   ratio: string;
   duration: number;
+  videoResolution: string;
   applied?: string[];
   editor?: EditorDocument;
 };
@@ -605,7 +607,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     [revisions, setRevisions] = useState<Any[]>([]),
     [trashItems, setTrashItems] = useState<Any>({ projects: [], assets: [], sources: [], chapters: [] }),
     [preview, setPreview] = useState<Asset | null>(null);
-  const [sourceLibraryRevision, setSourceLibraryRevision] = useState(0);
+  const [workflowDataRevision, setWorkflowDataRevision] = useState({ source: 0, adaptation: 0, script: 0 });
   const [previewTimeline, setPreviewTimeline] = useState(false);
   const [booted, setBooted] = useState(false);
   const [projectSetupOpen, setProjectSetupOpen] = useState(false);
@@ -638,6 +640,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       new Map<string, { width?: number; height?: number }>(),
     ),
     fileInput = useRef<HTMLInputElement>(null),
+    observedCompletedJobs = useRef(new Set<string>()),
     { fitView } = useReactFlow(),
     updateNodeInternals = useUpdateNodeInternals();
   const [layoutVersion, setLayoutVersion] = useState(0);
@@ -845,9 +848,35 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         const data = JSON.parse(e.data);
         const pid = current.current.project?.id;
         if (data.project_id === pid && data.type === "production" && typeof data.revision === "number") {
-          productionRevision.current = data.revision;
-          setProject((value) => value ? { ...value, production_revision: data.revision } : value);
           setProductions((items) => items.map((item) => item.id === current.current.project?.production_id ? { ...item, revision: data.revision } : item));
+          if (!dirty.current && !saveFlight.current && data.revision !== productionRevision.current) {
+            void api(`/projects/${pid}`).then((latest) => {
+              if (current.current.project?.id !== pid || dirty.current || saveFlight.current) return;
+              const projectedDocument = deriveManagedGraph(latest.document);
+              const openedProject = { ...latest, document: projectedDocument };
+              revision.current = latest.revision;
+              productionRevision.current = latest.production_revision;
+              current.current = { project: openedProject, doc: projectedDocument };
+              setProject(openedProject);
+              setDoc(projectedDocument);
+              setSaved("已同步");
+            }).catch(report);
+          }
+        }
+        if (data.project_id === pid && data.type === "project" && typeof data.revision === "number") {
+          if (!dirty.current && !saveFlight.current && data.revision !== revision.current) {
+            void api(`/projects/${pid}`).then((latest) => {
+              if (current.current.project?.id !== pid || dirty.current || saveFlight.current) return;
+              const projectedDocument = deriveManagedGraph(latest.document);
+              const openedProject = { ...latest, document: projectedDocument };
+              revision.current = latest.revision;
+              productionRevision.current = latest.production_revision;
+              current.current = { project: openedProject, doc: projectedDocument };
+              setProject(openedProject);
+              setDoc(projectedDocument);
+              setSaved("已同步");
+            }).catch(report);
+          }
         }
         if (data.project_id === pid && data.type === "job")
           refresh(pid!).catch(() => {});
@@ -1026,23 +1055,75 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     const completed = jobs
       .filter(
         (j) =>
-          j.status === "succeeded" && j.result && !doc.applied?.includes(j.id),
+          j.status === "succeeded" && j.result &&
+          !["source_analysis", "adaptation_generation", "script_generation"].includes(j.input?.stage) &&
+          !doc.applied?.includes(j.id),
       )
       .sort((a, b) => a.created - b.created);
     if (!completed.length) return;
+    const importedStoryboard = completed.find((job) => job.kind === "storyboard" && job.result?.shots);
     update((d) => {
       let next = d;
       for (const job of completed) {
-        next = job.node_id.startsWith("visual-version:")
-          ? acceptVisualReferenceResult(next, job)
-          : acceptResult(next, job, jobs);
+        if (job.node_id.startsWith("visual-version:")) {
+          next = acceptVisualReferenceResult(next, job);
+        } else if (job.kind === "storyboard" && job.result?.shots) {
+          const storyboardNode = next.nodes.find(
+            (item) => item.id === job.node_id && item.data.kind === "storyboard",
+          );
+          const withFilmBible = job.result.filmBible
+            ? { ...next, filmBible: { ...next.filmBible, ...job.result.filmBible } }
+            : next;
+          next = importStoryboardShots(
+            withFilmBible,
+            job.result.shots,
+            config.providers,
+            system.models,
+            id,
+            storyboardNode?.id,
+          );
+        } else {
+          next = acceptResult(next, job, jobs);
+        }
       }
       return {
         ...next,
         applied: [...(d.applied || []), ...completed.map((j) => j.id)],
       };
     });
-  }, [jobs, doc?.applied]);
+    if (importedStoryboard) {
+      setNotice(`分镜规划已完成并自动导入 ${importedStoryboard.result.shots.length} 个分镜，画布节点和连线已同步建立`);
+    }
+  }, [jobs, doc?.applied, config.providers, system.models]);
+  useEffect(() => {
+    const completed = jobs.filter((job) => job.status === "succeeded");
+    const newlyCompleted = completed.filter((job) => !observedCompletedJobs.current.has(job.id));
+    completed.forEach((job) => observedCompletedJobs.current.add(job.id));
+    const workflowCompleted = newlyCompleted.filter((job) =>
+      ["source_analysis", "adaptation_generation", "script_generation"].includes(job.input?.stage),
+    );
+    if (workflowCompleted.length) {
+      setWorkflowDataRevision((value) => ({
+        source: value.source + Number(workflowCompleted.some((job) => job.input?.stage === "source_analysis")),
+        adaptation: value.adaptation + Number(workflowCompleted.some((job) => ["source_analysis", "adaptation_generation"].includes(job.input?.stage))),
+        script: value.script + Number(workflowCompleted.some((job) => job.input?.stage === "script_generation")),
+      }));
+      if (workflowCompleted.some((job) => job.input?.stage === "script_generation")) {
+        const pid = current.current.project?.id;
+        if (pid && !dirty.current && !saveFlight.current) {
+          void api(`/projects/${pid}`).then((latest) => {
+            if (current.current.project?.id !== pid || dirty.current) return;
+            const projectedDocument = deriveManagedGraph(latest.document);
+            revision.current = latest.revision;
+            productionRevision.current = latest.production_revision;
+            current.current = { project: { ...latest, document: projectedDocument }, doc: projectedDocument };
+            setProject({ ...latest, document: projectedDocument });
+            setDoc(projectedDocument);
+          }).catch(report);
+        }
+      }
+    }
+  }, [jobs]);
   useEffect(() => {
     const context = (document as any).modelContext;
     if (!context?.registerTool) return;
@@ -1413,7 +1494,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setProductions(await api("/productions"));
     if (kind === "asset" && currentProjectId && item.production_id === project?.production_id)
       await refresh(currentProjectId);
-    if (kind === "source" || kind === "chapter") setSourceLibraryRevision((value) => value + 1);
+    if (kind === "source" || kind === "chapter") setWorkflowDataRevision((value) => ({ ...value, source: value.source + 1, adaptation: value.adaptation + 1 }));
     await loadTrash();
     const label = kind === "project" ? "项目" : kind === "asset" ? "素材" : kind === "source" ? "原著" : "章节";
     setNotice(`${label}“${item.name}”已恢复`);
@@ -1472,6 +1553,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         provider: n.data.provider || "local",
         asset_ids: sourceAssets(n.id),
         allow_cloud: Boolean(targetProvider && !targetProvider.local),
+        parameters: n.data.kind === "video" && targetProvider?.type === "volcengine_ark"
+          ? { resolution: doc?.videoResolution || "720p", ...(n.data.parameters || {}) }
+          : n.data.parameters,
         prompt: String(n.data.prompt || ""),
         ratio: doc?.ratio || "16:9",
         size: n.data.resolution || "1024x1024",
@@ -1785,6 +1869,10 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     const version = visual.versions[versionId];
     const card = version ? visual.cards[version.cardId] : undefined;
     if (!version || !card) throw new Error("视觉版本不存在");
+    const alreadyActive = jobs.find((job) =>
+      job.node_id === `visual-version:${versionId}` && ["queued", "running"].includes(job.status),
+    );
+    if (alreadyActive) throw new Error("该资产参考图已在排队或生成中，请勿重复提交");
     const target = resolveVisualGenerationTarget(
       card,
       snapshot.doc.generationPolicy,
@@ -2251,9 +2339,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         </button>
         <span className="divider" />
         <button
-          className={panel === "projects" ? "project-menu active" : "project-menu"}
-          onClick={() => setPanel(panel === "projects" ? null : "projects")}
-          title="打开 Production 与 Episode 列表"
+          className={panel === "projectInfo" ? "project-menu active" : "project-menu"}
+          onClick={() => { setProjectSettingsTab("production"); setPanel(panel === "projectInfo" ? null : "projectInfo"); }}
+          title="打开当前项目设置"
         >
           <FolderOpen size={15} />
           项目 · {currentProduction?.name || project.name}
@@ -2453,7 +2541,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             projectId={project.id}
             providers={config.providers}
             defaultTarget={(doc as Any).generationPolicy?.text}
-            refreshKey={sourceLibraryRevision}
+            refreshKey={workflowDataRevision.source}
             request={api}
             notify={setNotice}
             report={report}
@@ -2464,6 +2552,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             projectId={project.id}
             providers={config.providers}
             defaultTarget={(doc as Any).generationPolicy?.text}
+            refreshKey={workflowDataRevision.adaptation}
             request={api}
             notify={setNotice}
             report={report}
@@ -2480,6 +2569,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             currentEpisodeNo={project.episode_no}
             providers={config.providers}
             defaultTarget={(doc as Any).generationPolicy?.text}
+            refreshKey={workflowDataRevision.script}
             request={api}
             notify={setNotice}
             report={report}
@@ -3456,6 +3546,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           </div>
         </aside>
       )}
+      {panel && <div className="side-panel-scrim" onClick={() => setPanel(null)} aria-hidden="true" />}
       {panel && (
         <div
           className={
@@ -3691,6 +3782,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   <div className="two-fields">
                     <label>画幅<select value={doc.ratio} onChange={(event)=>{update((document)=>applyRatioChange(document,event.target.value));setNotice("画幅已修改；已有分镜图和视频保留并标记为待更新");}}><option>16:9</option><option>9:16</option><option>1:1</option></select><small>修改后保留镜头、资产和 Timeline。</small></label>
                     <label>目标时长（秒）<input type="number" min="5" max="3000" value={doc.duration} onChange={(event)=>update((document)=>applyTargetDuration(document,Number(event.target.value)))}/><small>策划目标，不会裁剪已有镜头或成片。</small></label>
+                    <label>默认视频分辨率<select value={doc.videoResolution || "720p"} onChange={(event)=>{update((document)=>applyVideoResolution(document,event.target.value));setNotice("视频分辨率已修改；已有视频保留并标记为待更新");}}><option value="480p">480p（测试）</option><option value="720p">720p</option><option value="1080p">1080p</option></select><small>用于新提交的视频任务，单镜头参数仍可覆盖。</small></label>
                   </div>
                   <div className="duration-impact"><span>目标 {doc.duration} 秒</span><span>镜头合计 {doc.shots.reduce((sum,shot)=>sum+Number(shot.duration||0),0).toFixed(1)} 秒</span><span>剪辑 {Math.max(0,...(doc.editor?.timeline?.tracks||[]).flatMap((track)=>track.elements.map((element)=>Number(element.e)||0))).toFixed(1)} 秒</span></div>
                 </>}
