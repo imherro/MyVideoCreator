@@ -88,6 +88,7 @@ import { PromptLibrary } from "./PromptLibrary";
 import { ModelSelector } from "./ModelSelector";
 import { ArkProviderSettings } from "./ArkProviderSettings";
 import { GenerationPolicyPanel } from "./GenerationPolicyPanel";
+import { VisualStylePicker } from "./VisualStylePicker";
 import type { GenerationPolicy } from "./generationPolicy";
 import { FilmBiblePanel } from "./filmBible/FilmBiblePanel";
 import {
@@ -3540,7 +3541,11 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 {projectSettingsTab === "production" ? <>
                   <h3>整部作品设置</h3>
                   <label>作品名称<div className="inline-save-field"><input maxLength={100} value={productionNameDraft} onChange={(event)=>setProductionNameDraft(event.target.value)}/><button disabled={!productionNameDraft.trim() || productionNameDraft.trim() === currentProduction?.name} onClick={()=>renameProduction(productionNameDraft).catch(report)}>保存名称</button></div><small>修改作品名称不会改变任何 Episode 标题，也不会触发生成。</small></label>
-                  <label>高层视觉风格<div className="inline-save-field"><input maxLength={200} value={visualStyleDraft} onChange={(event)=>setVisualStyleDraft(event.target.value)}/><button disabled={!visualStyleDraft.trim() || visualStyleDraft.trim() === doc.style} onClick={()=>{update((document)=>setProjectVisualStyle(document,visualStyleDraft.trim()));setNotice("视觉风格已应用；旧媒体保留，相关生成结果已标记为待更新");}}>应用风格</button></div><small>修改后会把已生成的分镜图和视频标记为待更新；旧媒体和剪辑内容会保留，不会自动生成。</small></label>
+                  <div className="visual-style-setting">
+                    <VisualStylePicker value={visualStyleDraft} onChange={setVisualStyleDraft} label="高层视觉风格" hint="选择预设或直接输入自定义风格。应用后会统一进入资产、分镜图和视频的生成上下文。"/>
+                    <button disabled={!visualStyleDraft.trim() || visualStyleDraft.trim() === doc.style} onClick={()=>{update((document)=>setProjectVisualStyle(document,visualStyleDraft.trim()));setNotice("视觉风格已应用；旧媒体保留，相关生成结果已标记为待更新");}}>应用风格</button>
+                    <small>修改后会把已生成的分镜图和视频标记为待更新；旧媒体和剪辑内容会保留，不会自动生成。</small>
+                  </div>
                   <GenerationPolicyPanel value={doc.generationPolicy} providers={config.providers} localModels={system.models} onChange={(generationPolicy)=>update((document)=>({...document,generationPolicy}))}/>
                   <div className="project-bible-heading"><div><span className="eyebrow">PROJECT BIBLE</span><h3>创作约束</h3></div><button className="quiet" onClick={()=>setPanel("filmBible")}><BookOpen size={15}/>打开塑角造景 {Object.keys(visualBibleOf(doc).cards).length || ""}<ChevronRight size={14}/></button></div>
                   <p className="muted">这里只修改文字约束，不会覆盖已有 VisualCard、VisualVersion 或锁定参考图。</p>

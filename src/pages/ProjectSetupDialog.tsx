@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { BookOpen, Film, LoaderCircle, Settings2, X } from "lucide-react";
 import { GenerationPolicyPanel } from "../GenerationPolicyPanel";
+import { VisualStylePicker } from "../VisualStylePicker";
 import {
   defaultProjectSetupDraft,
   validateProjectSetupDraft,
@@ -49,8 +50,8 @@ export function ProjectSetupDialog({
               <label>作品名称 *<input autoFocus maxLength={100} value={draft.name} onChange={(event)=>patch({name:event.target.value})} placeholder="例如：花信未迟"/></label>
               <label>EP01 标题<input maxLength={100} value={draft.episodeTitle} onChange={(event)=>patch({episodeTitle:event.target.value})}/></label>
             </div>
-            <div className="three-fields">
-              <label>视觉风格 *<input maxLength={200} value={draft.style} onChange={(event)=>patch({style:event.target.value})} list="project-style-presets"/><datalist id="project-style-presets"><option value="电影写实"/></datalist></label>
+            <VisualStylePicker value={draft.style} onChange={(style)=>patch({style})}/>
+            <div className="two-fields">
               <label>画幅 *<select value={draft.ratio} onChange={(event)=>patch({ratio:event.target.value as ProjectSetupDraft["ratio"]})}><option>16:9</option><option>9:16</option><option>1:1</option></select></label>
               <label>目标时长（秒）*<input type="number" min={5} max={3000} value={draft.duration} onChange={(event)=>patch({duration:Number(event.target.value)})}/></label>
             </div>
