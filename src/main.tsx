@@ -128,6 +128,7 @@ import {
 import { visualBibleOf } from "./filmBible/types";
 import type { VoiceProfile } from "./filmBible/types";
 import { acceptVoiceResult, saveVoiceProfile, setVoiceLocked, voiceProfilesOf } from "./filmBible/voices";
+import { catalogVoice, CUSTOM_VOICE_ID, DOUBAO_TTS2_VOICES } from "./filmBible/voiceCatalog";
 import { StoryboardWorkspace } from "./pages/StoryboardWorkspace";
 import { VideoProductionWorkspace } from "./pages/VideoProductionWorkspace";
 import { TaskCenter } from "./pages/TaskCenter";
@@ -4726,10 +4727,13 @@ function SettingsPanel({
           {p.type !== "volcengine_ark" && (
             <label>
               {p.type === "volcengine_speech" ? "默认音色 ID" : "默认模型 ID"}
-              <input
-                value={p.model || ""}
-                onChange={(e) => patchProvider(i, { model: e.target.value })}
-              />
+              {p.type === "volcengine_speech" ? <>
+                <select value={catalogVoice(p.model || "")?.id || CUSTOM_VOICE_ID} onChange={(e)=>patchProvider(i,{model:e.target.value === CUSTOM_VOICE_ID ? "" : e.target.value})}>
+                  {[...new Set(DOUBAO_TTS2_VOICES.map((item)=>item.category))].map((category)=><optgroup key={category} label={category}>{DOUBAO_TTS2_VOICES.filter((item)=>item.category===category).map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</optgroup>)}
+                  <option value={CUSTOM_VOICE_ID}>自定义 / 声音复刻 ID…</option>
+                </select>
+                {!catalogVoice(p.model || "") && <input value={p.model || ""} placeholder="粘贴自定义 Speaker ID" onChange={(e)=>patchProvider(i,{model:e.target.value})}/>} 
+              </> : <input value={p.model || ""} onChange={(e) => patchProvider(i, { model: e.target.value })}/>} 
             </label>
           )}
           <label>

@@ -20,6 +20,7 @@ import type {
   VoiceProfile,
 } from "./types.ts";
 import { defaultVoiceProfile } from "./voices.ts";
+import { catalogVoice, CUSTOM_VOICE_ID, DOUBAO_TTS2_VOICES } from "./voiceCatalog.ts";
 import { visualKindLabels, visualStatusLabels } from "./types.ts";
 import {
   isVersionBound,
@@ -369,7 +370,9 @@ export function FilmBiblePanel({
           <div className="film-bible-section-title"><b>角色固定音色</b><small>跨镜头统一对白声纹</small></div>
           {!speechProviders.length ? <p className="warning-text">尚未配置豆包语音。请到“设置 → 模型服务”添加豆包语音并填写独立 Speech API Key。</p> : <>
             <label>语音服务<select value={voiceDraft.providerId} disabled={voiceDraft.status === "locked"} onChange={(event)=>setVoiceDraft({...voiceDraft,providerId:event.target.value})}>{speechProviders.map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-            <label>音色 ID<input value={voiceDraft.voiceType} disabled={voiceDraft.status === "locked"} onChange={(event)=>setVoiceDraft({...voiceDraft,voiceType:event.target.value})}/><small>可填写预置音色、音色设计或声音复刻返回的 Speaker ID。</small></label>
+            <label>预置音色<select value={catalogVoice(voiceDraft.voiceType)?.id || CUSTOM_VOICE_ID} disabled={voiceDraft.status === "locked"} onChange={(event)=>setVoiceDraft({...voiceDraft,voiceType:event.target.value === CUSTOM_VOICE_ID ? "" : event.target.value})}>{[...new Set(DOUBAO_TTS2_VOICES.map((item)=>item.category))].map((category)=><optgroup key={category} label={category}>{DOUBAO_TTS2_VOICES.filter((item)=>item.category===category).map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</optgroup>)}<option value={CUSTOM_VOICE_ID}>自定义 / 声音复刻 ID…</option></select></label>
+            {!catalogVoice(voiceDraft.voiceType) && <label>自定义 Speaker ID<input value={voiceDraft.voiceType} disabled={voiceDraft.status === "locked"} placeholder="粘贴声音复刻或音色设计返回的 ID" onChange={(event)=>setVoiceDraft({...voiceDraft,voiceType:event.target.value})}/><small>声音复刻训练完成后，把控制台返回的 Speaker ID 粘贴到这里。</small></label>}
+            {catalogVoice(voiceDraft.voiceType) && <p className="muted">Speaker ID：{voiceDraft.voiceType}</p>}
             <label>试听台词<textarea value={voiceDraft.previewText} disabled={voiceDraft.status === "locked"} onChange={(event)=>setVoiceDraft({...voiceDraft,previewText:event.target.value})}/></label>
             <div className="two-fields">
               <label>语速<select value={voiceDraft.parameters.speechRate} disabled={voiceDraft.status === "locked"} onChange={(event)=>setVoiceDraft({...voiceDraft,parameters:{...voiceDraft.parameters,speechRate:Number(event.target.value)}})}><option value={-25}>较慢</option><option value={0}>正常</option><option value={25}>较快</option></select></label>
