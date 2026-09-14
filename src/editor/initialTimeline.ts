@@ -66,9 +66,21 @@ export function planInitialTimeline(
     const duration = Math.min(plannedDuration, mediaDuration);
     const elementId = `e-${newId()}`;
     const shotStart = cursor;
-    const dialogueAssets = assets.filter((candidate) =>
+    const dialogueCandidates = assets.filter((candidate) =>
       candidate.kind === "audio" &&
       String(candidate.metadata?.input?.dialogue?.shotUid || "") === String(shot.uid || shot.id || ""),
+    ).sort((left, right) => Number(right.created || 0) - Number(left.created || 0));
+    const latestDialogueAssets = new Map<string, EditorAsset>();
+    dialogueCandidates.forEach((candidate) => {
+      const dialogueId = String(candidate.metadata?.input?.dialogue?.id || candidate.id);
+      if (!latestDialogueAssets.has(dialogueId)) latestDialogueAssets.set(dialogueId, candidate);
+    });
+    const dialogueOrder = new Map(
+      (Array.isArray(shot.dialogues) ? shot.dialogues : []).map((dialogue: Value, dialogueIndex: number) => [String(dialogue.id), dialogueIndex]),
+    );
+    const dialogueAssets = [...latestDialogueAssets.values()].sort((left, right) =>
+      (dialogueOrder.get(String(left.metadata?.input?.dialogue?.id)) ?? 999) -
+      (dialogueOrder.get(String(right.metadata?.input?.dialogue?.id)) ?? 999),
     );
     elements.push({
       id: elementId,

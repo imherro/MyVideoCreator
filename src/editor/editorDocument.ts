@@ -5,6 +5,7 @@ export type EditorAsset = {
   name: string;
   kind: string;
   url: string;
+  created?: number;
   metadata: Record<string, any>;
 };
 

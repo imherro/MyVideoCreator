@@ -121,3 +121,21 @@ test("fixed character dialogue becomes an audio track and replaces generated vid
   assert.equal(plan.timeline.tracks[1].elements[0].s, 0);
   assert.equal(plan.timeline.tracks[1].elements[0].e, 2.4);
 });
+
+test("initial edit uses only the latest take when dialogue is regenerated", () => {
+  const plan = planInitialTimeline(
+    {
+      shots: [{ id: "shot-1", uid: "shot-uid", videoNode: "video-node", duration: 5, dialogues: [{ id: "dialogue-1" }] }],
+      nodes: [{ id: "video-node", data: { assetId: "video" } }],
+      assets: [
+        { id: "video", name: "镜头", kind: "video", url: "/video", created: 1, metadata: { duration: 5 } },
+        { id: "old-take", name: "旧对白", kind: "audio", url: "/old", created: 2, metadata: { duration: 1, input: { dialogue: { id: "dialogue-1", shotUid: "shot-uid" } } } },
+        { id: "new-take", name: "新对白", kind: "audio", url: "/new", created: 3, metadata: { duration: 1.2, input: { dialogue: { id: "dialogue-1", shotUid: "shot-uid" } } } },
+      ],
+      resolution: { width: 1280, height: 720 },
+    },
+    () => "id",
+  );
+  assert.equal(plan.timeline.tracks[1].elements.length, 1);
+  assert.equal(plan.timeline.tracks[1].elements[0].metadata.assetId, "new-take");
+});

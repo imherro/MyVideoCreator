@@ -69,6 +69,7 @@ export function FilmBiblePanel({
   onGenerateVoice,
   onLockVoice,
   onGenerateCharacterDialogue,
+  onRegenerateDialogue,
 }: {
   visual: VisualBible;
   shots: Array<Record<string, any>>;
@@ -106,6 +107,7 @@ export function FilmBiblePanel({
   onGenerateVoice: (cardId: string, profile: VoiceProfile) => Promise<void>;
   onLockVoice: (cardId: string, locked: boolean) => void;
   onGenerateCharacterDialogue: (cardId: string) => Promise<number>;
+  onRegenerateDialogue: (cardId: string, dialogueId: string) => Promise<void>;
 }) {
   const versions = useMemo(
     () =>
@@ -409,7 +411,11 @@ export function FilmBiblePanel({
                   <p title={row.text}>{row.text}</p>
                   {row.status === "failed" && row.job?.error && <small className="error" title={row.job.error}>{row.job.error}</small>}
                 </div>
-                <div className="voice-dialogue-state"><span className={`voice-state ${row.status}`}>{statusLabel}</span>{row.asset && <button className="secondary" onClick={()=>onPreviewAsset(row.asset!)}><Volume2 size={13}/>试听</button>}</div>
+                <div className="voice-dialogue-state">
+                  <span className={`voice-state ${row.status}`}>{statusLabel}</span>
+                  {row.asset && <button className="secondary" onClick={()=>onPreviewAsset(row.asset!)}><Volume2 size={13}/>试听</button>}
+                  {!(["queued","running","syncing"] as string[]).includes(row.status) && <button disabled={voiceBusy} onClick={()=>{setVoiceBusy(true);setVoiceError("");void onRegenerateDialogue(card.id,row.id).catch((reason)=>setVoiceError(reason?.message||String(reason))).finally(()=>setVoiceBusy(false));}}>{row.status === "ready" ? "重新生成" : "生成"}</button>}
+                </div>
               </div>;
             })}</div>}
             {voiceError && <p className="error">{voiceError}</p>}

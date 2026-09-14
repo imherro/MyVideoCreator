@@ -2331,6 +2331,41 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       setNotice(`已并发提交 ${needed.length} 条${card?.name || "角色"}对白`);
       return needed.length;
     },
+    onRegenerateDialogue: async (cardId, dialogueId) => {
+      const profile = voiceProfilesOf(doc)[cardId];
+      const card = visualBibleOf(doc).cards[cardId];
+      if (!profile || profile.status !== "locked") throw new Error("请先试听并锁定角色主音色");
+      const match = doc.shots.flatMap((shot) =>
+        (Array.isArray(shot.dialogues) ? shot.dialogues : [])
+          .filter((dialogue: Any) => dialogue.characterCardId === cardId && dialogue.id === dialogueId)
+          .map((dialogue: Any) => ({ shot, dialogue })),
+      )[0];
+      if (!match) throw new Error("该对白已不存在，请刷新后重试");
+      const active = jobs.some((job) => job.input?.dialogue?.id === dialogueId && job.input?.dialogue?.voiceVersion === profile.version && ["queued","running"].includes(job.status));
+      if (active) throw new Error("该对白正在生成，请等待当前任务完成");
+      await save();
+      if (dirty.current) throw new Error("角色声音设定尚未保存，请先解决保存冲突");
+      await api(`/projects/${project.id}/jobs`,send("POST",{
+        node_id:`dialogue:${dialogueId}`,
+        kind:"audio",
+        submission_id:id(),
+        input:{
+          prompt:match.dialogue.text,
+          provider:profile.providerId,
+          model:profile.voiceType,
+          voice_type:profile.voiceType,
+          voice_version:profile.version,
+          character_name:card?.name || match.dialogue.characterName,
+          output_name:`${match.shot.id || "分镜"} · ${card?.name || "角色"}对白 · 新版本.mp3`,
+          asset_category:"voice",
+          emotion:match.dialogue.emotion,
+          parameters:{speech_rate:profile.parameters.speechRate,emotion:match.dialogue.emotion || profile.parameters.emotion},
+          dialogue:{id:dialogueId,shotUid:String(match.shot.uid||match.shot.id),characterCardId:cardId,voiceVersion:profile.version,text:match.dialogue.text},
+        },
+      }));
+      await refresh(project.id);
+      setNotice("对白已重新提交，旧音频仍保留在素材库");
+    },
     focusVersionId: visualFocus,
     onFocusVersion: setVisualFocus,
     onRenameCard: (cardId, name) => {
