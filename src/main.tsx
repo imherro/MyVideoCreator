@@ -129,6 +129,7 @@ import { visualBibleOf } from "./filmBible/types";
 import { StoryboardWorkspace } from "./pages/StoryboardWorkspace";
 import { VideoProductionWorkspace } from "./pages/VideoProductionWorkspace";
 import { TaskCenter } from "./pages/TaskCenter";
+import { TaskDetailPage } from "./pages/TaskDetailPage";
 import {
   createStoryboardShot,
   moveStoryboardShot,
@@ -561,6 +562,8 @@ function Studio() {
       </div>
     );
   if (!logged) return <Auth onLogin={() => setLogged(true)} />;
+  const taskId = new URLSearchParams(window.location.search).get("task");
+  if (taskId) return <TaskDetailPage jobId={taskId} request={api} />;
   return (
     <ReactFlowProvider>
       <Workspace onLogout={() => setLogged(false)} />

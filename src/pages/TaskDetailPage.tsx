@@ -1,0 +1,94 @@
+import { useEffect, useMemo, useState } from "react";
+import { ArrowLeft, Check, Clock, Download, LoaderCircle, RefreshCw, XCircle } from "lucide-react";
+import { JobProgress } from "../JobProgress";
+import { jobDebugParameters, jobElapsedSeconds } from "../jobDetail";
+
+type Value = Record<string, any>;
+
+const statusLabels: Record<string, string> = {
+  queued: "排队中", running: "运行中", succeeded: "成功", failed: "失败",
+  interrupted: "待恢复", cancelled: "已取消",
+};
+const kindLabels: Record<string, string> = {
+  text: "文本", storyboard: "分镜规划", image: "图片", video: "视频", export: "成片导出",
+};
+
+function displayTime(value?: number) {
+  return value ? new Date(value * 1000).toLocaleString() : "—";
+}
+function duration(value: number) {
+  const seconds = Math.floor(Math.max(0, value));
+  return seconds >= 60 ? `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒` : `${seconds} 秒`;
+}
+
+export function TaskDetailPage({ jobId, request }: { jobId: string; request: (path: string) => Promise<any> }) {
+  const [job, setJob] = useState<Value>();
+  const [error, setError] = useState("");
+  const [connected, setConnected] = useState(true);
+  const [now, setNow] = useState(Date.now() / 1000);
+
+  async function load() {
+    try { setJob(await request(`/jobs/${jobId}`)); setError(""); }
+    catch (reason: any) { setError(reason?.message || String(reason)); }
+  }
+
+  useEffect(() => { void load(); }, [jobId]);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now() / 1000), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    const events = new EventSource("/api/events");
+    events.onopen = () => setConnected(true);
+    events.onerror = () => setConnected(false);
+    events.onmessage = (event) => {
+      try { const payload = JSON.parse(event.data); if (payload.type === "job" && payload.id === jobId) void load(); }
+      catch { /* Ignore malformed debug events and keep the last snapshot. */ }
+    };
+    return () => events.close();
+  }, [jobId]);
+  useEffect(() => {
+    if (job) document.title = `${kindLabels[job.kind] || job.kind}任务 · 安影`;
+    return () => { document.title = "安影 · AI 视频工作室"; };
+  }, [job?.kind]);
+
+  const parameters = useMemo(() => jobDebugParameters(job?.input || {}), [job?.input]);
+  const assets = job?.result?.assets || [];
+  const text = typeof job?.result === "string" ? job.result : job?.result?.text;
+
+  return <main className="task-detail-page">
+    <header className="task-detail-header">
+      <div><span className="eyebrow">TASK DEBUG VIEW</span><h1>任务详情</h1><p>{jobId}</p></div>
+      <div><span className={`live-indicator ${connected ? "connected" : "disconnected"}`}>{connected ? "实时监控中" : "连接中断，正在重连"}</span><button className="quiet" onClick={() => void load()}><RefreshCw size={15}/>刷新</button><button onClick={() => window.close()}><ArrowLeft size={15}/>关闭窗口</button></div>
+    </header>
+    {error && <div className="error">读取失败，保留当前内容：{error}</div>}
+    {!job ? <div className="loading task-detail-loading"><LoaderCircle className="spin"/>正在读取任务</div> : <>
+      <section className="task-detail-summary">
+        <div><small>状态</small><strong className={job.status}>{job.status === "succeeded" ? <Check/> : job.status === "failed" ? <XCircle/> : <Clock/>}{statusLabels[job.status] || job.status}</strong></div>
+        <div><small>类型</small><strong>{kindLabels[job.kind] || job.kind}</strong></div>
+        <div><small>当前阶段</small><strong>{job.phase || "等待处理"}</strong></div>
+        <div><small>已用时间</small><strong>{duration(jobElapsedSeconds(job, now))}</strong></div>
+      </section>
+      <section className="task-detail-card">
+        <h2>运行状态</h2><JobProgress job={job}/>
+        <dl className="task-detail-times"><div><dt>创建</dt><dd>{displayTime(job.created)}</dd></div><div><dt>开始</dt><dd>{displayTime(job.started)}</dd></div><div><dt>更新</dt><dd>{displayTime(job.updated)}</dd></div><div><dt>完成</dt><dd>{displayTime(job.finished)}</dd></div><div><dt>节点</dt><dd>{job.node_id}</dd></div><div><dt>远程任务 ID</dt><dd>{job.provider_job_id || "—"}</dd></div></dl>
+        {job.error && <div className="error"><b>错误信息</b><pre>{job.error}</pre></div>}
+      </section>
+      <section className="task-detail-card">
+        <h2>提交给任务的提示词</h2>
+        <p className="muted">这里显示任务创建时冻结的输入，便于核对生成内容。</p>
+        <h3>用户提示词</h3><pre className="debug-block">{job.input?.prompt || "未记录"}</pre>
+        {job.input?.system_prompt && <><h3>系统提示词</h3><pre className="debug-block">{job.input.system_prompt}</pre></>}
+        <h3>请求参数</h3><pre className="debug-block">{JSON.stringify(parameters, null, 2)}</pre>
+      </section>
+      <section className="task-detail-card">
+        <h2>返回结果</h2>
+        {text && <pre className="debug-block result-text">{text}</pre>}
+        {!!assets.length && <div className="task-result-assets">{assets.map((asset: Value) => <article key={asset.id || asset.url}>
+          {asset.kind === "video" ? <video src={asset.url} controls preload="metadata"/> : asset.kind === "audio" ? <audio src={asset.url} controls/> : <img src={asset.url} alt={asset.name || "生成结果"}/>}<a href={asset.url} download={asset.name}><Download size={14}/>{asset.name || "下载结果"}</a>
+        </article>)}</div>}
+        {!text && !assets.length && <pre className="debug-block">{job.result ? JSON.stringify(job.result, null, 2) : "尚未返回结果"}</pre>}
+      </section>
+    </>}
+  </main>;
+}

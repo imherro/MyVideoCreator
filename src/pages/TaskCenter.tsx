@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, Clock, Download, LoaderCircle, Play, RefreshCw, RotateCcw, Square, XCircle } from "lucide-react";
+import { Check, Clock, Download, ExternalLink, LoaderCircle, Play, RefreshCw, RotateCcw, Square, XCircle } from "lucide-react";
 import { JobProgress } from "../JobProgress";
 import { deriveTaskCenterRows, filterTaskCenterRows, taskShotLabel, type TaskEpisode } from "../taskCenter";
+import { taskDetailHref } from "../jobDetail";
 
 type Value = Record<string, any>;
 
@@ -131,6 +132,7 @@ export function TaskCenter({
         <JobProgress job={job}/>
         {job.error && <div className="error">{job.error}</div>}
         <div className="task-card-actions">
+          <a className="task-detail-link" href={taskDetailHref(job.id)} target="_blank" rel="noopener noreferrer">任务详情 <ExternalLink size={13}/></a>
           {job.result?.assets?.map((asset: Value) => <a className="download-link" href={asset.url} download={asset.name} key={asset.id}><Download size={14}/>{asset.name}</a>)}
           {job.result?.shots && job.project_id === currentProjectId && <button onClick={() => onAdoptShots(job)}>导入分镜表</button>}
           {job.status === "interrupted" && job.provider_job_id && <button onClick={() => void mutate(`/jobs/${job.id}/resume`)}><Play size={14}/>恢复查询已有任务</button>}
