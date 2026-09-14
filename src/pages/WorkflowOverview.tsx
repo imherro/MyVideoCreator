@@ -7,6 +7,7 @@ import {
   Scissors,
 } from "lucide-react";
 import type { WorkflowStage } from "../app/workflow";
+import type { WorkflowGuide } from "../app/workflowGuide";
 
 type OverviewProps = {
   projectName: string;
@@ -18,6 +19,7 @@ type OverviewProps = {
   shotCount: number;
   videoCount: number;
   activeJobs: number;
+  guide: WorkflowGuide;
   onOpenStage: (stage: WorkflowStage) => void;
 };
 
@@ -28,13 +30,8 @@ export function WorkflowOverview(props: OverviewProps) {
     { label: "分镜", value: props.shotCount, suffix: "镜", icon: Clapperboard, stage: "storyboard" },
     { label: "视频", value: props.videoCount, suffix: "条", icon: Film, stage: "video" },
   ] as const;
-  const nextStage: WorkflowStage = props.scriptCount
-    ? props.shotCount
-      ? props.videoCount
-        ? "editor"
-        : "video"
-      : "storyboard"
-    : "script";
+  const nextStage = props.guide.recommendedStage;
+  const next = props.guide.stages[nextStage];
 
   return (
     <section className="workflow-overview">
@@ -60,8 +57,8 @@ export function WorkflowOverview(props: OverviewProps) {
       <div className="workflow-overview-grid">
         <article>
           <span className="eyebrow">NEXT STEP</span>
-          <h2>{props.videoCount ? "进入剪辑完成成片" : props.shotCount ? "生成镜头视频" : props.scriptCount ? "把剧本拆成分镜" : "从剧本开始创作"}</h2>
-          <p>工作流阶段只重新组织现有能力，项目数据仍由当前文档统一保存。</p>
+          <h2>{next?.headline || "继续制作"}</h2>
+          <p>{next?.reasons[0] || "系统根据正式数据、任务状态和过期标记判断下一步。"}</p>
           <button onClick={() => props.onOpenStage(nextStage)}>打开下一阶段</button>
         </article>
         <article>
@@ -74,4 +71,3 @@ export function WorkflowOverview(props: OverviewProps) {
     </section>
   );
 }
-

@@ -1,17 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, RefreshCw, Save, Sparkles } from "lucide-react";
+import { ArrowRight, Check, RefreshCw, Save, Sparkles } from "lucide-react";
 import { STATUS_LABELS, normalizeEpisodeSelection, splitList } from "../adaptation";
 
 type Value = Record<string, any>;
 
 export function ScriptRoomPage({
-  productionId, currentEpisodeNo, providers, defaultTarget, request, notify, report, onChanged, onSelectEpisode,
+  productionId, currentEpisodeNo, providers, defaultTarget, request, notify, report, onChanged, onSelectEpisode, onEnterEpisode,
 }: {
   productionId: string; currentEpisodeNo: number; providers: Value[]; defaultTarget?: Value;
   request: (path: string, options?: RequestInit) => Promise<any>;
   notify: (message: string) => void; report: (error: unknown) => void;
   onChanged: (projectId?: string) => void | Promise<void>;
   onSelectEpisode: (episodeNo: number) => void | Promise<void>;
+  onEnterEpisode: (episodeNo: number) => void | Promise<void>;
 }) {
   const [items, setItems] = useState<Value[]>([]);
   const [chapters, setChapters] = useState<Value[]>([]);
@@ -117,7 +118,7 @@ export function ScriptRoomPage({
           <label>角色（逗号或换行）<textarea rows={3} value={draft.characters.join("、")} onChange={(e) => patch({ characters: splitList(e.target.value) })} /></label>
           <label>场景（逗号或换行）<textarea rows={3} value={draft.scenes.join("、")} onChange={(e) => patch({ scenes: splitList(e.target.value) })} /></label>
           <label>道具（逗号或换行）<textarea rows={3} value={draft.props.join("、")} onChange={(e) => patch({ props: splitList(e.target.value) })} /></label>
-        </div></article><div className="script-state-actions"><button disabled={busy} onClick={() => run(() => transition("needs-changes"))}>退回修改</button><button disabled={busy} onClick={() => run(() => generate([active]))}><Sparkles size={15} />{draft.body ? "重新生成本集" : "生成本集"}</button></div>
+        </div></article><div className="script-state-actions"><button disabled={busy} onClick={() => run(() => transition("needs-changes"))}>退回修改</button><button disabled={busy} onClick={() => run(() => generate([active]))}><Sparkles size={15} />{draft.body ? "重新生成本集" : "生成本集"}</button>{draft.status === "approved" && <button className="primary" disabled={busy || !draft.project_id} onClick={() => run(() => Promise.resolve(onEnterEpisode(active)))} >进入 EP{String(active).padStart(2, "0")} 制作<ArrowRight size={15}/></button>}</div>
       </> : <div className="empty-state"><h3>先完成分集规划</h3><p>改编策划批准后，可以在这里逐集生成和修订剧本。</p></div>}</main>
     </div>
     <footer className="domain-generation-bar"><div><b>批量生成所选剧本</b><small>已选 {selected.size} 集 · 只有已批准的改编策划可以执行</small></div><label>服务<select value={providerId} onChange={(e) => { setProviderId(e.target.value); const p = textProviders.find((x) => x.id === e.target.value); setModel(p?.models?.text || p?.model || ""); }}>{textProviders.map((value) => <option key={value.id} value={value.id}>{value.local ? "本地" : "云端"} · {value.name}</option>)}</select></label><label>模型<input value={model} placeholder="本地默认" onChange={(e) => setModel(e.target.value)} /></label><button className="primary" disabled={busy || !selected.size} onClick={() => run(() => generate([...selected]))}><Sparkles size={15} />生成 {selected.size} 集</button></footer>

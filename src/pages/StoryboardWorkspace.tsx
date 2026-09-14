@@ -26,6 +26,7 @@ type PreviewAsset = {
 };
 
 type Props = {
+  purpose: "planning" | "images";
   mode: "table" | "grid";
   document: FilmBibleDocument;
   assets: PreviewAsset[];
@@ -102,15 +103,14 @@ export function StoryboardWorkspace(props: Props) {
 
   const header = <>
     <div className="storyboard-workspace-header">
-      <div><span className="eyebrow">STORYBOARD WORKSPACE</span><h2>分镜工作区</h2><p>分镜表、宫格和高级画布共用同一组 Episode 镜头。</p></div>
+      <div><span className="eyebrow">{props.purpose === "planning" ? "SHOT PLANNING" : "STORYBOARD IMAGES"}</span><h2>{props.purpose === "planning" ? "分镜规划" : "分镜图"}</h2><p>{props.purpose === "planning" ? "拆解镜头、编辑提示词并绑定视觉版本。" : "生成、审核和更新本集镜头首帧；数据仍来自同一组分镜。"}</p></div>
       <div className="settings-actions">
-        <button onClick={props.onCreate}><Plus size={15}/>新建镜头</button>
-        <button onClick={props.onCreatePlan}><Sparkles size={15}/>分镜规划</button>
-        {!!shots.length && <button onClick={props.onEnsureAll}><Layers size={15}/>补齐生成节点</button>}
-        {!!shots.length && <button onClick={props.onAppendTimeline}>按顺序入时间线</button>}
+        {props.purpose === "planning" && <button onClick={props.onCreate}><Plus size={15}/>新建镜头</button>}
+        {props.purpose === "planning" && <button className="primary" onClick={props.onCreatePlan}><Sparkles size={15}/>{shots.length ? "重新生成规划" : "从剧本生成规划"}</button>}
+        {props.purpose === "images" && !!shots.length && <button onClick={props.onEnsureAll}><Layers size={15}/>补齐生成节点</button>}
       </div>
     </div>
-    {!!shots.length && <div className="storyboard-selection-bar">
+    {props.purpose === "images" && !!shots.length && <div className="storyboard-selection-bar">
       <label className="check-label"><input type="checkbox" checked={selected.length === shots.length} onChange={(event) => setSelected(event.target.checked ? identities : [])}/>全选 {shots.length} 镜</label>
       <span>已选 {selected.length} 镜</span>
       <button className="primary compact" disabled={props.busy || !selected.length} onClick={() => void generate(selected)}><ImageIcon size={15}/>生成所选分镜图</button>
@@ -118,7 +118,7 @@ export function StoryboardWorkspace(props: Props) {
     {error && <p className="error">{error}</p>}
   </>;
 
-  if (!shots.length) return <section className="storyboard-workspace">{header}<div className="empty-state"><Layers/><h3>还没有分镜</h3><p>可从正式剧本生成分镜规划，也可以手工新建镜头。</p><button className="primary" onClick={props.onCreatePlan}>开始分镜规划</button></div></section>;
+  if (!shots.length) return <section className="storyboard-workspace">{header}<div className="empty-state"><Layers/><h3>还没有分镜</h3><p>{props.purpose === "planning" ? "从已批准的正式剧本生成分镜规划，也可以手工新建镜头。" : "请先到“分镜规划”建立本集镜头。"}</p>{props.purpose === "planning" && <button className="primary" onClick={props.onCreatePlan}>开始分镜规划</button>}</div></section>;
 
   if (props.mode === "grid") return <section className="storyboard-workspace">{header}
     <div className="storyboard-grid-toolbar"><label>布局<select value={columns} onChange={(event) => setColumns(Number(event.target.value))}><option value="3">三列宫格</option><option value="2">两列图板</option></select></label><button onClick={() => void props.onExport(columns, currentPage)}><Download size={15}/>下载当前页 PNG</button></div>
@@ -146,11 +146,11 @@ export function StoryboardWorkspace(props: Props) {
     const asset = props.assets.find((item) => item.id === node?.data?.assetId);
     const job = latestJob(props.jobs, imageNodeId);
     const references = projectShotReferences(props.document, shot);
-    const state = node?.data?.stale ? "待更新" : asset ? "已完成" : statusLabel[job?.status] || "待生成";
+    const imageState = node?.data?.stale ? "待更新" : asset ? "已完成" : statusLabel[job?.status] || "待生成";
     return <article key={uid} className={selected.includes(uid) ? "selected" : ""}>
-      <header><label className="check-label"><input type="checkbox" checked={selected.includes(uid)} onChange={() => toggle(uid)}/><strong>{String(index+1).padStart(2,"0")}</strong><span>SHOT</span></label><code>{uid}</code><span className={`storyboard-state ${node?.data?.stale ? "stale" : ""}`}>{state}</span><button className="icon-button" disabled={index===0} onClick={() => props.onMove(uid,-1)} title="上移"><ArrowUp size={15}/></button><button className="icon-button" disabled={index===shots.length-1} onClick={() => props.onMove(uid,1)} title="下移"><ArrowDown size={15}/></button></header>
+      <header><label className="check-label">{props.purpose === "images" && <input type="checkbox" checked={selected.includes(uid)} onChange={() => toggle(uid)}/>}<strong>{String(index+1).padStart(2,"0")}</strong><span>SHOT</span></label><code>{uid}</code><span className={`storyboard-state ${node?.data?.stale ? "stale" : ""}`}>{props.purpose === "planning" ? shot.prompts_need_review ? "需检查" : references.length || !Object.keys(visual.cards).length ? "规划完成" : "待绑定资产" : imageState}</span><button className="icon-button" disabled={index===0} onClick={() => props.onMove(uid,-1)} title="上移"><ArrowUp size={15}/></button><button className="icon-button" disabled={index===shots.length-1} onClick={() => props.onMove(uid,1)} title="下移"><ArrowDown size={15}/></button></header>
       <div className="storyboard-table-main">
-        <button className="storyboard-table-preview" onClick={() => asset ? props.onPreview(asset) : void generate([uid])}>{asset ? <img src={asset.url} alt={shot.scene || `镜头 ${index+1}`}/> : <span><ImageIcon/>等待分镜图</span>}</button>
+        <button className="storyboard-table-preview" onClick={() => asset ? props.onPreview(asset) : undefined}>{asset ? <img src={asset.url} alt={shot.scene || `镜头 ${index+1}`}/> : <span><ImageIcon/>等待分镜图</span>}</button>
         <div className="storyboard-shot-fields">
           <div className="domain-fields four"><label>时长（秒）<input type="number" min="0.1" step="0.1" value={shot.duration ?? 3} onChange={(event) => props.onPatch(uid,{duration:Number(event.target.value)})}/></label><label>场景<input value={shot.scene || ""} onChange={(event) => props.onPatch(uid,{scene:event.target.value})}/></label><label>角色<input value={stringList(shot.characters)} onChange={(event) => props.onPatch(uid,{characters:event.target.value.split(/[、,，]/).map((item)=>item.trim()).filter(Boolean)})}/></label><label>情绪<input value={shot.emotion || ""} onChange={(event) => props.onPatch(uid,{emotion:event.target.value})}/></label></div>
           <label>动作<textarea value={shot.action || ""} onChange={(event) => props.onPatch(uid,{action:event.target.value})}/></label>
@@ -164,7 +164,7 @@ export function StoryboardWorkspace(props: Props) {
         return <span key={`${item.group}:${item.versionId}`}><b>{item.cardName} V{item.version}</b><small>{visualKindLabels[item.kind]} · {item.primaryAssetId ? "主参考已就绪" : "缺少主参考"}</small>{canUpgrade && <button onClick={() => props.onUpgrade(uid,item.cardId,target.id)}>升级到 V{target.version}</button>}<button className="icon-button" onClick={() => props.onUnbind(uid,item.versionId)} title="解除绑定"><Unlink size={13}/></button></span>;
       })}{!references.length && <small>尚未绑定角色、场景或道具版本</small>}</div><label>添加视觉版本<select value="" onChange={(event) => { if(event.target.value) props.onBind(uid,event.target.value); }}><option value="">选择 Production 视觉版本…</option>{availableVersions.map((version) => { const card=visual.cards[version.cardId]; return <option value={version.id} key={version.id}>{visualKindLabels[card.kind]} · {card.name} · V{version.version} · {version.status}</option>; })}</select></label></div>
       <details className="storyboard-prompts"><summary>生成提示词与参考编译投影</summary><div className="domain-fields"><label>Image Prompt<textarea value={shot.image_prompt || ""} onChange={(event) => props.onPatch(uid,{image_prompt:event.target.value})}/></label><label>Video Prompt<textarea value={shot.video_prompt || ""} onChange={(event) => props.onPatch(uid,{video_prompt:event.target.value})}/></label></div><div className="reference-projection"><CheckSquare2 size={15}/><span>{references.length ? references.map((item) => `${item.group}:${item.cardName} V${item.version}`).join(" → ") : "Reference Compiler 当前没有 identity reference"}</span></div></details>
-      <footer>{shot.prompts_need_review && <span className="danger">镜头内容已改变，请核对提示词</span>}<div/><button onClick={() => void generate([uid])}>{asset ? "重新生成" : "生成分镜图"}</button>{asset && <button onClick={() => props.onPreview(asset)}>查看结果</button>}<button className="quiet" onClick={() => props.onOpenCanvas(shot,index)}>高级画布<ArrowUpRight size={14}/></button></footer>
+      <footer>{shot.prompts_need_review && <span className="danger">镜头内容已改变，请核对提示词</span>}<div/>{props.purpose === "images" && <button onClick={() => void generate([uid])}>{asset ? "重新生成" : "生成分镜图"}</button>}{asset && <button onClick={() => props.onPreview(asset)}>查看结果</button>}<button className="quiet" onClick={() => props.onOpenCanvas(shot,index)}>高级画布<ArrowUpRight size={14}/></button></footer>
     </article>;
   })}</div></section>;
 }

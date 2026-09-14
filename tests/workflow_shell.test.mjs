@@ -11,7 +11,7 @@ import {planGlobalPanelAction} from '../src/app/globalNavigation.ts';
 
 test('workflow shell exposes the production stages in order',()=>{
   assert.deepEqual(WORKFLOW_STAGES.map(stage=>stage.label),[
-    '概览','原著','改编策划','剧本','塑角造景','分镜','视频','剪辑','高级画布',
+    '概览','原著','改编策划','剧本','分镜规划','塑角造景','分镜图','视频','剪辑','高级画布',
   ]);
 });
 
@@ -29,13 +29,14 @@ test('workflow stages mount the existing workspace views',()=>{
   assert.equal(defaultViewForStage('overview'),'stage');
   assert.equal(defaultViewForStage('art'),'stage');
   assert.equal(defaultViewForStage('storyboard'),'shots');
+  assert.equal(defaultViewForStage('images'),'grid');
   assert.equal(defaultViewForStage('editor'),'editor');
   assert.equal(defaultViewForStage('canvas'),'canvas');
 });
 
 test('workflow stages separate production planning from episode making',()=>{
-  for (const stage of ['overview','source','adaptation','art']) assert.equal(workflowStageScope(stage),'production');
-  for (const stage of ['script','storyboard','video','editor','canvas']) assert.equal(workflowStageScope(stage),'episode');
+  for (const stage of ['overview','source','adaptation','script']) assert.equal(workflowStageScope(stage),'production');
+  for (const stage of ['storyboard','art','images','video','editor','canvas']) assert.equal(workflowStageScope(stage),'episode');
 });
 
 test('global trash navigation requests fresh server state before display',()=>{

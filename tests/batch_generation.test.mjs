@@ -63,3 +63,11 @@ test('running work is skipped to prevent duplicate batch submissions',()=>{
   assert.match(plan.skipped[0].reason,/队列/);
 });
 
+test('shot image batch blocks missing or unapproved film bible bindings',()=>{
+  const document={filmBible:{visual:{cards:{hero:{id:'hero',status:'active'}},versions:{'hero-v1':{id:'hero-v1',cardId:'hero',status:'draft',references:[]}}}},shots:[{id:'S1',imageNode:'image-1',assetBindings:{characters:[],scene:null,props:[]}}],nodes:[{id:'image-1',data:{kind:'image',prompt:'主角入场',provider:'ark'}}]};
+  const missing=planBatchGeneration(document,[],providers,[],'shot_images');
+  assert.match(missing.blocked[0].reason,/尚未绑定/);
+  document.shots[0].assetBindings.characters=[{versionId:'hero-v1'}];
+  const unlocked=planBatchGeneration(document,[],providers,[],'shot_images');
+  assert.match(unlocked.blocked[0].reason,/尚未锁定/);
+});

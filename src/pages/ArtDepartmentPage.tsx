@@ -27,19 +27,38 @@ export function ArtDepartmentPage({
   ...panelProps
 }: PanelProps & { productionName: string; usage: Usage[] }) {
   const [filter, setFilter] = useState<"all" | VisualKind>("all");
+  const [scope, setScope] = useState<"episode" | "production">("episode");
   const [activeVersionId, setActiveVersionId] = useState(panelProps.focusVersionId || "");
   const [busyVersionId, setBusyVersionId] = useState("");
+  const requiredVersionIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const shot of panelProps.shots || []) {
+      const bindings = shot.assetBindings || {};
+      for (const item of bindings.characters || []) if (item?.versionId) ids.add(item.versionId);
+      for (const item of bindings.props || []) if (item?.versionId) ids.add(item.versionId);
+      if (bindings.scene?.versionId) ids.add(bindings.scene.versionId);
+    }
+    return ids;
+  }, [panelProps.shots]);
+  const requiredCardIds = useMemo(() => new Set([...requiredVersionIds].map((id) => panelProps.visual.versions[id]?.cardId).filter(Boolean)), [requiredVersionIds, panelProps.visual.versions]);
   const cards = useMemo(
     () => Object.values(panelProps.visual.cards)
-      .filter((card) => !card.deletedAt && (filter === "all" || card.kind === filter))
+      .filter((card) => !card.deletedAt && (scope === "production" || requiredCardIds.has(card.id)) && (filter === "all" || card.kind === filter))
       .sort((left, right) => `${left.kind}:${left.name}`.localeCompare(`${right.kind}:${right.name}`)),
-    [panelProps.visual.cards, filter],
+    [panelProps.visual.cards, filter, scope, requiredCardIds],
   );
+  const scopedVisual = useMemo(() => {
+    const cardIds = new Set(cards.map((card) => card.id));
+    return {
+      cards: Object.fromEntries(Object.entries(panelProps.visual.cards).filter(([id]) => cardIds.has(id))),
+      versions: Object.fromEntries(Object.entries(panelProps.visual.versions).filter(([, version]) => cardIds.has(version.cardId))),
+    };
+  }, [cards, panelProps.visual.cards, panelProps.visual.versions]);
   useEffect(() => {
     if (panelProps.focusVersionId) setActiveVersionId(panelProps.focusVersionId);
   }, [panelProps.focusVersionId]);
   useEffect(() => {
-    if (!activeVersionId && cards[0]) setActiveVersionId(cards[0].currentVersionId);
+    if (cards[0] && !cards.some((card) => Object.values(panelProps.visual.versions).some((version) => version.cardId === card.id && version.id === activeVersionId))) setActiveVersionId(cards[0].currentVersionId);
   }, [activeVersionId, cards]);
   const usageByVersion = useMemo(
     () => new Map(usage.map((item) => [item.version_id, item])),
@@ -66,6 +85,10 @@ export function ArtDepartmentPage({
           <b>{Object.values(panelProps.visual.versions).filter((item) => item.status === "locked").length}</b><span>已锁定版本</span>
         </div>
       </header>
+      <nav className="art-scope-switch" aria-label="资产范围">
+        <button className={scope === "episode" ? "active" : ""} onClick={() => setScope("episode")}>本集需要 <small>{requiredCardIds.size}</small></button>
+        <button className={scope === "production" ? "active" : ""} onClick={() => setScope("production")}>全部作品资产 <small>{Object.values(panelProps.visual.cards).filter((card) => !card.deletedAt).length}</small></button>
+      </nav>
       <nav className="art-filters" aria-label="视觉资产类型">
         {filters.map((item) => (
           <button key={item.id} className={filter === item.id ? "active" : ""} onClick={() => setFilter(item.id)}>
@@ -74,7 +97,7 @@ export function ArtDepartmentPage({
         ))}
       </nav>
       {!cards.length ? (
-        <div className="empty-state art-empty"><Boxes /><h3>此分类还没有资产卡</h3><p>从剧本生成分镜时会提取共享视觉资产；进入本页不会自动调用模型。</p></div>
+        <div className="empty-state art-empty"><Boxes /><h3>{scope === "episode" ? "本集暂无需要确认的资产" : "此分类还没有资产卡"}</h3><p>{scope === "episode" ? "先完成分镜规划和资产绑定，或切换到“全部作品资产”查看。" : "从剧本生成分镜时会提取共享视觉资产；进入本页不会自动调用模型。"}</p></div>
       ) : (
         <div className="art-card-grid">
           {cards.map((card) => {
@@ -124,10 +147,10 @@ export function ArtDepartmentPage({
           })}
         </div>
       )}
-      {!!Object.keys(panelProps.visual.versions).length && (
+      {!!cards.length && (
         <div className="art-department-detail">
           <div className="art-detail-heading"><div><span className="eyebrow">CANONICAL VERSION</span><h3>版本详情与参考图</h3></div><p>下方操作直接修改 Production Film Bible。</p></div>
-          <FilmBiblePanel {...panelProps} focusVersionId={activeVersionId || panelProps.focusVersionId} onFocusVersion={select} />
+          <FilmBiblePanel {...panelProps} visual={scopedVisual} focusVersionId={activeVersionId || panelProps.focusVersionId} onFocusVersion={select} />
         </div>
       )}
     </section>

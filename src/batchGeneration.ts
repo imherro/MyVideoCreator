@@ -131,6 +131,8 @@ function planShotNodes(
   const nodes = new Map<string, Value>(
     (document.nodes || []).map((node: Value) => [node.id, node]),
   );
+  const visual = visualBibleOf(document as any);
+  const hasVisualCards = Object.values(visual.cards).some((card) => !card.deletedAt && card.status !== "deprecated");
   for (const [index, shot] of (document.shots || []).entries()) {
     const nodeId =
       kind === "shot_images"
@@ -154,6 +156,26 @@ function planShotNodes(
     if (!String(node.data.prompt || "").trim()) {
       result.blocked.push({ id: node.id, label, reason: "生成描述为空" });
       continue;
+    }
+    if (kind === "shot_images") {
+      const bindings = shot.assetBindings || {};
+      const versionIds = [
+        ...(bindings.characters || []).map((item: Value) => item.versionId),
+        ...(bindings.props || []).map((item: Value) => item.versionId),
+        bindings.scene?.versionId,
+      ].filter(Boolean);
+      if (hasVisualCards && !versionIds.length) {
+        result.blocked.push({ id: node.id, label, reason: "尚未绑定本镜头需要的视觉版本" });
+        continue;
+      }
+      const invalid = versionIds.find((versionId) => {
+        const version = visual.versions[versionId];
+        return !version || version.status !== "locked" || !primaryReference(version);
+      });
+      if (invalid) {
+        result.blocked.push({ id: node.id, label, reason: "绑定的视觉版本尚未锁定或缺少主参考图" });
+        continue;
+      }
     }
     const provider = providerFor(node.data, providers);
     if (!provider || node.data.provider === "local") {

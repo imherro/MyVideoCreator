@@ -153,6 +153,8 @@ import { AnYingMark } from "./app/AnYingMark";
 import { GlobalNav, type GlobalPanel } from "./app/GlobalNav";
 import { planGlobalPanelAction } from "./app/globalNavigation";
 import { WorkflowStageNav } from "./app/WorkflowStageNav";
+import { WorkflowGuideBanner } from "./app/WorkflowGuideBanner";
+import { deriveWorkflowGuide } from "./app/workflowGuide";
 import {
   defaultViewForStage,
   parseWorkflowStage,
@@ -581,6 +583,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     [assets, setAssets] = useState<Asset[]>([]),
     [jobs, setJobs] = useState<Job[]>([]),
     [visualUsage, setVisualUsage] = useState<VisualUsage[]>([]),
+    [workflowContext, setWorkflowContext] = useState<Any>({ adaptation: null, scripts: [] }),
     [system, setSystem] = useState<Any>({
       models: [],
       templates: {},
@@ -663,11 +666,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       );
     }
     setPanel(null);
-    if (
-      next === "storyboard" &&
-      ["shots", "grid", "director"].includes(view)
-    )
-      return;
+    if (next === "storyboard" && ["shots", "director"].includes(view)) return;
+    if (next === "images" && ["shots", "grid"].includes(view)) return;
     setView(defaultViewForStage(next));
   }
   const report = (e: any) => {
@@ -702,15 +702,18 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         const productionId = current.current.project?.id === pid
           ? current.current.project.production_id
           : undefined;
-        const [a, j, usages] = await Promise.all([
+        const [a, j, usages, adaptation, scripts] = await Promise.all([
           api(`/projects/${pid}/assets?scope=production`),
           api(`/projects/${pid}/jobs`),
           productionId ? api(`/productions/${productionId}/visual-usage`) : Promise.resolve([]),
+          productionId ? api(`/productions/${productionId}/adaptation`) : Promise.resolve(null),
+          productionId ? api(`/productions/${productionId}/scripts`) : Promise.resolve([]),
         ]);
         if (current.current.project?.id === pid) {
           setAssets(a);
           setJobs(j);
           setVisualUsage(usages);
+          setWorkflowContext({ adaptation, scripts });
         }
         setSyncFailure((previous) =>
           previous?.kind === "api" ? null : previous,
@@ -737,13 +740,15 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       throw new Error("项目尚未保存，已保留当前编辑。请先解决保存冲突。");
     // Only switch views after every part of the new project snapshot arrives.
     // This leaves the current canvas visible if a refresh fails mid-request.
-    let p: Project, a: Asset[], j: Job[], usages: VisualUsage[];
+    let p: Project, a: Asset[], j: Job[], usages: VisualUsage[], adaptation: Any, scripts: Any[];
     try {
       p = await api("/projects/" + pid);
-      [a, j, usages] = await Promise.all([
+      [a, j, usages, adaptation, scripts] = await Promise.all([
         api(`/projects/${pid}/assets?scope=production`),
         api(`/projects/${pid}/jobs`),
         api(`/productions/${p.production_id}/visual-usage`),
+        api(`/productions/${p.production_id}/adaptation`),
+        api(`/productions/${p.production_id}/scripts`),
       ]);
     } catch (e: any) {
       setSyncFailure({
@@ -769,6 +774,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setAssets(a);
     setJobs(j);
     setVisualUsage(usages);
+    setWorkflowContext({ adaptation, scripts });
     setSelected(null);
     setHoveredNode(null);
     setVisualFocus(undefined);
@@ -1231,6 +1237,18 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setNotice(existingId ? "正在使用已有分镜规划节点提交任务" : "已建立并连接分镜规划节点，正在提交任务");
     setTimeout(() => fitView({ nodes: [{ id: storyboardId }], padding: 0.8 }), 80);
   }
+  function startStoryboardPlanning() {
+    if (!doc) return;
+    const scriptNode = doc.nodes.find((node) =>
+      node.data?.canonicalScriptProjection && node.data?.scriptStatus === "approved" && String(node.data?.text || "").trim(),
+    );
+    if (!scriptNode) {
+      report(new Error("请先在剧本页批准本集剧本，再开始分镜规划"));
+      activateWorkflowStage("script");
+      return;
+    }
+    generateStoryboardFromScript(scriptNode);
+  }
   function removeNode() {
     if (!selected) return;
     update((d) => {
@@ -1287,6 +1305,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     ]);
     setProductions(productionList);
     setProjects(episodeList);
+    return { productions: productionList, projects: episodeList };
   }
   function openProjectSetup() {
     setProjectSetupKey((value) => value + 1);
@@ -1578,6 +1597,25 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       selected.has(shotIdentity(shot)),
     );
     if (!targetShots.length) throw new Error("请先选择需要生成的镜头");
+    const visual = visualBibleOf(snapshot.doc);
+    const hasVisualCards = Object.values(visual.cards).some((card) => !card.deletedAt && card.status !== "deprecated");
+    for (const shot of targetShots) {
+      const bindings = shot.assetBindings || {};
+      const versionIds = [
+        ...(bindings.characters || []).map((item: Any) => item.versionId),
+        ...(bindings.props || []).map((item: Any) => item.versionId),
+        bindings.scene?.versionId,
+      ].filter(Boolean);
+      if (hasVisualCards && !versionIds.length)
+        throw new Error("所选镜头尚未绑定视觉版本，请先在“分镜规划”确认角色、场景或道具");
+      for (const versionId of versionIds) {
+        const version = visual.versions[versionId];
+        if (!version || version.status !== "locked")
+          throw new Error("所选镜头引用的视觉版本尚未锁定，请先到“塑角造景”确认");
+        if (!version.references?.some((item: Any) => item.role === "primary" && item.assetId))
+          throw new Error("所选镜头引用的视觉版本缺少主参考图，请先到“塑角造景”生成或上传");
+      }
+    }
     const prepared = deriveManagedGraph(
       ensureShotNodes(
         snapshot.doc,
@@ -2069,6 +2107,13 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     productions.find((item) => item.id === project.production_id) || null;
   const currentEpisodes = episodesForProduction(projects, project.production_id);
   const currentWorkflowScope = workflowStageScope(workflowStage);
+  const workflowGuide = deriveWorkflowGuide({
+    adaptation: workflowContext.adaptation,
+    scripts: workflowContext.scripts,
+    currentProject: project,
+    document: doc,
+    jobs,
+  });
   const projectBibleFields = bibleFields(doc);
   const filmBiblePanelProps: React.ComponentProps<typeof FilmBiblePanel> = {
     visual: visualBibleOf(doc),
@@ -2264,15 +2309,12 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         onChange={activateGlobalPanel}
       />
       <main className="work-area">
-        <WorkflowStageNav active={workflowStage} onChange={activateWorkflowStage} />
+        <WorkflowStageNav active={workflowStage} onChange={activateWorkflowStage} states={Object.fromEntries(Object.entries(workflowGuide.stages).map(([stage, guide]: any) => [stage, guide.state]))} />
         <div className="viewbar">
           {workflowStage === "storyboard" ? (
             <div className="segmented" aria-label="分镜视图">
               <button className={view === "shots" ? "active" : ""} onClick={() => setView("shots")}>
                 <Table2 size={15} />分镜表<span>{doc.shots.length || ""}</span>
-              </button>
-              <button className={view === "grid" ? "active" : ""} onClick={() => setView("grid")}>
-                <LayoutGrid size={15} />宫格
               </button>
               <button className={view === "director" ? "active" : ""} onClick={() => setView("director")}>
                 3D 导演台
@@ -2280,6 +2322,12 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               <button onClick={() => activateWorkflowStage("canvas")}>
                 高级画布<ArrowUpRight size={13} />
               </button>
+            </div>
+          ) : workflowStage === "images" ? (
+            <div className="segmented" aria-label="分镜图视图">
+              <button className={view === "grid" ? "active" : ""} onClick={() => setView("grid")}><LayoutGrid size={15}/>宫格<span>{doc.shots.length || ""}</span></button>
+              <button className={view === "shots" ? "active" : ""} onClick={() => setView("shots")}><Table2 size={15}/>列表</button>
+              <button onClick={() => activateWorkflowStage("canvas")}>高级画布<ArrowUpRight size={13}/></button>
             </div>
           ) : workflowStage === "editor" ? (
             <strong className="workspace-title"><Scissors size={15} />Twick 多轨剪辑</strong>
@@ -2291,6 +2339,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 adaptation: "改编策划",
                 script: "剧本工作区",
                 art: "塑角造景",
+                images: "分镜图",
                 video: "视频工作区",
                 canvas: "高级画布",
               }[workflowStage]}
@@ -2331,7 +2380,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             </button>
             </>
           )}
-          {["art", "storyboard", "canvas"].includes(workflowStage) && (
+          {["art", "images", "video", "canvas"].includes(workflowStage) && (
             <div className="batch-generation-actions" aria-label="批量生成">
               {["art", "canvas"].includes(workflowStage) && <button
                 className="quiet"
@@ -2342,7 +2391,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 <BookOpen size={15} />
                 全部资产 <b>{assetBatchPlan.readyIds.length}</b>
               </button>}
-              {["storyboard", "canvas"].includes(workflowStage) && <button
+              {["images", "canvas"].includes(workflowStage) && <button
                 className="quiet"
                 disabled={busy}
                 onClick={() => void runSmartBatch("shot_images")}
@@ -2373,17 +2422,23 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               </button>
           )}
         </div>
+        {!['overview', 'canvas'].includes(workflowStage) && <WorkflowGuideBanner
+          guide={workflowGuide.stages[workflowStage]}
+          onNavigate={activateWorkflowStage}
+          onOpenTasks={() => setPanel("jobs")}
+        />}
         {workflowStage === "overview" ? (
           <WorkflowOverview
             projectName={currentProduction?.name || project.name}
             duration={doc.duration}
             ratio={doc.ratio}
             style={doc.style}
-            scriptCount={doc.nodes.filter((node) => node.data?.kind === "text").length}
+            scriptCount={(workflowContext.scripts || []).filter((item: Any) => item.script?.status === "approved").length}
             visualCount={Object.values(visualBibleOf(doc).cards).filter((card) => !card.deletedAt).length}
             shotCount={doc.shots.length}
             videoCount={doc.nodes.filter((node) => node.data?.kind === "video" && node.data?.assetId).length}
             activeJobs={activeCount}
+            guide={workflowGuide}
             onOpenStage={activateWorkflowStage}
           />
         ) : workflowStage === "source" ? (
@@ -2430,6 +2485,13 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               const episode = currentEpisodes.find((item) => item.episode_no === episodeNo);
               if (episode && episode.id !== project.id) await openProject(episode.id);
             }}
+            onEnterEpisode={async (episodeNo) => {
+              const hierarchy = await refreshProductionHierarchy();
+              const episode = episodesForProduction(hierarchy.projects, project.production_id).find((item) => item.episode_no === episodeNo);
+              if (episode && episode.id !== project.id) await openProject(episode.id);
+              if (!episode) throw new Error(`EP${String(episodeNo).padStart(2, "0")} 尚未建立可制作的 Episode`);
+              activateWorkflowStage("storyboard");
+            }}
           />
         ) : workflowStage === "art" ? (
           <ArtDepartmentPage
@@ -2437,8 +2499,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             productionName={currentProduction?.name || project.name}
             usage={visualUsage}
           />
-        ) : workflowStage === "storyboard" && (view === "shots" || view === "grid") ? (
+        ) : ["storyboard", "images"].includes(workflowStage) && (view === "shots" || view === "grid") ? (
           <StoryboardWorkspace
+            purpose={workflowStage === "images" ? "images" : "planning"}
             mode={view === "grid" ? "grid" : "table"}
             document={doc}
             assets={assets}
@@ -2454,7 +2517,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               update((document) => createStoryboardShot(document, id));
               setNotice("已新建空镜头；填写内容后再显式生成分镜图");
             }}
-            onCreatePlan={() => newNode("storyboard", doc.brief)}
+            onCreatePlan={startStoryboardPlanning}
             onEnsureAll={allShotNodes}
             onAppendTimeline={appendShotTimeline}
             onBind={(uid, versionId) => {
