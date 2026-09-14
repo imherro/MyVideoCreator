@@ -615,6 +615,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   const [panorama, setPanorama] = useState<Asset | null>(null);
   const [syncFailure, setSyncFailure] = useState<SyncFailure | null>(null);
   const [mediaRetryKey, setMediaRetryKey] = useState(0);
+  const [pendingAutoRunNodeId, setPendingAutoRunNodeId] = useState<string | null>(null);
   const [uploadCategory, setUploadCategory] = useState("other");
   const [conflict, setConflict] = useState(false),
     [recoveryBusy, setRecoveryBusy] = useState(false);
@@ -1215,6 +1216,21 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setPanel(null);
     return nid;
   }
+  function generateStoryboardFromScript(sourceNode: Any) {
+    if (!doc || busy) return;
+    const existingId = doc.edges.find((edge) => edge.source === sourceNode.id &&
+      doc.nodes.some((item) => item.id === edge.target && item.data.kind === "storyboard"))?.target;
+    const storyboardId = existingId || newNode(
+      "storyboard",
+      String(sourceNode.data.text),
+      {},
+      sourceNode.id,
+    );
+    setSelected(storyboardId);
+    setPendingAutoRunNodeId(storyboardId);
+    setNotice(existingId ? "正在使用已有分镜规划节点提交任务" : "已建立并连接分镜规划节点，正在提交任务");
+    setTimeout(() => fitView({ nodes: [{ id: storyboardId }], padding: 0.8 }), 80);
+  }
   function removeNode() {
     if (!selected) return;
     update((d) => {
@@ -1620,6 +1636,13 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       setBusy(false);
     }
   }
+  useEffect(() => {
+    if (!pendingAutoRunNodeId) return;
+    const target = doc?.nodes.find((item) => item.id === pendingAutoRunNodeId);
+    if (!target) return;
+    setPendingAutoRunNodeId(null);
+    void run(target);
+  }, [pendingAutoRunNodeId, doc?.nodes]);
   async function generateShotVideos(shotUids: string[]) {
     const snapshot = current.current;
     if (!snapshot.project || !snapshot.doc || busy) return;
@@ -3250,12 +3273,11 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 {data.kind === "text" && (
                   <button
                     className="secondary"
-                    onClick={() =>
-                      newNode("storyboard", String(data.text), {}, node.id)
-                    }
+                    disabled={busy}
+                    onClick={() => generateStoryboardFromScript(node)}
                   >
                     <Layers size={15} />
-                    继续拆解分镜
+                    生成分镜规划
                   </button>
                 )}
                 {data.kind === "storyboard" && activeJob?.result?.shots && (
