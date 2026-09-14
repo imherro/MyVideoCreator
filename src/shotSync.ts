@@ -33,3 +33,26 @@ export function updateShot<T extends {shots:Value[];nodes:Node[];edges:Edge[]}>(
  }
  return next;
 }
+
+export function updateLinkedNodePrompt<T extends {shots:Value[];nodes:Node[];edges:Edge[]}>(document:T,nodeId:string,prompt:string):T{
+ const shot=document.shots.find(s=>(s.imageNode||s.pipeline?.imageNodeId)===nodeId||(s.videoNode||s.pipeline?.videoNodeId)===nodeId);
+ if(!shot)return patchNode(document,nodeId,{prompt});
+ const field=(shot.imageNode||shot.pipeline?.imageNodeId)===nodeId?'image_prompt':'video_prompt';
+ return updateShot(document,shot.id,{[field]:prompt});
+}
+
+/** Migrate prompt edits made in the legacy canvas inspector into canonical shots. */
+export function migrateLinkedNodePrompts<T extends {shots:Value[];nodes:Node[];edges:Edge[]}>(document:T):T{
+ const nodes=new Map(document.nodes.map(node=>[node.id,node]));
+ let changed=false;
+ const shots=document.shots.map(shot=>{
+  const image=nodes.get(shot.imageNode||shot.pipeline?.imageNodeId);
+  const video=nodes.get(shot.videoNode||shot.pipeline?.videoNodeId);
+  const patch:Value={};
+  if(image&&typeof image.data.prompt==='string'&&image.data.prompt!==shot.image_prompt)patch.image_prompt=image.data.prompt;
+  if(video&&typeof video.data.prompt==='string'&&video.data.prompt!==shot.video_prompt)patch.video_prompt=video.data.prompt;
+  if(!Object.keys(patch).length)return shot;
+  changed=true;return {...shot,...patch};
+ });
+ return changed?{...document,shots}:document;
+}

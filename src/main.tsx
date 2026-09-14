@@ -149,7 +149,7 @@ import { defaultStage } from "./directorScene";
 const DirectorStage = lazy(() =>
   import("./DirectorStage").then((m) => ({ default: m.DirectorStage })),
 );
-import { framesForDuration } from "./shotSync";
+import { framesForDuration, migrateLinkedNodePrompts, updateLinkedNodePrompt } from "./shotSync";
 import { TimelinePreview } from "./TimelinePreview";
 import type { Clip } from "./timeline";
 import type { EditorDocument } from "./editor/editorDocument";
@@ -766,7 +766,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       });
       throw e;
     }
-    const projectedDocument = deriveManagedGraph(p.document);
+    const migratedDocument = migrateLinkedNodePrompts(p.document);
+    const projectedDocument = deriveManagedGraph(migratedDocument);
     const openedProject = { ...p, document: projectedDocument };
     revision.current = p.revision;
     productionRevision.current = p.production_revision;
@@ -1253,7 +1254,13 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     ["queued", "running"].includes(j.status),
   ).length;
   function editNode(patch: Any) {
-    if (selected) update((d) => patchNode(d, selected, patch));
+    if (!selected) return;
+    update((d) => {
+      if (!("prompt" in patch)) return patchNode(d, selected, patch);
+      const { prompt, ...rest } = patch;
+      const next = updateLinkedNodePrompt(d, selected, String(prompt));
+      return Object.keys(rest).length ? patchNode(next, selected, rest) : next;
+    });
   }
   function changeModel(patch: Any) {
     if (!selected) return;
