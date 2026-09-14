@@ -73,3 +73,16 @@ test("Ark end frame visibility follows the selected model capability, not provid
   assert.equal(withoutCapability[4].endFrameSupported, false);
   assert.match(withoutCapability[4].readinessReason, /不支持尾帧/);
 });
+
+test("Seedance dialogue requires the current locked voice take before paid submission", () => {
+  const { document, jobs } = fixture();
+  document.shots[0].duration = 5;
+  document.shots[0].dialogues = [{ id: "dialogue-1", characterCardId: "robot", characterName: "球球", text: "你好" }];
+  document.filmBible = { voices: { profiles: { robot: { status: "locked", voiceType: "robot-speaker", version: 2 } } } };
+  let rows = deriveVideoProductionRows(document, assets, jobs, providers, capabilities);
+  assert.match(rows[0].readinessReason, /尚未使用当前固定音色生成/);
+  const voiceAsset = { id: "voice-1", kind: "audio", created: 5, metadata: { duration: 1.5, input: { dialogue: { id: "dialogue-1", voiceVersion: 2 } } } };
+  rows = deriveVideoProductionRows(document, [...assets, voiceAsset], jobs, providers, capabilities);
+  assert.equal(rows[0].readinessReason, "");
+  assert.deepEqual(rows[0].dialogueAudioAssets.map((asset) => asset.id), ["voice-1"]);
+});

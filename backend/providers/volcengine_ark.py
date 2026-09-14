@@ -1,11 +1,13 @@
 """Volcengine Ark adapters for Seedream images and Seedance video tasks."""
 import base64
+import subprocess
 from urllib.parse import quote
 
 import httpx
 from PIL import Image
 
 from .. import store as s
+from ..media import ffmpeg_executable, probe
 from . import common
 
 
@@ -266,6 +268,51 @@ def _video_url(value):
     return value.get('video_url') or value.get('output_url')
 
 
+def _mux_fixed_dialogue(worker, job, video_path):
+    tracks = job['input'].get('dialogue_audio') or []
+    assets = common.assets_by_ids(job, [item['assetId'] for item in tracks])
+    if len(assets) != len(tracks) or any(item.get('kind') != 'audio' for item in assets):
+        raise ValueError('固定对白音频已失效，请重新生成对白后再生成视频')
+    output = s.DATA / (s.uid('dialogue-video-') + '.mp4')
+    args = [ffmpeg_executable(), '-y', '-i', str(video_path)]
+    for asset in assets:
+        args += ['-i', str(s.ASSETS / asset['path'])]
+    filters = []
+    labels = []
+    for index, track in enumerate(tracks, 1):
+        delay = max(0, round(float(track.get('start') or 0) * 1000))
+        label = f'd{index}'
+        filters.append(
+            f'[{index}:a]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,'
+            f'adelay={delay}|{delay}[{label}]'
+        )
+        labels.append(f'[{label}]')
+    duration = float(probe(video_path).get('duration') or 0)
+    if duration <= 0:
+        raise ValueError('Seedance 返回的视频时长无效，无法写入固定对白')
+    filters.append(
+        ''.join(labels) + f'amix=inputs={len(labels)}:duration=longest:normalize=0,'
+        f'alimiter=limit=.95,apad,atrim=duration={duration:.6f}[dialogue]'
+    )
+    worker.progress(job, '写入角色固定音色')
+    command = args + [
+        '-filter_complex', ';'.join(filters), '-map', '0:v:0', '-map', '[dialogue]',
+        '-c:v', 'copy', '-c:a', 'aac', '-ac', '2', '-ar', '48000',
+        '-t', f'{duration:.6f}', str(output),
+    ]
+    try:
+        completed = subprocess.run(
+            command, capture_output=True, timeout=300,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+        )
+        if completed.returncode != 0:
+            detail = completed.stderr.decode('utf-8', errors='replace')[-1200:]
+            raise ValueError('固定对白写入视频失败：' + detail)
+        return common.register(job, output, '生成结果 · 固定角色音色.mp4')
+    finally:
+        output.unlink(missing_ok=True)
+
+
 def generate_video(worker, job, provider):
     if len(job['input'].get('asset_ids',[]))>1:
         raise ValueError('当前火山方舟视频最多接受一张首帧，请移除多余引用')
@@ -306,7 +353,7 @@ def generate_video(worker, job, provider):
                 'content': content,
                 'duration': int(params.get('duration', 5)),
                 'resolution': str(params.get('resolution', '720p')),
-                'generate_audio': bool(params.get('generate_audio', True)),
+                'generate_audio': False if job['input'].get('dialogue_audio') else bool(params.get('generate_audio', True)),
             }
             # Seedance derives image-to-video output ratio from the first frame
             # and rejects an explicit ratio for first-frame/first-last-frame jobs.
@@ -352,6 +399,12 @@ def generate_video(worker, job, provider):
                 target = _video_url(value)
                 if not target:
                     raise ValueError('火山方舟任务成功但未返回视频下载地址')
+                if job['input'].get('dialogue_audio'):
+                    video_path = common.download_file(target, '.mp4', recoverable=True)
+                    try:
+                        return {'assets': [_mux_fixed_dialogue(worker, job, video_path)]}
+                    finally:
+                        video_path.unlink(missing_ok=True)
                 return {'assets': [common.download_result(job, target, '.mp4', recoverable=True)]}
     raise InterruptedError()
 

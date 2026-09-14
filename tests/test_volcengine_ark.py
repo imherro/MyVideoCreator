@@ -143,6 +143,25 @@ def test_seedance_persists_task_and_resume_only_queries(monkeypatch):
     ]
 
 
+def test_seedance_dialogue_disables_random_audio_and_returns_muxed_video(monkeypatch,tmp_path):
+    item=stored_job('video',provider())
+    item['input']['dialogue_audio']=[{'assetId':'voice-1','start':.3,'duration':1.2}]
+    item['input']['dialogue_audio_asset_ids']=['voice-1']
+    original=httpx.Client;submitted=[]
+    def handle(request):
+        if request.method=='POST':
+            body=json.loads(request.read());submitted.append(body)
+            return httpx.Response(200,json={'id':'dialogue-video'})
+        return httpx.Response(200,json={'status':'succeeded','content':{'video_url':'https://result.example/dialogue.mp4'}})
+    monkeypatch.setattr(ark.httpx,'Client',lambda **kw:original(**kw,transport=httpx.MockTransport(handle)))
+    downloaded=tmp_path/'silent.mp4';downloaded.write_bytes(b'video')
+    monkeypatch.setattr(common,'download_file',lambda *args,**kwargs:downloaded)
+    monkeypatch.setattr(ark,'_mux_fixed_dialogue',lambda worker,job,path:{'id':'fixed-voice-video','kind':'video'})
+    worker=Worker();worker.halt=NoWait()
+    assert worker.execute(item)['assets'][0]['id']=='fixed-voice-video'
+    assert submitted[0]['generate_audio'] is False
+
+
 def test_seedance_sends_one_local_image_as_first_frame(monkeypatch):
     p=provider();item=stored_job('video',p)
     aid,expected=add_image_asset(item,'首帧',(24,48,96))

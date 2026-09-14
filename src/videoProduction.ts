@@ -25,6 +25,7 @@ export type VideoProductionRow = {
   status: VideoProductionStatus;
   readinessReason: string;
   endFrameSupported: boolean;
+  dialogueAudioAssets: Value[];
 };
 
 function latestJob(jobs: Value[], nodeId?: string) {
@@ -61,6 +62,31 @@ export function deriveVideoProductionRows(
     const videoAsset = videoNode?.data?.assetId ? assetMap.get(videoNode.data.assetId) : undefined;
     const job = latestJob(jobs, videoNode?.id);
     const provider = providerMap.get(videoNode?.data?.provider);
+    const profiles = document.filmBible?.voices?.profiles || {};
+    const dialogues = Array.isArray(shot.dialogues) ? shot.dialogues.filter((item: Value) => String(item.text || "").trim()) : [];
+    const dialogueAudioAssets: Value[] = [];
+    let dialogueReadinessReason = "";
+    if (provider?.type === "volcengine_ark") {
+      for (const dialogue of dialogues) {
+        const profile = profiles[dialogue.characterCardId] || {};
+        if (profile.status !== "locked" || !String(profile.voiceType || "").trim()) {
+          dialogueReadinessReason = `${dialogue.characterName || "角色"}尚未锁定固定音色`;
+          break;
+        }
+        const match = assets
+          .filter((asset) => asset.kind === "audio" && asset.metadata?.input?.dialogue?.id === dialogue.id && Number(asset.metadata?.input?.dialogue?.voiceVersion) === Number(profile.version || 1))
+          .sort((left, right) => Number(right.created || 0) - Number(left.created || 0))[0];
+        if (!match) {
+          dialogueReadinessReason = `${dialogue.characterName || "角色"}的本镜对白尚未使用当前固定音色生成`;
+          break;
+        }
+        dialogueAudioAssets.push(match);
+      }
+      const spokenDuration = dialogueAudioAssets.reduce((sum, asset) => sum + Number(asset.metadata?.duration || 0), 0) + Math.max(0, dialogueAudioAssets.length - 1) * .12;
+      if (!dialogueReadinessReason && dialogues.length && (!spokenDuration || spokenDuration > Number(shot.duration || 0) + .08)) {
+        dialogueReadinessReason = spokenDuration ? `固定对白共 ${spokenDuration.toFixed(2)} 秒，超过镜头时长` : "固定对白音频时长无效";
+      }
+    }
     const catalogCapabilities = modelCapabilities[
       [String(videoNode?.data?.provider || ""), String(videoNode?.data?.model || "")].join("\u0000")
     ];
@@ -80,6 +106,7 @@ export function deriveVideoProductionRows(
     else if (!provider || videoNode.data?.provider === "local") readinessReason = "尚未选择可用的视频 Provider";
     else if (!String(videoNode.data?.model || "").trim()) readinessReason = "尚未选择视频模型";
     else if (videoNode.data?.end_asset_id && !endFrameSupported) readinessReason = "当前模型不支持尾帧";
+    else if (dialogueReadinessReason) readinessReason = dialogueReadinessReason;
 
     let status: VideoProductionStatus;
     if (["queued", "running", "interrupted"].includes(job?.status)) status = "generating";
@@ -91,7 +118,7 @@ export function deriveVideoProductionRows(
 
     return {
       uid: shotIdentity(shot), index, shot, imageNode, videoNode, firstFrame, endFrame,
-      videoAsset, job, provider, status, readinessReason, endFrameSupported,
+      videoAsset, job, provider, status, readinessReason, endFrameSupported, dialogueAudioAssets,
     };
   });
 }

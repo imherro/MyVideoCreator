@@ -45,6 +45,46 @@ def assets_for(job):
     return assets
 
 
+def assets_by_ids(job, asset_ids):
+    """Resolve production-scoped assets in the caller's explicit order."""
+    resolved = []
+    with s.db() as c:
+        for aid in asset_ids:
+            row = c.execute('''SELECT a.* FROM assets a
+                JOIN projects origin ON origin.id=a.project_id
+                JOIN projects target ON target.id=?
+                WHERE a.id=? AND COALESCE(a.production_id,origin.production_id,origin.id)=COALESCE(target.production_id,target.id)
+                AND NOT EXISTS(SELECT 1 FROM deleted_items d WHERE d.kind='asset' AND d.item_id=a.id)
+            ''', (job['project_id'], aid)).fetchone()
+            if not row:
+                raise ValueError('引用素材已丢失')
+            resolved.append(s.unpack(row))
+    return resolved
+
+
+def download_file(url, ext, recoverable=False):
+    if urlparse(url).scheme not in ('http','https'):
+        raise ValueError('模型结果不是有效媒体地址')
+    path = s.DATA / (s.uid('download-') + ext)
+    try:
+        # Provider credentials are intentionally never forwarded to result hosts.
+        with httpx.stream('GET', url, follow_redirects=True, timeout=120) as response:
+            if not response.is_success:
+                response.read()
+                checked(response, recoverable=recoverable)
+            size = 0
+            with path.open('wb') as out:
+                for chunk in response.iter_bytes():
+                    size += len(chunk)
+                    if size > 2*1024**3:
+                        raise ValueError('输出超过 2GB，请降低分辨率或时长')
+                    out.write(chunk)
+        return path
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
+
+
 def register(job,path,name=None,category=None,asset_source='generated'):
     with s.db() as c:
         row=c.execute('SELECT status FROM jobs WHERE id=?',(job['id'],)).fetchone()
@@ -83,19 +123,7 @@ def register(job,path,name=None,category=None,asset_source='generated'):
 
 
 def download_result(job,url,ext,recoverable=False):
-    if urlparse(url).scheme not in ('http','https'): raise ValueError('模型结果不是有效媒体地址')
-    path=s.DATA/(s.uid('download-')+ext)
+    path=download_file(url,ext,recoverable=recoverable)
     try:
-        # Provider credentials are intentionally never forwarded to result hosts.
-        with httpx.stream('GET',url,follow_redirects=True,timeout=120) as response:
-            if not response.is_success:
-                response.read()
-                checked(response,recoverable=recoverable)
-            size=0
-            with path.open('wb') as out:
-                for chunk in response.iter_bytes():
-                    size+=len(chunk)
-                    if size>2*1024**3: raise ValueError('输出超过 2GB，请降低分辨率或时长')
-                    out.write(chunk)
         return register(job,path,'生成结果'+ext)
     finally: path.unlink(missing_ok=True)

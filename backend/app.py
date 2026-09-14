@@ -892,11 +892,18 @@ def submit(pid:str,body:JobCreate):
         s.get_setting('providers',[]),
         production_context=project_state['production_context'],
     )
-    from .video_dialogue import compile_shot_video_input
+    from .video_dialogue import bind_fixed_dialogue_audio, compile_shot_video_input
     prepared_input=compile_shot_video_input(
         project_state['episode_document'],body.node_id,body.kind,prepared_input,
         production_context=project_state['production_context'],
     )
+    selected_provider=next((item for item in s.get_setting('providers',[]) if item.get('id')==prepared_input.get('provider')),None)
+    if body.kind=='video' and selected_provider and selected_provider.get('type')=='volcengine_ark':
+        prepared_input=bind_fixed_dialogue_audio(
+            project_state['episode_document'],body.node_id,body.kind,prepared_input,
+            production_assets(saved_project['production_id'],kind='audio'),
+            production_context=project_state['production_context'],
+        )
     if body.kind in ('text','storyboard') and prepared_input.get('target_duration') is None:
         prepared_input={**prepared_input,'target_duration':saved_project['document'].get('duration',15)}
     body=body.model_copy(update={'input':prepared_input})
@@ -1498,8 +1505,9 @@ async def run_workflow(pid:str,request:Request):
     runnable={'text','storyboard','image','video'}
     prepared=[]
     from .reference_compiler import compile_shot_image_input
-    from .video_dialogue import compile_shot_video_input
+    from .video_dialogue import bind_fixed_dialogue_audio, compile_shot_video_input
     from .visual_references import resolve_image_model_capabilities
+    available_audio_assets=production_assets(p['production_id'],kind='audio')
     capability_cache={}
     def cached_image_capabilities(provider,model_id):
         key=(provider.get('id'),model_id)
@@ -1567,6 +1575,12 @@ async def run_workflow(pid:str,request:Request):
             reference_asset(pid,aid)
         provider=providers.get(data.get('provider','local'))
         if provider and provider.get('type')=='volcengine_ark':
+            if kind=='video':
+                data=bind_fixed_dialogue_audio(
+                    project_state['episode_document'],node['id'],kind,data,
+                    available_audio_assets,
+                    production_context=project_state['production_context'],
+                )
             if kind=='video':
                 data['parameters']={
                     'resolution':p['document'].get('videoResolution','720p'),
