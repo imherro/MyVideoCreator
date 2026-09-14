@@ -23,3 +23,9 @@ test("an authored prompt that already contains every line is preserved", () => {
 test("a shot without dialogue still exposes its final video prompt", () => {
   assert.equal(compileVideoPrompt("只有镜头动作和环境声。", { dialogues: [] }), "只有镜头动作和环境声。");
 });
+
+test("video prompt preview states the effective generated duration", () => {
+  const value = compileVideoPrompt("机器人抬头。", { ...shot, duration: 2 }, 3);
+  assert.match(value, /成片总时长必须为 3 秒/);
+  assert.equal(compileVideoPrompt(value, { ...shot, duration: 2 }, 3), value);
+});

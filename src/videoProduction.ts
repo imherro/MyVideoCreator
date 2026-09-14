@@ -26,6 +26,8 @@ export type VideoProductionRow = {
   readinessReason: string;
   endFrameSupported: boolean;
   dialogueAudioAssets: Value[];
+  plannedDuration: number;
+  effectiveDuration: number;
 };
 
 function latestJob(jobs: Value[], nodeId?: string) {
@@ -65,6 +67,8 @@ export function deriveVideoProductionRows(
     const profiles = document.filmBible?.voices?.profiles || {};
     const dialogues = Array.isArray(shot.dialogues) ? shot.dialogues.filter((item: Value) => String(item.text || "").trim()) : [];
     const dialogueAudioAssets: Value[] = [];
+    const plannedDuration = Math.max(0, Number(shot.duration || 0));
+    let effectiveDuration = plannedDuration;
     let dialogueReadinessReason = "";
     if (provider?.type === "volcengine_ark") {
       for (const dialogue of dialogues) {
@@ -83,8 +87,10 @@ export function deriveVideoProductionRows(
         dialogueAudioAssets.push(match);
       }
       const spokenDuration = dialogueAudioAssets.reduce((sum, asset) => sum + Number(asset.metadata?.duration || 0), 0) + Math.max(0, dialogueAudioAssets.length - 1) * .12;
-      if (!dialogueReadinessReason && dialogues.length && (!spokenDuration || spokenDuration > Number(shot.duration || 0) + .08)) {
-        dialogueReadinessReason = spokenDuration ? `固定对白共 ${spokenDuration.toFixed(2)} 秒，超过镜头时长` : "固定对白音频时长无效";
+      if (!dialogueReadinessReason && dialogues.length && !spokenDuration) {
+        dialogueReadinessReason = "固定对白音频时长无效";
+      } else if (!dialogueReadinessReason && dialogues.length) {
+        effectiveDuration = Math.max(plannedDuration, Math.ceil(spokenDuration));
       }
     }
     const catalogCapabilities = modelCapabilities[
@@ -119,6 +125,7 @@ export function deriveVideoProductionRows(
     return {
       uid: shotIdentity(shot), index, shot, imageNode, videoNode, firstFrame, endFrame,
       videoAsset, job, provider, status, readinessReason, endFrameSupported, dialogueAudioAssets,
+      plannedDuration, effectiveDuration,
     };
   });
 }

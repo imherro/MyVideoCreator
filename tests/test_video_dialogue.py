@@ -6,6 +6,7 @@ from backend.video_dialogue import MARKER, bind_fixed_dialogue_audio, compile_sh
 def shot():
     return {
         'id': 'shot-001', 'uid': 'shot-uid',
+        'duration': 5,
         'pipeline': {'videoNodeId': 'video-node'},
         'video_prompt': '机器人抬头，镜头缓慢推进。',
         'dialogues': [
@@ -30,10 +31,27 @@ def test_video_prompt_projection_replaces_older_projection_without_duplication()
 
 
 def test_video_job_compiles_dialogue_for_existing_node_and_records_projection():
-    value = compile_shot_video_input({'shots': [shot()]}, 'video-node', 'video', {'prompt': '旧节点提示词'})
+    current_shot = {**shot(), 'duration': 2}
+    value = compile_shot_video_input({'shots': [current_shot]}, 'video-node', 'video', {'prompt': '旧节点提示词'})
     assert value['prompt'].startswith('旧节点提示词')
+    assert '本镜头成片总时长必须为 2 秒' in value['prompt']
+    assert value['shot_duration'] == 2
+    assert value['parameters']['duration'] == 2
     assert value['dialogue_projection']['shotUid'] == 'shot-uid'
     assert value['dialogue_projection']['dialogues'][0]['text'] == '下一步直接拔电源。'
+
+
+def test_video_job_canonical_duration_overrides_provider_or_stale_node_default():
+    current_shot = {**shot(), 'duration': 2}
+    value = compile_shot_video_input(
+        {'shots': [current_shot]}, 'video-node', 'video',
+        {'prompt': '两秒镜头', 'parameters': {'duration': 5, 'resolution': '480p'}},
+    )
+    assert value['parameters'] == {'duration': 2, 'resolution': '480p'}
+    assert value['prompt'].count('[镜头时长]') == 1
+    repeated = compile_shot_video_input({'shots': [current_shot]}, 'video-node', 'video', value)
+    assert repeated['parameters']['duration'] == 2
+    assert repeated['prompt'].count('[镜头时长]') == 1
 
 
 def test_non_video_and_unbound_nodes_are_unchanged():
@@ -62,6 +80,28 @@ def test_locked_voice_dialogue_assets_are_frozen_into_video_input():
     assert result['dialogue_audio'][1]['start'] > result['dialogue_audio'][0]['start']
     assert result['parameters']['generate_audio'] is False
     assert '固定对白音轨时序' in result['prompt'] and '自然闭嘴' in result['prompt']
+
+
+def test_dialogue_longer_than_planned_shot_extends_generation_to_next_second():
+    current_shot = {**shot(), 'duration': 2}
+    document = {
+        'shots': [current_shot],
+        'filmBible': {'voices': {'profiles': {
+            'robot': {'status': 'locked', 'voiceType': 'robot-speaker', 'version': 2},
+            'human': {'status': 'locked', 'voiceType': 'human-speaker', 'version': 4},
+        }}},
+    }
+    assets = [
+        {'id': 'robot-audio', 'kind': 'audio', 'created': 2, 'metadata': {'duration': 1.4, 'input': {'dialogue': {'id': 'd1', 'voiceVersion': 2}}}},
+        {'id': 'human-audio', 'kind': 'audio', 'created': 3, 'metadata': {'duration': 1.1, 'input': {'dialogue': {'id': 'd2', 'voiceVersion': 4}}}},
+    ]
+    result = bind_fixed_dialogue_audio(document, 'video-node', 'video', {'prompt': '基础动作'}, assets)
+    assert result['parameters']['duration'] == 3
+    assert result['shot_duration'] == 3
+    assert result['duration_adjustment'] == {
+        'reason': 'dialogue_audio', 'from': 2.0, 'to': 3, 'spoken_duration': 2.62,
+    }
+    assert '成片总时长必须为 3 秒' in result['prompt']
 
 
 def test_video_with_dialogue_requires_current_locked_voice_take():

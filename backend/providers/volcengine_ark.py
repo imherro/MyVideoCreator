@@ -287,9 +287,11 @@ def _mux_fixed_dialogue(worker, job, video_path):
             f'adelay={delay}|{delay}[{label}]'
         )
         labels.append(f'[{label}]')
-    duration = float(probe(video_path).get('duration') or 0)
-    if duration <= 0:
+    source_duration = float(probe(video_path).get('duration') or 0)
+    if source_duration <= 0:
         raise ValueError('Seedance 返回的视频时长无效，无法写入固定对白')
+    requested_duration = float(job['input'].get('shot_duration') or 0)
+    duration = min(source_duration, requested_duration) if requested_duration > 0 else source_duration
     filters.append(
         ''.join(labels) + f'amix=inputs={len(labels)}:duration=longest:normalize=0,'
         f'alimiter=limit=.95,apad,atrim=duration={duration:.6f}[dialogue]'

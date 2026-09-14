@@ -1,9 +1,25 @@
 """Compile canonical storyboard dialogue into video-generation prompts."""
 from __future__ import annotations
 
+import math
+
 
 MARKER = '[对白与声音]'
 TIMING_MARKER = '[固定对白音轨时序]'
+DURATION_MARKER = '[镜头时长]'
+
+
+def _apply_duration(result, duration, planned_duration=None):
+    duration = max(1, int(math.ceil(float(duration))))
+    base = str(result.get('prompt') or '').split(DURATION_MARKER, 1)[0].rstrip()
+    result['prompt'] = (
+        base + f'\n\n{DURATION_MARKER}\n'
+        f'本镜头成片总时长必须为 {duration:g} 秒；所有动作、运镜、开口与闭口必须在这段时间内完成。'
+    )
+    result['planned_shot_duration'] = float(planned_duration if planned_duration is not None else duration)
+    result['shot_duration'] = duration
+    result['parameters'] = {**(result.get('parameters') or {}), 'duration': duration}
+    return result
 
 
 def _shot_for_video_node(document, node_id):
@@ -42,7 +58,7 @@ def compile_video_prompt(base_prompt, shot):
 
 
 def compile_shot_video_input(document, node_id, kind, input_value, production_context=None):
-    """Project the shot's dialogue into every video submission, including old nodes."""
+    """Freeze canonical shot timing and dialogue into every video submission."""
     result = dict(input_value)
     if kind != 'video':
         return result
@@ -52,9 +68,21 @@ def compile_shot_video_input(document, node_id, kind, input_value, production_co
     shot = _shot_for_video_node(document, node_id)
     if not shot:
         return result
+    try:
+        shot_duration = float(shot.get('duration'))
+    except (TypeError, ValueError):
+        shot_duration = 0
+    if shot_duration <= 0:
+        raise ValueError('分镜时长无效，请先在分镜卡片中设置大于 0 秒的时长')
+    provider_duration = max(1, int(math.ceil(shot_duration)))
+    base_prompt = str(result.get('prompt') or shot.get('video_prompt') or '')
+    # Job prompts are immutable snapshots, but this also keeps retries and old
+    # already-compiled node data idempotent.
+    base_prompt = base_prompt.split(DURATION_MARKER, 1)[0].rstrip()
     result['prompt'] = compile_video_prompt(
-        result.get('prompt') or shot.get('video_prompt'), shot,
+        base_prompt, shot,
     )
+    result = _apply_duration(result, provider_duration, shot_duration)
     dialogues = [item for item in (shot.get('dialogues') or []) if isinstance(item, dict) and str(item.get('text') or '').strip()]
     if dialogues:
         result['dialogue_projection'] = {
@@ -120,9 +148,16 @@ def bind_fixed_dialogue_audio(document, node_id, kind, input_value, assets, prod
     shot_duration = float(shot.get('duration') or (result.get('parameters') or {}).get('duration') or 0)
     gaps = max(0, len(selected) - 1) * .12
     spoken_duration = sum(item[3] for item in selected) + gaps
-    if shot_duration and spoken_duration > shot_duration + .08:
-        raise ValueError(f'本镜固定对白共 {spoken_duration:.2f} 秒，超过镜头 {shot_duration:.2f} 秒，请缩短对白或延长镜头')
-    cursor = min(.3, max(0, (shot_duration - spoken_duration) / 2)) if shot_duration else .3
+    effective_duration = max(shot_duration, math.ceil(spoken_duration))
+    if effective_duration > shot_duration:
+        result['duration_adjustment'] = {
+            'reason': 'dialogue_audio',
+            'from': shot_duration,
+            'to': effective_duration,
+            'spoken_duration': round(spoken_duration, 3),
+        }
+    result = _apply_duration(result, effective_duration, shot_duration)
+    cursor = min(.3, max(0, (effective_duration - spoken_duration) / 2)) if effective_duration else .3
     frozen = []
     timing_lines = []
     for dialogue, profile, asset, duration in selected:

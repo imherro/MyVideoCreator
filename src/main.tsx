@@ -149,7 +149,7 @@ import { defaultStage } from "./directorScene";
 const DirectorStage = lazy(() =>
   import("./DirectorStage").then((m) => ({ default: m.DirectorStage })),
 );
-import { framesForDuration, migrateLinkedNodePrompts, updateLinkedNodePrompt } from "./shotSync";
+import { framesForDuration, migrateLinkedNodePrompts, updateLinkedNodePrompt, updateShot } from "./shotSync";
 import { TimelinePreview } from "./TimelinePreview";
 import type { Clip } from "./timeline";
 import type { EditorDocument } from "./editor/editorDocument";
@@ -1815,7 +1815,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       selectedUids.has(shotIdentity(shot)),
     );
     if (!targetShots.length) throw new Error("请先选择需要生成的视频镜头");
-    const prepared = deriveManagedGraph(
+    let prepared = deriveManagedGraph(
       ensureShotNodes(
         snapshot.doc,
         config.providers,
@@ -1827,6 +1827,13 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     ) as Doc;
     const rows = deriveVideoProductionRows(prepared, assets, jobs, config.providers);
     const targets = validateVideoSubmission(rows, shotUids);
+    let extendedCount = 0;
+    for (const target of targets) {
+      if (target.effectiveDuration > target.plannedDuration) {
+        prepared = updateShot(prepared, target.shot.id, { duration: target.effectiveDuration }) as Doc;
+        extendedCount += 1;
+      }
+    }
     const nodeIds = selectedShotVideoNodeIds(prepared, shotUids);
     if (nodeIds.length !== targets.length)
       throw new Error("部分镜头缺少视频生成节点");
@@ -1849,7 +1856,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       );
       await refresh(snapshot.project.id);
       setPanel("jobs");
-      setNotice(`已提交 ${result.count} 个所选视频任务`);
+      setNotice(`已提交 ${result.count} 个所选视频任务${extendedCount ? `；${extendedCount} 个镜头已按对白自动延长` : ""}`);
     } catch (reason) {
       report(reason);
       throw reason;
@@ -3136,7 +3143,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 }}
               >
                 <Download size={14} />
-                导出成片
+                导出样片
               </button>
               <button
                 className="icon-button"

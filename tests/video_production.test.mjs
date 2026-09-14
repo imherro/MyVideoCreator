@@ -86,3 +86,22 @@ test("Seedance dialogue requires the current locked voice take before paid submi
   assert.equal(rows[0].readinessReason, "");
   assert.deepEqual(rows[0].dialogueAudioAssets.map((asset) => asset.id), ["voice-1"]);
 });
+
+test("Seedance dialogue extends a short shot instead of blocking submission", () => {
+  const { document, jobs } = fixture();
+  document.shots[0].duration = 2;
+  document.shots[0].dialogues = [
+    { id: "dialogue-1", characterCardId: "robot", characterName: "球球", text: "第一句" },
+    { id: "dialogue-2", characterCardId: "robot", characterName: "球球", text: "第二句" },
+  ];
+  document.filmBible = { voices: { profiles: { robot: { status: "locked", voiceType: "robot-speaker", version: 2 } } } };
+  const voiceAssets = [
+    { id: "voice-1", kind: "audio", created: 5, metadata: { duration: 1.4, input: { dialogue: { id: "dialogue-1", voiceVersion: 2 } } } },
+    { id: "voice-2", kind: "audio", created: 6, metadata: { duration: 1.1, input: { dialogue: { id: "dialogue-2", voiceVersion: 2 } } } },
+  ];
+  const rows = deriveVideoProductionRows(document, [...assets, ...voiceAssets], jobs, providers, capabilities);
+  assert.equal(rows[0].readinessReason, "");
+  assert.equal(rows[0].plannedDuration, 2);
+  assert.equal(rows[0].effectiveDuration, 3);
+  assert.doesNotThrow(() => validateVideoSubmission(rows, ["u-ready"]));
+});

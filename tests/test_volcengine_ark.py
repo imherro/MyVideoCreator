@@ -110,6 +110,7 @@ def test_seedream_reference_limit_is_provider_configurable(monkeypatch):
 
 def test_seedance_persists_task_and_resume_only_queries(monkeypatch):
     p=provider();item=stored_job('video',p)
+    item['input']['parameters']={'duration':2}
     calls=[];downloads=[];original=httpx.Client
     def handle(request):
         calls.append((request.method,request.url.path))
@@ -117,6 +118,7 @@ def test_seedance_persists_task_and_resume_only_queries(monkeypatch):
             body=json.loads(request.read())
             assert body['model']=='seedance-video' and body['content'][0]['type']=='text'
             assert body['ratio']=='16:9'
+            assert body['duration']==2
             return httpx.Response(200,json={'id':'ark-task-1','status':'queued'})
         return httpx.Response(200,json={'id':'ark-task-1','status':'succeeded','content':{'video_url':'https://result.example/movie.mp4'}})
     monkeypatch.setattr(ark.httpx,'Client',lambda **kw:original(**kw,transport=httpx.MockTransport(handle)))
