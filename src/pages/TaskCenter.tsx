@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, Clock, Download, ExternalLink, LoaderCircle, Play, RefreshCw, RotateCcw, Square, XCircle } from "lucide-react";
+import { Check, Clock, Download, ExternalLink, LoaderCircle, RefreshCw, RotateCcw, Square, XCircle } from "lucide-react";
 import { JobProgress } from "../JobProgress";
 import { deriveTaskCenterRows, filterTaskCenterRows, taskShotLabel, type TaskEpisode } from "../taskCenter";
 import { taskDetailHref } from "../jobDetail";
@@ -109,6 +109,11 @@ export function TaskCenter({
     }
   }
 
+  async function resumeJob(job: Value) {
+    if (!job.provider_job_id && !window.confirm("此任务没有上游任务编号，将使用已保存的提示词和模型参数重新排队，可能再次产生模型费用。是否继续？")) return;
+    await mutate(`/jobs/${job.id}/resume`);
+  }
+
   return <section className="task-center">
     <header className="task-center-header">
       <div><span className="eyebrow">TASK CENTER</span><h2>任务中心</h2><p>{productionName} · 直接读取现有生成任务，不会自动重试或产生费用。</p></div>
@@ -125,7 +130,9 @@ export function TaskCenter({
       const job = row.job;
       const canOpenNode = job.node_id && job.node_id !== "export";
       return <article className="job-card task-card" key={job.id}>
-        <header><span className={`job-state ${job.status}`}><StatusIcon status={job.status}/>{statusLabels[job.status] || job.status}</span><small>{new Date(job.created * 1000).toLocaleString()}</small></header>
+        <header>{job.status === "interrupted"
+          ? <button className={`job-state ${job.status} task-resume-state`} title={job.provider_job_id ? "继续查询原上游任务" : "使用已保存的输入重新排队"} onClick={() => void resumeJob(job)}><StatusIcon status={job.status}/>{statusLabels[job.status]}</button>
+          : <span className={`job-state ${job.status}`}><StatusIcon status={job.status}/>{statusLabels[job.status] || job.status}</span>}<small>{new Date(job.created * 1000).toLocaleString()}</small></header>
         <div className="task-card-title"><b>{kindLabels[job.kind] || job.kind} · {taskShotLabel(row)}</b><span>EP{String(row.episode?.episode_no || 1).padStart(2,"0")} · {row.episode?.episode_title || row.episode?.name || job.project_id}</span></div>
         <dl><div><dt>Provider</dt><dd>{row.providerName}</dd></div><div><dt>Model</dt><dd>{row.modelName}</dd></div><div><dt>Node</dt><dd>{job.node_id}</dd></div>{job.provider_job_id && <div><dt>上游任务</dt><dd>{job.provider_job_id}</dd></div>}</dl>
         {job.phase && <p>{job.phase}</p>}
@@ -135,8 +142,7 @@ export function TaskCenter({
           <a className="task-detail-link" href={taskDetailHref(job.id)} target="_blank" rel="noopener noreferrer">任务详情 <ExternalLink size={13}/></a>
           {job.result?.assets?.map((asset: Value) => <a className="download-link" href={asset.url} download={asset.name} key={asset.id}><Download size={14}/>{asset.name}</a>)}
           {job.result?.shots && job.project_id === currentProjectId && <button onClick={() => onAdoptShots(job)}>导入分镜表</button>}
-          {job.status === "interrupted" && job.provider_job_id && <button onClick={() => void mutate(`/jobs/${job.id}/resume`)}><Play size={14}/>恢复查询已有任务</button>}
-          {job.status === "interrupted" && !job.provider_job_id && <span className="muted">未取得上游任务编号，请核对后从原节点重新提交。</span>}
+          {job.status === "interrupted" && <span className="muted">{job.provider_job_id ? "点击上方“待恢复”继续查询原任务。" : "点击上方“待恢复”可按原提示词重新排队。"}</span>}
           {["queued","running","interrupted"].includes(job.status) && <button onClick={() => void mutate(`/jobs/${job.id}/cancel`)}><Square size={14}/>取消任务</button>}
           {canOpenNode && <button className="quiet" onClick={() => void onOpenNode(job.project_id, job.node_id)}>查看节点</button>}
         </div>

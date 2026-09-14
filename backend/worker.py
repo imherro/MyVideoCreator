@@ -27,7 +27,13 @@ class Worker:
         try:
             with s.db() as c:
                 # Reconcile only after proving this process owns the queue.
-                c.execute("UPDATE jobs SET status='interrupted',phase='服务已重启，可凭上游任务编号恢复查询',updated=? WHERE status='running'",(time.time(),))
+                c.execute("""UPDATE jobs SET status='interrupted',phase=CASE
+                    WHEN provider_job_id IS NULL THEN '服务已重启，原任务输入已保留；点击待恢复可重新排队'
+                    ELSE '服务已重启，点击待恢复可继续查询上游任务' END,updated=?
+                    WHERE status='running'""",(time.time(),))
+                c.execute("""UPDATE jobs SET phase='原任务输入已保留；点击待恢复可重新排队'
+                    WHERE status='interrupted' AND provider_job_id IS NULL
+                    AND phase='服务已重启，可凭上游任务编号恢复查询'""")
             self.halt.clear()
             self.thread=threading.Thread(target=self.run_owned,daemon=True,name='studio-worker')
             self.thread.start()

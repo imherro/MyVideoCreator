@@ -1622,8 +1622,8 @@ def cancel(jid:str):
 
 @app.post('/api/jobs/{jid}/resume')
 def resume(jid:str):
-    # Reconcile the same upstream job using its original credentials and input.
-    # Never infer that a missing handle means the original submission failed.
+    # Remote jobs keep polling the original handle. Synchronous jobs do not have
+    # one, so an explicit resume action requeues their frozen input instead.
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
         job=c.execute('SELECT * FROM jobs WHERE id=?',(jid,)).fetchone()
@@ -1632,9 +1632,24 @@ def resume(jid:str):
         if job['status']!='interrupted': raise HTTPException(409,'只有中断任务可以恢复查询')
         snapshot=c.execute('SELECT provider FROM job_private WHERE job_id=?',(jid,)).fetchone()
         provider=json.loads(snapshot['provider']) if snapshot else {}
-        if not job['provider_job_id'] or provider.get('type') not in ('maestro','comfy','video_api','minimax','replicate','volcengine_ark'):
-            raise HTTPException(409,'此任务没有可恢复的上游编号或查询接口，请核对服务后从节点重新生成')
-        c.execute("UPDATE jobs SET status='queued',error=NULL,phase='恢复查询已有上游任务',updated=? WHERE id=?",(time.time(),jid))
+        if job['provider_job_id']:
+            if provider.get('type') not in ('maestro','comfy','video_api','minimax','replicate','volcengine_ark'):
+                raise HTTPException(409,'此任务的上游服务不支持恢复查询，请核对服务配置')
+            phase='恢复查询已有上游任务'
+        else:
+            frozen_input=json.loads(job['input'])
+            marker=frozen_input.get('source_event_extraction') or {}
+            if marker.get('chapterId'):
+                chapter=c.execute('''SELECT sc.id,sd.production_id FROM source_chapters sc
+                    JOIN source_documents sd ON sd.id=sc.source_id WHERE sc.id=?
+                    AND NOT EXISTS(SELECT 1 FROM deleted_items d WHERE d.kind='source' AND d.item_id=sd.id)
+                    AND NOT EXISTS(SELECT 1 FROM deleted_items d WHERE d.kind='chapter' AND d.item_id=sc.id)''',
+                    (marker['chapterId'],)).fetchone()
+                if not chapter or chapter['production_id']!=marker.get('productionId'):
+                    raise HTTPException(409,'原任务对应的章节已删除或归属已变化，无法重新排队')
+            phase='使用已保存的输入重新排队'
+        c.execute('''UPDATE jobs SET status='queued',result=NULL,error=NULL,phase=?,progress=NULL,
+            started=NULL,finished=NULL,telemetry=NULL,updated=? WHERE id=?''',(phase,time.time(),jid))
     s.event(job['project_id'],{'type':'job','id':jid})
     return read_job(jid)
 

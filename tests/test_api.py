@@ -891,10 +891,17 @@ def test_resume_only_queries_frozen_upstream(authenticated,monkeypatch,provider_
     assert worker.execute(job)['assets']
     assert calls
 
-def test_resume_missing_handle_and_cancelled_rejected(authenticated):
+def test_resume_missing_handle_requeues_frozen_input_and_cancelled_rejected(authenticated):
     c=authenticated;p=project(c)
     job=c.post('/api/projects/'+p['id']+'/jobs',json={'node_id':'n','kind':'text','submission_id':'resume-no-handle','input':{'prompt':'test'}}).json()
-    s.job_update(job['id'],status='interrupted')
+    s.job_update(job['id'],status='interrupted',error='restart',phase='old phase',progress=42,telemetry={'old':True})
+    resumed=c.post('/api/jobs/'+job['id']+'/resume').json()
+    assert resumed['status']=='queued'
+    assert resumed['id']==job['id']
+    assert resumed['input']==job['input']
+    assert resumed['phase']=='使用已保存的输入重新排队'
+    assert resumed['error'] is None and resumed['progress'] is None and resumed['telemetry'] is None
+    assert c.post('/api/jobs/'+job['id']+'/cancel').json()['status']=='cancelled'
     assert c.post('/api/jobs/'+job['id']+'/resume').status_code==409
 
 def test_replicate_resume_uses_frozen_service_and_cancel_requests_remote_stop(authenticated,monkeypatch):

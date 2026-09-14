@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Check, Clock, Download, LoaderCircle, RefreshCw, XCircle } from "lucide-react";
+import { ArrowLeft, Check, Clock, Download, LoaderCircle, RefreshCw, RotateCcw, XCircle } from "lucide-react";
 import { JobProgress } from "../JobProgress";
 import { jobDebugParameters, jobElapsedSeconds } from "../jobDetail";
 
@@ -21,15 +21,30 @@ function duration(value: number) {
   return seconds >= 60 ? `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒` : `${seconds} 秒`;
 }
 
-export function TaskDetailPage({ jobId, request }: { jobId: string; request: (path: string) => Promise<any> }) {
+export function TaskDetailPage({ jobId, request }: { jobId: string; request: (path: string, init?: RequestInit) => Promise<any> }) {
   const [job, setJob] = useState<Value>();
   const [error, setError] = useState("");
   const [connected, setConnected] = useState(true);
   const [now, setNow] = useState(Date.now() / 1000);
+  const [recovering, setRecovering] = useState(false);
 
   async function load() {
     try { setJob(await request(`/jobs/${jobId}`)); setError(""); }
     catch (reason: any) { setError(reason?.message || String(reason)); }
+  }
+
+  async function resume() {
+    if (!job) return;
+    if (!job.provider_job_id && !window.confirm("此任务没有上游任务编号，将使用已保存的提示词和模型参数重新排队，可能再次产生模型费用。是否继续？")) return;
+    setRecovering(true);
+    try {
+      setJob(await request(`/jobs/${jobId}/resume`, { method: "POST", headers: { "Content-Type": "application/json" } }));
+      setError("");
+    } catch (reason: any) {
+      setError(reason?.message || String(reason));
+    } finally {
+      setRecovering(false);
+    }
   }
 
   useEffect(() => { void load(); }, [jobId]);
@@ -64,7 +79,9 @@ export function TaskDetailPage({ jobId, request }: { jobId: string; request: (pa
     {error && <div className="error">读取失败，保留当前内容：{error}</div>}
     {!job ? <div className="loading task-detail-loading"><LoaderCircle className="spin"/>正在读取任务</div> : <>
       <section className="task-detail-summary">
-        <div><small>状态</small><strong className={job.status}>{job.status === "succeeded" ? <Check/> : job.status === "failed" ? <XCircle/> : <Clock/>}{statusLabels[job.status] || job.status}</strong></div>
+        <div><small>状态</small>{job.status === "interrupted"
+          ? <button className="job-state interrupted task-resume-state" disabled={recovering} title={job.provider_job_id ? "继续查询原上游任务" : "使用已保存的输入重新排队"} onClick={() => void resume()}><RotateCcw className={recovering ? "spin" : ""}/>{recovering ? "恢复中" : statusLabels[job.status]}</button>
+          : <strong className={job.status}>{job.status === "succeeded" ? <Check/> : job.status === "failed" ? <XCircle/> : <Clock/>}{statusLabels[job.status] || job.status}</strong>}</div>
         <div><small>类型</small><strong>{kindLabels[job.kind] || job.kind}</strong></div>
         <div><small>当前阶段</small><strong>{job.phase || "等待处理"}</strong></div>
         <div><small>已用时间</small><strong>{duration(jobElapsedSeconds(job, now))}</strong></div>
