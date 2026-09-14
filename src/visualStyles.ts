@@ -5,6 +5,10 @@ export type VisualStylePreset = {
 
 export const VISUAL_STYLE_PRESETS: VisualStylePreset[] = [
   { name: "电影写实", prompt: "电影写实，真实材质，自然肤质，电影级布光与景深" },
+  {
+    name: "东方仙侠·半写实电影",
+    prompt: "东方仙侠电影质感，半写实真人风格，影视级角色设计，精致东方五官，真实皮肤纹理与丝绸服饰，电影级布光，浅景深，宏大仙侠世界，轻度 AI 漫剧美学，非卡通、非传统 3D 动画",
+  },
   { name: "国风写实", prompt: "国风写实，东方美学，克制色彩，细腻自然光影" },
   { name: "日系动漫", prompt: "日系动漫，清晰线稿，赛璐璐上色，富有表现力的角色设计" },
   { name: "3D 卡通", prompt: "3D 卡通，精致角色建模，柔和材质，动画电影级灯光" },
