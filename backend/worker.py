@@ -237,17 +237,31 @@ class Worker:
         if kind=='storyboard' and inp.get('film_bible'):
             from .film_bible import extract_storyboard
             prompt_trace=[]
-            def request_stage(system,user,schema,phase,stage_id):
-                prompt_trace.append({
-                    'id':stage_id,'phase':phase,'system_prompt':system,
-                    'user_prompt':user,'response_schema':schema,
-                })
+            def publish_trace():
                 s.job_update(job['id'],telemetry={'prompt_stages':prompt_trace})
-                return self._chat_text(job,p,system,user,schema,phase)
+            def request_stage(system,user,schema,phase,stage_id):
+                entry={
+                    'id':stage_id,'phase':phase,'system_prompt':system,
+                    'user_prompt':user,'response_schema':schema,'status':'running',
+                    'started':time.time(),
+                }
+                prompt_trace.append(entry);publish_trace()
+                try:return self._chat_text(job,p,system,user,schema,phase)
+                except Exception as exc:
+                    entry.update(status='request_failed',finished=time.time(),error=str(exc)[:1200]);publish_trace();raise
+                finally:
+                    if entry['status']=='running':
+                        entry.update(status='response_received',finished=time.time());publish_trace()
+            def report_stage(stage_id,status,error=None):
+                entry=next((item for item in reversed(prompt_trace) if item['id']==stage_id),None)
+                if entry:
+                    entry['status']=status
+                    if error:entry['validation_error']=error[:1200]
+                    publish_trace()
             return extract_storyboard(
                 inp['prompt'],inp.get('target_duration'),inp.get('provider','local'),
                 inp.get('model') or p.get('model','local'),
-                request_stage,inp.get('prompt_stages'),
+                request_stage,inp.get('prompt_stages'),report_stage,
             )
         prompt=inp['prompt']
         if kind=='text' and inp.get('target_duration'):

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Check, Clock, Download, LoaderCircle, RefreshCw, RotateCcw, XCircle } from "lucide-react";
 import { JobProgress } from "../JobProgress";
 import { jobDebugParameters, jobElapsedSeconds } from "../jobDetail";
+import { filmBibleJobStages } from "../filmBibleJobProgress";
 
 type Value = Record<string, any>;
 
@@ -72,6 +73,7 @@ export function TaskDetailPage({ jobId, request }: { jobId: string; request: (pa
   const text = typeof job?.result === "string" ? job.result : job?.result?.text;
   const promptStages = job?.input?.prompt_stages || [];
   const runtimePromptStages = job?.telemetry?.prompt_stages || [];
+  const filmBibleStages = filmBibleJobStages(job || {});
 
   return <main className="task-detail-page">
     <header className="task-detail-header">
@@ -90,6 +92,14 @@ export function TaskDetailPage({ jobId, request }: { jobId: string; request: (pa
       </section>
       <section className="task-detail-card">
         <h2>运行状态</h2><JobProgress job={job}/>
+        {!!filmBibleStages.length && <div className="film-bible-task-progress">
+          <div className="film-bible-task-heading"><b>Film Bible 分镜流程</b><span>最近更新于 {duration(now - Number(job.updated || now))}前</span></div>
+          <div className="film-bible-task-stages">{filmBibleStages.map((stage) => <article className={stage.status} key={stage.id}>
+            <span>{stage.status === "succeeded" ? "已完成" : stage.status === "running" ? "进行中" : stage.status === "failed" ? "失败" : "等待中"}</span>
+            <b>{stage.label}</b><p>{stage.detail}</p>{stage.validationError && <p className="stage-validation-error">校验原因：{stage.validationError}</p>}<small>尝试 {stage.attempts} 次</small>
+          </article>)}</div>
+          {job.status === "running" && <p className="film-bible-live-note">{now - Number(job.updated || 0) < 15 ? "任务仍在持续更新，没有失联。" : "超过 15 秒没有状态更新，可能正在等待模型首个输出；可继续观察。"}</p>}
+        </div>}
         <dl className="task-detail-times"><div><dt>创建</dt><dd>{displayTime(job.created)}</dd></div><div><dt>开始</dt><dd>{displayTime(job.started)}</dd></div><div><dt>更新</dt><dd>{displayTime(job.updated)}</dd></div><div><dt>完成</dt><dd>{displayTime(job.finished)}</dd></div><div><dt>任务范围</dt><dd>{job.scope === "production" ? "整部作品" : "单集制作"}</dd></div><div><dt>节点</dt><dd>{job.node_id}</dd></div><div><dt>远程任务 ID</dt><dd>{job.provider_job_id || "—"}</dd></div></dl>
         {job.error && <div className="error"><b>错误信息</b><pre>{job.error}</pre></div>}
       </section>
