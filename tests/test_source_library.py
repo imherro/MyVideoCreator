@@ -297,6 +297,15 @@ def test_source_document_moves_to_trash_and_restores_with_chapters_and_events(so
         f'/api/productions/{production["id"]}/sources/{source["id"]}/chapters',
         json={"title": "旧第二章", "content": "阿青回到屋内。"},
     ).json()
+    assert client.delete(
+        f'/api/productions/{production["id"]}/chapters/{chapter["id"]}'
+    ).status_code == 200
+    renumbered = client.get(f'/api/productions/{production["id"]}/chapters').json()
+    assert renumbered[0]["id"] == second_chapter["id"]
+    assert renumbered[0]["chapter_no"] == 2
+    assert renumbered[0]["display_no"] == 1
+    assert client.post(f'/api/trash/chapter/{chapter["id"]}/restore').status_code == 200
+
     deleted_chapters = client.post(
         f'/api/productions/{production["id"]}/chapters/trash',
         json={"chapter_ids": [chapter["id"], second_chapter["id"]]},

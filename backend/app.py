@@ -1047,7 +1047,12 @@ def source_chapters(production_id:str,source_id:str|None=None,q:str=''):
     if source_id:clauses.append('c.source_id=?');params.append(source_id)
     if q.strip():clauses.append('(c.title LIKE ? OR c.content LIKE ?)');term='%'+q.strip()+'%';params.extend([term,term])
     with s.db() as c:
-        rows=c.execute('''SELECT c.*,d.title source_title FROM source_chapters c
+        rows=c.execute('''SELECT c.*,d.title source_title,1+(SELECT COUNT(*) FROM source_chapters previous
+            WHERE previous.source_id=c.source_id
+            AND NOT EXISTS(SELECT 1 FROM deleted_items hidden WHERE hidden.kind='chapter' AND hidden.item_id=previous.id)
+            AND (previous.sort_order<c.sort_order OR (previous.sort_order=c.sort_order AND previous.chapter_no<c.chapter_no)
+                OR (previous.sort_order=c.sort_order AND previous.chapter_no=c.chapter_no AND previous.id<c.id))) display_no
+            FROM source_chapters c
             JOIN source_documents d ON d.id=c.source_id WHERE '''+' AND '.join(clauses)+
             ' ORDER BY d.created,c.sort_order,c.chapter_no',params).fetchall()
     return [dict(row) for row in rows]
