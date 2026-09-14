@@ -791,6 +791,8 @@ def save_prompt_template(tid:str,body:PromptTemplateSave):
     return library
 
 def create_job_record(c,pid,body):
+    from .job_contracts import freeze_prompt_contract
+    body.input=freeze_prompt_contract(body.kind,body.input)
     if body.kind not in ('text','storyboard','image','video','export'): raise ValueError('不支持的任务类型')
     old=c.execute('SELECT * FROM jobs WHERE submission_id=?',(body.submission_id,)).fetchone()
     if old:

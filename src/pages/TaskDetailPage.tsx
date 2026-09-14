@@ -92,10 +92,11 @@ export function TaskDetailPage({ jobId, request }: { jobId: string; request: (pa
         {job.error && <div className="error"><b>错误信息</b><pre>{job.error}</pre></div>}
       </section>
       <section className="task-detail-card">
-        <h2>提交给任务的提示词</h2>
-        <p className="muted">这里显示任务创建时冻结的输入，便于核对生成内容。</p>
-        <h3>用户提示词</h3><pre className="debug-block">{job.input?.prompt || "未记录"}</pre>
-        {job.input?.system_prompt && <><h3>系统提示词</h3><pre className="debug-block">{job.input.system_prompt}</pre></>}
+        <h2>模型请求契约</h2>
+        <p className="muted">{job.input?.prompt_contract_origin === "migration" ? "旧任务按当前兼容版本补齐的提示词契约。" : "任务创建时冻结的完整提示词契约；Worker 执行时读取同一份快照。"}</p>
+        <h3>System Prompt</h3><pre className="debug-block">{job.input?.system_prompt || "此任务没有独立的 System Prompt"}</pre>
+        <h3>User Prompt</h3><pre className="debug-block">{job.input?.prompt || "未记录"}</pre>
+        <h3>Output Schema · {job.input?.schema_version || "无版本"}</h3><pre className="debug-block">{job.input?.response_schema ? JSON.stringify(job.input.response_schema, null, 2) : "此任务没有结构化输出 Schema"}</pre>
         <h3>请求参数</h3><pre className="debug-block">{JSON.stringify(parameters, null, 2)}</pre>
       </section>
       <section className="task-detail-card">

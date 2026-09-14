@@ -14,7 +14,14 @@ export function redactDebugValue(value: any, key = ""): any {
 }
 
 export function jobDebugParameters(input: Value = {}): Value {
-  const { prompt: _prompt, system_prompt: _systemPrompt, ...parameters } = input;
+  const {
+    prompt: _prompt,
+    system_prompt: _systemPrompt,
+    response_schema: _responseSchema,
+    schema_version: _schemaVersion,
+    prompt_contract_origin: _promptContractOrigin,
+    ...parameters
+  } = input;
   return redactDebugValue(parameters);
 }
 

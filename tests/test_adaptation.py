@@ -128,6 +128,8 @@ def test_script_generation_requires_explicit_approval_and_selected_set_isolated(
     assert {job["kind"] for job in first.json()["jobs"]} == {"text"}
     assert {job["scope"] for job in first.json()["jobs"]} == {"episode"}
     assert {job["input"]["episode_script_generation"]["episodeNo"] for job in first.json()["jobs"]} == {5, 8, 12}
+    assert {job["input"]["schema_version"] for job in first.json()["jobs"]} == {"episode-script/v1"}
+    assert all(job["input"]["system_prompt"] and job["input"]["response_schema"] for job in first.json()["jobs"])
 
     worker = Worker()
     generated = {

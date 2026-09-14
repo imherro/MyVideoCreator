@@ -155,6 +155,13 @@ def init():
         c.execute('CREATE INDEX IF NOT EXISTS source_events_production_chapter ON source_events(production_id,chapter_id,event_order)')
         c.execute('CREATE INDEX IF NOT EXISTS episode_scripts_status ON episode_scripts(status,updated)')
         c.execute('CREATE INDEX IF NOT EXISTS episode_script_revisions_parent ON episode_script_revisions(project_id,revision)')
+        from .job_contracts import freeze_prompt_contract
+        for job in c.execute('SELECT id,kind,input FROM jobs').fetchall():
+            try: old_input=json.loads(job['input'])
+            except (TypeError,ValueError): continue
+            frozen_input=freeze_prompt_contract(job['kind'],old_input,origin='migration')
+            if frozen_input!=old_input:
+                c.execute('UPDATE jobs SET input=? WHERE id=?',(dumps(frozen_input),job['id']))
         from .adaptation import seed_episode_scripts
         seed_episode_scripts(c)
 

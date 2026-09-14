@@ -214,21 +214,21 @@ class Worker:
         inp=job['input']; kind=job['kind']
         if kind=='text' and inp.get('adaptation_generation'):
             from .adaptation import ADAPTATION_SCHEMA, ADAPTATION_SYSTEM_PROMPT, apply_adaptation_generation
-            raw=self._chat_text(job,p,ADAPTATION_SYSTEM_PROMPT,inp['prompt'],ADAPTATION_SCHEMA,'生成改编策划')
+            raw=self._chat_text(job,p,inp.get('system_prompt') or ADAPTATION_SYSTEM_PROMPT,inp['prompt'],inp.get('response_schema') or ADAPTATION_SCHEMA,'生成改编策划')
             try:value=json.loads(raw.strip())
             except json.JSONDecodeError as exc:raise ValueError('改编策划结果不是严格 JSON：'+str(exc)) from exc
             result=apply_adaptation_generation(job,value)
             return {'text':s.dumps(result),'adaptation':result}
         if kind=='text' and inp.get('episode_script_generation'):
             from .adaptation import SCRIPT_SCHEMA, SCRIPT_SYSTEM_PROMPT, apply_episode_script_generation
-            raw=self._chat_text(job,p,SCRIPT_SYSTEM_PROMPT,inp['prompt'],SCRIPT_SCHEMA,'生成本集剧本')
+            raw=self._chat_text(job,p,inp.get('system_prompt') or SCRIPT_SYSTEM_PROMPT,inp['prompt'],inp.get('response_schema') or SCRIPT_SCHEMA,'生成本集剧本')
             try:value=json.loads(raw.strip())
             except json.JSONDecodeError as exc:raise ValueError('逐集剧本结果不是严格 JSON：'+str(exc)) from exc
             result=apply_episode_script_generation(job,value)
             return {'text':result['script']['body'],'script':result['script']}
         if kind=='text' and inp.get('source_event_extraction'):
             from .source_library import EVENT_SCHEMA, SYSTEM_PROMPT, replace_events, validate_events
-            raw=self._chat_text(job,p,SYSTEM_PROMPT,inp['prompt'],EVENT_SCHEMA,'提取原著事件')
+            raw=self._chat_text(job,p,inp.get('system_prompt') or SYSTEM_PROMPT,inp['prompt'],inp.get('response_schema') or EVENT_SCHEMA,'提取原著事件')
             try:rows=validate_events(json.loads(raw.strip()))
             except (ValueError,TypeError,json.JSONDecodeError) as exc:
                 raise ValueError('事件提取结果校验失败：'+str(exc)) from exc
@@ -256,7 +256,7 @@ class Worker:
             prompt+=f'\n镜头总时长必须为 {inp["target_duration"]} 秒，误差不超过 0.5 秒。'
         text=self._chat_text(
             job,p,inp.get('system_prompt') or TEMPLATES[kind],prompt,
-            SHOT_SCHEMA if kind=='storyboard' else None,
+            inp.get('response_schema') or (SHOT_SCHEMA if kind=='storyboard' else None),
             '生成剧本' if kind=='text' else '拆解分镜',
         )
         if kind=='storyboard':
