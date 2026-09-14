@@ -2,6 +2,7 @@
 import json
 import os
 import sqlite3
+import threading
 import time
 import uuid
 from contextlib import contextmanager
@@ -10,6 +11,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DATA = Path(os.environ.get('MVC_DATA_DIR', ROOT / 'data')).resolve()
 ASSETS = DATA / 'assets'
+EVENT_RETENTION = 2000
+JOB_EVENT_INTERVAL = 5.0
+_job_event_times = {}
+_job_event_lock = threading.Lock()
 for folder in (DATA, ASSETS, DATA / 'logs'):
     folder.mkdir(parents=True, exist_ok=True)
 
@@ -176,7 +181,23 @@ def set_setting(key, value):
 
 def event(project_id, payload):
     with db() as c:
-        c.execute('INSERT INTO events(project_id,payload,created) VALUES(?,?,?)',(project_id,dumps(payload),time.time()))
+        inserted = c.execute('INSERT INTO events(project_id,payload,created) VALUES(?,?,?)',(project_id,dumps(payload),time.time()))
+        c.execute('DELETE FROM events WHERE id<=?', (max(0, inserted.lastrowid - EVENT_RETENTION),))
+
+def _notify_job(project_id, job_id, *, force=False):
+    now = time.monotonic()
+    with _job_event_lock:
+        previous = _job_event_times.get(job_id, 0)
+        if not force and now - previous < JOB_EVENT_INTERVAL:
+            return False
+        _job_event_times[job_id] = now
+        if len(_job_event_times) > EVENT_RETENTION:
+            cutoff = now - JOB_EVENT_INTERVAL * 2
+            for key, value in list(_job_event_times.items()):
+                if value < cutoff:
+                    _job_event_times.pop(key, None)
+    event(project_id, {'type':'job','id':job_id})
+    return True
 
 def unpack(row):
     if row is None:
@@ -201,7 +222,8 @@ def job_update(job_id, **fields):
         if not current or current['status'] in ('cancelled','succeeded'):
             return False
         c.execute('UPDATE jobs SET '+','.join(f'{k}=?' for k in fields)+' WHERE id=?',(*fields.values(),job_id))
-    event(current['project_id'], {'type':'job','id':job_id})
+    force = bool(fields.keys() & {'status','error','provider_job_id'})
+    _notify_job(current['project_id'], job_id, force=force)
     return True
 
 def attach_provider_job_id(job_id, provider_job_id):
