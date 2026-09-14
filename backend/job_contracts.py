@@ -5,7 +5,7 @@ import copy
 
 IMAGE_SYSTEM_PROMPT = """你是安影的影视分镜美术生成器。严格依据用户提示词、项目视觉风格和按顺序提供的独立参考图生成单张画面。参考图用于锁定角色身份、服装、场景结构和道具外观；只改变镜头明确要求的动作、表情、构图与光线。不要添加提示词未要求的文字、水印或拼贴。"""
 
-VIDEO_SYSTEM_PROMPT = """你是安影的影视镜头生成器。严格依据用户提示词和首帧/尾帧参考生成连续视频，保持人物身份、服装、场景、道具和空间关系稳定。动作与摄影机运动应符合镜头描述，避免闪烁、形变、身份漂移、额外人物、文字和水印。"""
+VIDEO_SYSTEM_PROMPT = """你是安影的影视镜头生成器。严格依据用户提示词和首帧/尾帧参考生成连续视频，保持人物身份、服装、场景、道具和空间关系稳定。提示词中的对白必须由指定角色按原文说出，声音、开口时机、情绪和口型自然同步，不得改词、漏词或增加额外对白；没有台词的角色保持闭嘴。动作与摄影机运动应符合镜头描述，避免闪烁、形变、身份漂移、额外人物、字幕、文字和水印。"""
 
 AUDIO_SYSTEM_PROMPT = """你是安影的角色对白合成器。严格使用角色 Film Bible 中已选择的固定音色和本次台词参数生成音频，不改变台词内容，不在前后添加说明、音乐或额外对白。"""
 
@@ -56,7 +56,7 @@ def freeze_prompt_contract(kind: str, value: dict, *, origin: str = 'submission'
     elif kind == 'image':
         system_prompt, schema_version = IMAGE_SYSTEM_PROMPT, 'image-generation/v1'
     elif kind == 'video':
-        system_prompt, schema_version = VIDEO_SYSTEM_PROMPT, 'video-generation/v1'
+        system_prompt, schema_version = VIDEO_SYSTEM_PROMPT, 'video-generation/v2'
     elif kind == 'audio':
         system_prompt, schema_version = AUDIO_SYSTEM_PROMPT, 'dialogue-tts/v1'
 

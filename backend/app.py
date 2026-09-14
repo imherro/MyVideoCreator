@@ -892,6 +892,11 @@ def submit(pid:str,body:JobCreate):
         s.get_setting('providers',[]),
         production_context=project_state['production_context'],
     )
+    from .video_dialogue import compile_shot_video_input
+    prepared_input=compile_shot_video_input(
+        project_state['episode_document'],body.node_id,body.kind,prepared_input,
+        production_context=project_state['production_context'],
+    )
     if body.kind in ('text','storyboard') and prepared_input.get('target_duration') is None:
         prepared_input={**prepared_input,'target_duration':saved_project['document'].get('duration',15)}
     body=body.model_copy(update={'input':prepared_input})
@@ -1493,6 +1498,7 @@ async def run_workflow(pid:str,request:Request):
     runnable={'text','storyboard','image','video'}
     prepared=[]
     from .reference_compiler import compile_shot_image_input
+    from .video_dialogue import compile_shot_video_input
     from .visual_references import resolve_image_model_capabilities
     capability_cache={}
     def cached_image_capabilities(provider,model_id):
@@ -1506,6 +1512,10 @@ async def run_workflow(pid:str,request:Request):
         data=compile_shot_image_input(
             project_state['episode_document'],node['id'],kind,data,
             list(providers.values()),cached_image_capabilities,
+            production_context=project_state['production_context'],
+        )
+        data=compile_shot_video_input(
+            project_state['episode_document'],node['id'],kind,data,
             production_context=project_state['production_context'],
         )
         film_bible_compiled=bool(data.get('reference_compiler'))

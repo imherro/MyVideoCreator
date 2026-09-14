@@ -179,3 +179,4 @@
 @media(max-width:800px){.side-panel-scrim{left:54px;top:58px}}
 .canvas-script-editor{min-height:260px;margin:12px 0}
 .workflow-nav-state.skipped{background:#747b7d}.workflow-guide-banner.skipped{border-color:#465055;background:#1b2225}
+.video-dialogue-projection{margin:0 0 9px;border:1px solid #394247;border-radius:7px;background:#141a1d}.video-dialogue-projection summary{padding:7px 9px;color:#d0b071;font-size:10px;cursor:pointer}.video-dialogue-projection pre{max-height:180px;margin:0;padding:9px;overflow:auto;border-top:1px solid #30383d;color:#aeb9bb;font:10px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap}
