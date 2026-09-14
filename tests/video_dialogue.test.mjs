@@ -19,3 +19,7 @@ test("an authored prompt that already contains every line is preserved", () => {
   const value = "球球说：下一步直接拔电源。林岚回答：你确定吗？";
   assert.equal(compileVideoPrompt(value, shot), value);
 });
+
+test("a shot without dialogue still exposes its final video prompt", () => {
+  assert.equal(compileVideoPrompt("只有镜头动作和环境声。", { dialogues: [] }), "只有镜头动作和环境声。");
+});
