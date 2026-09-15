@@ -48,7 +48,8 @@ async def auth(request: Request, call_next):
         origin = request.headers.get('origin')
         if request.method not in ('GET','HEAD','OPTIONS') and origin and urlparse(origin).netloc != request.headers.get('host'):
             return Response('跨站请求已拒绝',status_code=403)
-        if request.url.path not in PUBLIC:
+        signed_provider_asset = request.method in ('GET','HEAD') and request.url.path.startswith('/api/provider-assets/')
+        if request.url.path not in PUBLIC and not signed_provider_asset:
             token = request.cookies.get('mvc_session','')
             with s.db() as c:
                 row = c.execute('SELECT expires FROM sessions WHERE token=?',(hashlib.sha256(token.encode()).hexdigest(),)).fetchone()
@@ -639,6 +640,20 @@ def asset_file(aid:str):
     if not path.is_relative_to(s.ASSETS) or not path.is_file(): raise HTTPException(404,'素材文件丢失')
     return FileResponse(path,media_type=row['mime'],filename=row['name'],content_disposition_type='inline')
 
+@app.get('/api/provider-assets/{aid}')
+def provider_asset_file(aid:str,expires:int,signature:str):
+    from .provider_assets import valid_signature
+    if not valid_signature(aid,expires,signature):
+        raise HTTPException(403,'素材访问链接无效或已过期')
+    row=asset_row(aid)
+    path=(s.ASSETS/row['path']).resolve()
+    if not path.is_relative_to(s.ASSETS) or not path.is_file():
+        raise HTTPException(404,'素材文件丢失')
+    return FileResponse(
+        path,media_type=row['mime'],filename=row['name'],content_disposition_type='inline',
+        headers={'Cache-Control':'private, no-store'},
+    )
+
 @app.get('/api/system')
 def system():
     return {'hardware':runtime.hardware(),'runtime':runtime.status(),'models':runtime.discover(),'templates':TEMPLATES,'inventory':runtime.inventory()}
@@ -676,6 +691,12 @@ async def update_settings(request:Request):
                 p['local']=False
                 p.pop('kind',None)
                 if not isinstance(p.get('models'),dict):raise ValueError('幻场 AI 模型配置无效')
+                public_base_url=str(p.get('public_base_url') or '').strip().rstrip('/')
+                if public_base_url:
+                    parsed_public=urlparse(public_base_url)
+                    if parsed_public.scheme not in ('http','https') or not parsed_public.netloc or parsed_public.username:
+                        raise ValueError('幻场 AI 公网素材地址必须是有效的 HTTP(S) 地址')
+                    p['public_base_url']=public_base_url
             if p.get('type')=='runninghub':
                 from .providers.runninghub import DEFAULT_BASE_URL
                 p['url']=p.get('url') or DEFAULT_BASE_URL

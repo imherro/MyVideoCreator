@@ -1619,7 +1619,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         ...n.data,
         provider: n.data.provider || "local",
         asset_ids: sourceAssets(n.id),
-        parameters: n.data.kind === "video" && targetProvider?.type === "volcengine_ark"
+        parameters: n.data.kind === "video" && ["volcengine_ark", "hc_atom"].includes(targetProvider?.type)
           ? { resolution: doc?.videoResolution || "720p", ...(n.data.parameters || {}) }
           : n.data.parameters,
         prompt: String(n.data.prompt || ""),
@@ -4841,6 +4841,15 @@ function SettingsPanel({
           </label>
           {["volcengine_ark", "hc_atom", "runninghub"].includes(p.type) ? (
             <>
+              {p.type === "hc_atom" && <label>
+                安影公网访问地址
+                <input
+                  value={p.public_base_url || ""}
+                  onChange={(e) => patchProvider(i, { public_base_url: e.target.value })}
+                  placeholder="https://vc.goroc.com"
+                />
+                <small>幻场 Seedance V3 用它读取带签名的首帧素材；应填写可从公网访问本工作室的 HTTPS 地址。</small>
+              </label>}
               <ArkProviderSettings
                 provider={p}
                 catalog={arkCatalogs[p.id] || []}

@@ -833,6 +833,19 @@ def test_media_upload_range_and_project_boundary(authenticated):
     assert c.post('/api/projects/'+other['id']+'/jobs',json=request).status_code==400
     assert c.post('/api/projects/'+p['id']+'/assets',files={'file':('bad.html',b'<script>x</script>','text/html')}).status_code==400
 
+def test_provider_asset_url_is_signed_expiring_and_needs_no_session(authenticated):
+    from backend.provider_assets import public_asset_url
+    import io
+    from PIL import Image
+    c=authenticated;p=project(c)
+    stream=io.BytesIO();Image.new('RGB',(16,16),'#334455').save(stream,format='PNG')
+    asset=c.post('/api/projects/'+p['id']+'/assets',files={'file':('provider.png',stream.getvalue(),'image/png')}).json()
+    url=public_asset_url({'public_base_url':'https://studio.example'},asset['id'])
+    path='/' + url.split('/',3)[3]
+    with TestClient(app) as anonymous:
+        assert anonymous.get(path).content == stream.getvalue()
+        assert anonymous.get(path.replace('signature=','signature=bad')).status_code == 403
+
 def test_restart_marks_ambiguous_running_job(authenticated):
     c=authenticated;p=project(c)
     job=c.post('/api/projects/'+p['id']+'/jobs',json={'node_id':'n','kind':'text','submission_id':'interrupted-job-001','input':{'prompt':'test'}}).json()

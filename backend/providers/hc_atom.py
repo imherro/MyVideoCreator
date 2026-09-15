@@ -12,6 +12,7 @@ from . import common
 
 DEFAULT_BASE_URL = 'https://ai-aigc.fzyinghe.com'
 KINDS = ('text', 'image', 'video')
+SEEDANCE_PREFIXES = ('doubao-seedance-', 'dreamina-seedance-')
 
 
 def _root(provider):
@@ -146,6 +147,45 @@ def _data_uri(asset):
     return f'data:{mime};base64,' + base64.b64encode(path.read_bytes()).decode('ascii')
 
 
+def _is_seedance(model):
+    return str(model or '').strip().lower().startswith(SEEDANCE_PREFIXES)
+
+
+def _seedance_duration(model, requested):
+    value = int(round(float(requested or 5)))
+    maximum = 30 if '2.5' in str(model) else 15
+    if value > maximum:
+        raise ValueError(f'幻场 {model} 视频时长不能超过 {maximum} 秒')
+    return max(4, value)
+
+
+def _seedance_prompt(prompt, requested, submitted):
+    value = str(prompt)
+    if requested == submitted:
+        return value
+    return value.replace(
+        f'本镜头成片总时长必须为 {requested:g} 秒',
+        f'本次模型生成长度为 {submitted:g} 秒；核心动作须在前 {requested:g} 秒内完成',
+    )
+
+
+def _post_task(worker, job, client, path, body):
+    """Retry an idempotent create only when no HTTP response was received."""
+    delays = (0, 2, 5)
+    last = None
+    for attempt, delay in enumerate(delays, start=1):
+        if delay and worker.halt.wait(delay):
+            raise InterruptedError()
+        if worker.cancelled(job):
+            raise InterruptedError()
+        try:
+            return common.checked(client.post(path, json=body))
+        except httpx.TransportError as exc:
+            last = exc
+            worker.progress(job, f'幻场 AI 提交连接中断，正在重试（{attempt}/3）')
+    raise ValueError(f'幻场 AI 提交接口连接中断（{path}），已使用同一幂等编号重试 3 次') from last
+
+
 def _task_value(client, path):
     return _unwrap(common.checked(client.get(path), recoverable=True))
 
@@ -172,6 +212,87 @@ def _wait_task(worker, job, client, path, remote, kind):
             ext = '.png' if kind == 'image' else '.mp4'
             return {'assets': [common.download_result(job, url, ext, recoverable=True) for url in urls]}
     raise InterruptedError()
+
+
+def _wait_seedance_v3(worker, job, client, path, remote):
+    while not worker.halt.wait(3):
+        if worker.cancelled(job):
+            try:
+                client.delete(path + '/' + quote(str(remote), safe=''))
+            finally:
+                raise InterruptedError()
+        value = common.checked(
+            client.get(path + '/' + quote(str(remote), safe='')), recoverable=True,
+        )
+        status = str(value.get('status') or '').lower()
+        worker.progress(job, {
+            'queued': '幻场 Seedance 排队中',
+            'pending': '幻场 Seedance 排队中',
+            'running': '幻场 Seedance 生成中',
+            'processing': '幻场 Seedance 生成中',
+            'succeeded': '下载幻场 Seedance 视频',
+            'success': '下载幻场 Seedance 视频',
+        }.get(status, '查询幻场 Seedance 任务'))
+        if status in ('failed', 'error', 'cancelled', 'canceled', 'expired'):
+            detail = value.get('error') or value.get('message') or value.get('failReason')
+            raise ValueError('幻场 Seedance 任务失败：' + str(detail or status)[:500])
+        if status in ('succeeded', 'success', 'completed'):
+            content = value.get('content') if isinstance(value.get('content'), dict) else {}
+            target = content.get('video_url') or value.get('video_url') or value.get('resultUrl')
+            if not target:
+                raise ValueError('幻场 Seedance 任务成功，但没有返回 content.video_url')
+            return {'assets': [common.download_result(job, target, '.mp4', recoverable=True)]}
+    raise InterruptedError()
+
+
+def _generate_seedance_v3(worker, job, provider, model, refs, params):
+    from ..provider_assets import public_asset_url
+
+    if len(refs) > 1:
+        raise ValueError('幻场 Seedance 当前最多提交一张首帧，请移除多余引用')
+    if job['input'].get('end_asset_id'):
+        raise ValueError('幻场 Seedance 当前尚未开放尾帧绑定，请清除尾帧')
+    path = _root(provider) + '/v3/video/tasks'
+    remote = job.get('provider_job_id')
+    with httpx.Client(timeout=120, headers=_headers(provider, job.get('submission_id')), trust_env=True) as client:
+        if not remote:
+            requested = float(params.get('duration') or job['input'].get('duration') or 5)
+            submitted = _seedance_duration(model, requested)
+            content = [{
+                'type': 'text',
+                'text': _seedance_prompt(job['input']['prompt'], requested, submitted),
+            }]
+            if refs:
+                content.append({
+                    'type': 'image_url',
+                    'image_url': {'url': public_asset_url(provider, refs[0]['id'])},
+                    'role': 'first_frame',
+                })
+            resolution = str(params.get('resolution') or '720p').lower()
+            if resolution not in ('480p', '720p'):
+                raise ValueError('幻场 Seedance 2.5 目前只支持 480p 或 720p，请修改项目视频分辨率')
+            body = {
+                'model': model,
+                'content': content,
+                'resolution': resolution,
+                'ratio': 'adaptive' if refs else str(job['input'].get('ratio') or params.get('ratio') or '16:9'),
+                'duration': submitted,
+                'generate_audio': bool(params.get('generate_audio', True)),
+            }
+            value = _post_task(worker, job, client, path, body)
+            remote = value.get('id') or value.get('taskId') or value.get('task_id')
+            if not remote:
+                raise ValueError('幻场 Seedance V3 未返回任务 id，请在幻场控制台核对')
+            remote = str(remote)
+            state = s.attach_provider_job_id(job['id'], remote)
+            if state == 'cancelled':
+                try:
+                    cancelled = client.delete(path + '/' + quote(remote, safe='')).is_success
+                except httpx.HTTPError:
+                    cancelled = False
+                s.cancelled_phase(job['id'], '已请求幻场取消远端任务' if cancelled else '本地已取消；幻场远端任务可能继续生成并产生费用')
+                raise InterruptedError()
+        return _wait_seedance_v3(worker, job, client, path, remote)
 
 
 def generate_image(worker, job, provider):
@@ -228,12 +349,14 @@ def generate_video(worker, job, provider):
     model = str(job['input'].get('model') or model_for(provider, 'video')).strip()
     if not model:
         raise ValueError('请填写幻场 AI 视频模型 ID')
+    refs = common.assets_for(job)
+    params = {**(provider.get('parameters') or {}).get('video', {}), **job['input'].get('parameters', {})}
+    if _is_seedance(model):
+        return _generate_seedance_v3(worker, job, provider, model, refs, params)
     if job['input'].get('end_asset_id'):
         raise ValueError('幻场 AI 通用视频接口暂未声明尾帧协议，请清除尾帧')
-    refs = common.assets_for(job)
     if len(refs) > 1:
         raise ValueError('幻场 AI 通用视频接口最多提交一张参考图')
-    params = {**(provider.get('parameters') or {}).get('video', {}), **job['input'].get('parameters', {})}
     path = _root(provider) + str(params.pop('task_path', None) or '/video/generation/tasks')
     with httpx.Client(timeout=120, headers=_headers(provider, job.get('submission_id')), trust_env=True) as client:
         remote = job.get('provider_job_id')
@@ -241,7 +364,7 @@ def generate_video(worker, job, provider):
             body = {**params, 'model': model, 'prompt': job['input']['prompt']}
             if refs:
                 body['image'] = _data_uri(refs[0])
-            value = _unwrap(common.checked(client.post(path, json=body)))
+            value = _unwrap(_post_task(worker, job, client, path, body))
             remote = value.get('taskId') or value.get('task_id') or value.get('id')
             if not remote:
                 raise ValueError('幻场 AI 视频任务未返回 taskId')
@@ -263,7 +386,9 @@ def cancel(job, provider):
         return False
     kind = job.get('kind')
     section = ((provider.get('parameters') or {}).get(kind) or {})
-    default = '/image/generation/tasks' if kind == 'image' else '/video/generation/tasks'
+    model = str((job.get('input') or {}).get('model') or model_for(provider, 'video')).strip()
+    default = ('/image/generation/tasks' if kind == 'image' else
+               '/v3/video/tasks' if _is_seedance(model) else '/video/generation/tasks')
     path = _root(provider) + str(section.get('task_path') or default) + '/' + quote(str(remote), safe='')
     try:
         with httpx.Client(timeout=20, headers=_headers(provider), trust_env=True) as client:

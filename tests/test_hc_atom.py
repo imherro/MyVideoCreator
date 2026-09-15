@@ -106,6 +106,82 @@ def test_video_submit_poll_and_download(monkeypatch):
     assert calls == [('POST', '/video/generation/tasks'), ('GET', '/video/generation/tasks/vg-1')]
 
 
+def test_seedance_uses_v3_signed_first_frame_and_minimum_duration(monkeypatch):
+    configured = provider()
+    configured['models']['video'] = 'doubao-seedance-2.5'
+    configured['public_base_url'] = 'https://studio.example'
+    item = stored_job('video', configured)
+    item['input'].update({
+        'model': 'doubao-seedance-2.5', 'parameters': {'duration': 3, 'resolution': '480p'},
+        'ratio': '16:9',
+    })
+    aid = 'hc-frame-' + uuid.uuid4().hex
+    path = s.ASSETS / (aid + '.png')
+    path.write_bytes(b'png-test')
+    with s.db() as db:
+        db.execute(
+            'INSERT INTO assets(id,project_id,name,kind,path,mime,metadata,created) VALUES(?,?,?,?,?,?,?,?)',
+            (aid, item['project_id'], 'frame.png', 'image', path.name, 'image/png', '{}', time.time()),
+        )
+    item['input']['asset_ids'] = [aid]
+    original = httpx.Client
+    calls = []
+
+    def handle(request):
+        calls.append((request.method, request.url.path))
+        if request.method == 'POST':
+            body = json.loads(request.read())
+            assert body['model'] == 'doubao-seedance-2.5'
+            assert body['duration'] == 4 and body['ratio'] == 'adaptive'
+            assert body['resolution'] == '480p'
+            assert body['content'][0] == {'type': 'text', 'text': '电影感镜头'}
+            image = body['content'][1]
+            assert image['type'] == 'image_url' and image['role'] == 'first_frame'
+            assert image['image_url']['url'].startswith(
+                f'https://studio.example/api/provider-assets/{aid}?expires='
+            )
+            assert 'signature=' in image['image_url']['url']
+            return httpx.Response(200, json={'id': 'cgt-1', 'status': 'queued'})
+        return httpx.Response(200, json={
+            'id': 'cgt-1', 'status': 'succeeded',
+            'content': {'video_url': 'https://result.example/video.mp4'},
+        })
+
+    monkeypatch.setattr(hc_atom.httpx, 'Client', lambda **kw: original(**kw, transport=httpx.MockTransport(handle)))
+    monkeypatch.setattr(common, 'download_result', lambda job, url, ext, recoverable=False: {'id': 'v3-video', 'kind': 'video'})
+    worker = Worker()
+    worker.halt = NoWait()
+    assert hc_atom.generate_video(worker, item, configured)['assets'][0]['id'] == 'v3-video'
+    assert calls == [('POST', '/v3/video/tasks'), ('GET', '/v3/video/tasks/cgt-1')]
+
+
+def test_seedance_retries_transport_reset_with_same_idempotency_key(monkeypatch):
+    configured = provider()
+    configured['models']['video'] = 'doubao-seedance-2.5'
+    item = stored_job('video', configured)
+    item['input'].update({'model': 'doubao-seedance-2.5', 'parameters': {'duration': 4}})
+    original = httpx.Client
+    posts = []
+
+    def handle(request):
+        if request.method == 'POST':
+            posts.append(request.headers['idempotency-key'])
+            if len(posts) == 1:
+                raise httpx.ReadError('reset', request=request)
+            return httpx.Response(200, json={'id': 'cgt-retry'})
+        return httpx.Response(200, json={
+            'id': 'cgt-retry', 'status': 'succeeded',
+            'content': {'video_url': 'https://result.example/video.mp4'},
+        })
+
+    monkeypatch.setattr(hc_atom.httpx, 'Client', lambda **kw: original(**kw, transport=httpx.MockTransport(handle)))
+    monkeypatch.setattr(common, 'download_result', lambda *args, **kwargs: {'id': 'retry-video'})
+    worker = Worker()
+    worker.halt = NoWait()
+    assert hc_atom.generate_video(worker, item, configured)['assets'][0]['id'] == 'retry-video'
+    assert posts == [item['submission_id'], item['submission_id']]
+
+
 def test_reference_image_uses_async_task_protocol(monkeypatch):
     item = stored_job('image', provider())
     aid = 'hc-ref-' + uuid.uuid4().hex
