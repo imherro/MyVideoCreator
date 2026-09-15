@@ -2,6 +2,7 @@ import base64
 import json
 import time
 import uuid
+import wave
 
 import httpx
 import pytest
@@ -51,6 +52,21 @@ def add_image_asset(item, name, color, size=(32,24)):
             aid,item['project_id'],name,'image',path.name,'image/png',s.dumps({'width':size[0],'height':size[1]}),time.time()
         ))
     return aid,path.read_bytes()
+
+
+def add_audio_asset(item, name='对白'):
+    aid='ark-audio-'+uuid.uuid4().hex
+    path=s.ASSETS/(aid+'.wav')
+    with wave.open(str(path),'wb') as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(24000)
+        audio.writeframes(b'\x00\x00'*12000)
+    with s.db() as db:
+        db.execute('INSERT INTO assets(id,project_id,name,kind,path,mime,metadata,created) VALUES(?,?,?,?,?,?,?,?)',(
+            aid,item['project_id'],name,'audio',path.name,'audio/wav',s.dumps({'duration':.5}),time.time()
+        ))
+    return aid
 
 
 def test_ark_text_reuses_openai_compatible_worker(monkeypatch):
@@ -157,15 +173,52 @@ def test_seedance_25_short_shot_uses_provider_minimum_without_changing_plan():
     assert '本镜头成片总时长必须为 3 秒' not in submitted
 
 
-def test_seedance_dialogue_disables_random_audio_and_returns_muxed_video(monkeypatch,tmp_path):
+def test_seedance_25_sends_locked_dialogue_as_audio_reference(monkeypatch):
     item=stored_job('video',provider())
     item['input']['dialogue_audio']=[{'assetId':'voice-1','start':.3,'duration':1.2}]
     item['input']['dialogue_audio_asset_ids']=['voice-1']
+    item['input']['dialogue_audio_mode']='seedance_reference'
+    item['input']['model']='doubao-seedance-2-5-260628'
     original=httpx.Client;submitted=[]
     def handle(request):
         if request.method=='POST':
             body=json.loads(request.read());submitted.append(body)
             return httpx.Response(200,json={'id':'dialogue-video'})
+        return httpx.Response(200,json={'status':'succeeded','content':{'video_url':'https://result.example/dialogue.mp4'}})
+    monkeypatch.setattr(ark.httpx,'Client',lambda **kw:original(**kw,transport=httpx.MockTransport(handle)))
+    monkeypatch.setattr(ark,'_dialogue_reference_audio',lambda job,duration:'data:audio/mpeg;base64,ZmFrZQ==')
+    monkeypatch.setattr(common,'download_result',lambda job,url,ext,recoverable=False:{'id':'referenced-video','kind':'video'})
+    worker=Worker();worker.halt=NoWait()
+    assert worker.execute(item)['assets'][0]['id']=='referenced-video'
+    body=submitted[0]
+    assert body['generate_audio'] is True
+    assert body['omni_reference_task_type']=='reference'
+    assert body['content'][-1]=={
+        'type':'audio_url','audio_url':{'url':'data:audio/mpeg;base64,ZmFrZQ=='},'role':'reference_audio',
+    }
+    assert '@音频1' in body['content'][0]['text']
+
+
+def test_seedance_dialogue_reference_preserves_timing_in_one_audio_file(tmp_path):
+    item=stored_job('video',provider())
+    aid=add_audio_asset(item)
+    item['input']['dialogue_audio']=[{'assetId':aid,'start':.5,'duration':.5}]
+    uri=ark._dialogue_reference_audio(item,4)
+    assert uri.startswith('data:audio/mpeg;base64,')
+    rendered=tmp_path/'reference.mp3'
+    rendered.write_bytes(base64.b64decode(uri.split(',',1)[1]))
+    metadata=ark.probe(rendered)
+    assert float(metadata['duration']) == pytest.approx(4,abs=.1)
+
+
+def test_seedance_legacy_dialogue_job_still_uses_exact_audio_mux(monkeypatch,tmp_path):
+    item=stored_job('video',provider())
+    item['input']['dialogue_audio']=[{'assetId':'voice-1','start':.3,'duration':1.2}]
+    original=httpx.Client;submitted=[]
+    def handle(request):
+        if request.method=='POST':
+            submitted.append(json.loads(request.read()))
+            return httpx.Response(200,json={'id':'legacy-dialogue-video'})
         return httpx.Response(200,json={'status':'succeeded','content':{'video_url':'https://result.example/dialogue.mp4'}})
     monkeypatch.setattr(ark.httpx,'Client',lambda **kw:original(**kw,transport=httpx.MockTransport(handle)))
     downloaded=tmp_path/'silent.mp4';downloaded.write_bytes(b'video')
@@ -174,6 +227,7 @@ def test_seedance_dialogue_disables_random_audio_and_returns_muxed_video(monkeyp
     worker=Worker();worker.halt=NoWait()
     assert worker.execute(item)['assets'][0]['id']=='fixed-voice-video'
     assert submitted[0]['generate_audio'] is False
+    assert 'omni_reference_task_type' not in submitted[0]
 
 
 def test_seedance_sends_one_local_image_as_first_frame(monkeypatch):

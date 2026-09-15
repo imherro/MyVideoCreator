@@ -38,6 +38,8 @@ DISABLED_VIDEO_PREFIXES = ('doubao-seedance-2-0',)
 SUPPORTED_REFERENCE_FORMATS = {'JPEG': 'image/jpeg', 'PNG': 'image/png'}
 MAX_REFERENCE_BYTES = 10 * 1024 * 1024
 MAX_REFERENCE_DIMENSION = 6000
+MAX_AUDIO_REFERENCE_BYTES = 15 * 1024 * 1024
+DIALOGUE_REFERENCE_MODE = 'seedance_reference'
 
 
 def model_for(provider, kind):
@@ -336,6 +338,65 @@ def _mux_fixed_dialogue(worker, job, video_path):
         output.unlink(missing_ok=True)
 
 
+def _dialogue_reference_audio(job, duration):
+    """Compile locked dialogue takes into one timing-aware Seedance reference."""
+    tracks = job['input'].get('dialogue_audio') or []
+    if not tracks:
+        raise ValueError('固定对白音频为空，请重新生成对白后再生成视频')
+    assets = common.assets_by_ids(job, [item['assetId'] for item in tracks])
+    if len(assets) != len(tracks) or any(item.get('kind') != 'audio' for item in assets):
+        raise ValueError('固定对白音频已失效，请重新生成对白后再生成视频')
+    output = s.DATA / (s.uid('seedance-dialogue-reference-') + '.mp3')
+    args = [ffmpeg_executable(), '-y']
+    for asset in assets:
+        path = (s.ASSETS / str(asset.get('path') or '')).resolve()
+        if not path.is_relative_to(s.ASSETS) or not path.is_file():
+            raise ValueError('固定对白音频文件已丢失，请重新生成对白')
+        args += ['-i', str(path)]
+    filters = []
+    labels = []
+    for index, track in enumerate(tracks):
+        delay = max(0, round(float(track.get('start') or 0) * 1000))
+        label = f'ref{index}'
+        filters.append(
+            f'[{index}:a]aresample=24000,aformat=sample_fmts=fltp:sample_rates=24000:channel_layouts=mono,'
+            f'adelay={delay}[{label}]'
+        )
+        labels.append(f'[{label}]')
+    filters.append(
+        ''.join(labels) + f'amix=inputs={len(labels)}:duration=longest:normalize=0,'
+        f'alimiter=limit=.95,apad,atrim=duration={float(duration):.6f}[reference]'
+    )
+    command = args + [
+        '-filter_complex', ';'.join(filters), '-map', '[reference]',
+        '-c:a', 'libmp3lame', '-b:a', '128k', '-ar', '24000', '-ac', '1', str(output),
+    ]
+    try:
+        completed = subprocess.run(
+            command, capture_output=True, timeout=180,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+        )
+        if completed.returncode != 0:
+            detail = completed.stderr.decode('utf-8', errors='replace')[-1200:]
+            raise ValueError('固定对白音频参考编排失败：' + detail)
+        if not output.is_file() or output.stat().st_size <= 0:
+            raise ValueError('固定对白音频参考编排失败：未生成音频文件')
+        if output.stat().st_size > MAX_AUDIO_REFERENCE_BYTES:
+            raise ValueError('固定对白音频参考超过 15MB，请缩短镜头对白后重试')
+        return 'data:audio/mpeg;base64,' + base64.b64encode(output.read_bytes()).decode('ascii')
+    finally:
+        output.unlink(missing_ok=True)
+
+
+def _dialogue_reference_prompt(prompt):
+    return (
+        str(prompt).rstrip()
+        + '\n\n[Seedance 音频参考]\n'
+        + '严格使用@音频1作为本镜头对白的音色、情绪、语速、节奏和开口时序参考；'
+        + '角色按对白内容表演并准确匹配口型，不得改词，不得增加额外对白。'
+    )
+
+
 def generate_video(worker, job, provider):
     if len(job['input'].get('asset_ids',[]))>1:
         raise ValueError('当前火山方舟视频最多接受一张首帧，请移除多余引用')
@@ -350,6 +411,12 @@ def generate_video(worker, job, provider):
     root = _root(provider)
     remote = job.get('provider_job_id')
     params = {**provider.get('parameters', {}).get('video', {}), **job['input'].get('parameters', {})}
+    dialogue_reference = (
+        bool(job['input'].get('dialogue_audio'))
+        and job['input'].get('dialogue_audio_mode') == DIALOGUE_REFERENCE_MODE
+    )
+    if dialogue_reference and not selected_model.lower().startswith(SEEDANCE_25_PREFIX):
+        raise ValueError('固定对白音频参考需要 Doubao-Seedance-2.5，请在项目设置中选择该模型')
     with httpx.Client(timeout=120, headers=_headers(provider), trust_env=True) as client:
         if not remote:
             assets=common.assets_for(job)
@@ -379,13 +446,25 @@ def generate_video(worker, job, provider):
             prompt = seedance_submission_prompt(
                 job['input']['prompt'], requested_duration, submission_duration,
             )
+            if dialogue_reference:
+                worker.progress(job, '编排固定对白音频参考')
+                prompt = _dialogue_reference_prompt(prompt)
+                content.append({
+                    'type': 'audio_url',
+                    'audio_url': {'url': _dialogue_reference_audio(job, submission_duration)},
+                    'role': 'reference_audio',
+                })
             body = {
                 'model': selected_model,
                 'content': [{**item, 'text': prompt} if item.get('type') == 'text' else item for item in content],
                 'duration': submission_duration,
                 'resolution': str(params.get('resolution', '720p')),
-                'generate_audio': False if job['input'].get('dialogue_audio') else bool(params.get('generate_audio', True)),
+                'generate_audio': True if dialogue_reference else (
+                    False if job['input'].get('dialogue_audio') else bool(params.get('generate_audio', True))
+                ),
             }
+            if dialogue_reference:
+                body['omni_reference_task_type'] = 'reference'
             # Seedance derives image-to-video output ratio from the first frame
             # and rejects an explicit ratio for first-frame/first-last-frame jobs.
             if not assets:
@@ -430,7 +509,9 @@ def generate_video(worker, job, provider):
                 target = _video_url(value)
                 if not target:
                     raise ValueError('火山方舟任务成功但未返回视频下载地址')
-                if job['input'].get('dialogue_audio'):
+                # Jobs created before audio-reference support did not carry a
+                # mode marker and still need the legacy exact-audio mux path.
+                if job['input'].get('dialogue_audio') and not dialogue_reference:
                     video_path = common.download_file(target, '.mp4', recoverable=True)
                     try:
                         return {'assets': [_mux_fixed_dialogue(worker, job, video_path)]}

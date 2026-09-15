@@ -78,7 +78,8 @@ def test_locked_voice_dialogue_assets_are_frozen_into_video_input():
     assert result['dialogue_audio_asset_ids'] == ['robot-audio', 'human-audio']
     assert result['dialogue_audio'][0]['voiceType'] == 'robot-speaker'
     assert result['dialogue_audio'][1]['start'] > result['dialogue_audio'][0]['start']
-    assert result['parameters']['generate_audio'] is False
+    assert result['dialogue_audio_mode'] == 'seedance_reference'
+    assert result['parameters']['generate_audio'] is True
     assert '固定对白音轨时序' in result['prompt'] and '自然闭嘴' in result['prompt']
 
 

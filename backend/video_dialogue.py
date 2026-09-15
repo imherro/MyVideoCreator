@@ -122,6 +122,7 @@ def bind_fixed_dialogue_audio(document, node_id, kind, input_value, assets, prod
     if not dialogues:
         result.pop('dialogue_audio_asset_ids', None)
         result.pop('dialogue_audio', None)
+        result.pop('dialogue_audio_mode', None)
         return result
     profiles = (((document.get('filmBible') or {}).get('voices') or {}).get('profiles') or {})
     candidates = sorted(assets or [], key=lambda item: float(item.get('created') or 0), reverse=True)
@@ -179,5 +180,9 @@ def bind_fixed_dialogue_audio(document, node_id, kind, input_value, assets, prod
     result['prompt'] = base + '\n\n' + TIMING_MARKER + '\n' + '\n'.join(timing_lines)
     result['dialogue_audio_asset_ids'] = [item['assetId'] for item in frozen]
     result['dialogue_audio'] = frozen
-    result['parameters'] = {**(result.get('parameters') or {}), 'generate_audio': False}
+    # Seedance 2.5 can use the locked TTS take as a full-modal audio reference.
+    # Keep the source asset ids in the durable job input; the provider builds a
+    # short timing-aware reference track immediately before submission.
+    result['dialogue_audio_mode'] = 'seedance_reference'
+    result['parameters'] = {**(result.get('parameters') or {}), 'generate_audio': True}
     return result
