@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   applyRatioChange,
   applyTargetDuration,
+  applyVideoOutputSetting,
   bibleFields,
   defaultProjectSetupDraft,
   mergeBibleFields,
@@ -14,12 +15,16 @@ test('project setup validates required fields and creates the reviewed API paylo
   const draft=defaultProjectSetupDraft([{id:'ark',type:'volcengine_ark',models:{text:'t',image:'i',video:'v'}}]);
   assert.deepEqual(validateProjectSetupDraft(draft),['请输入作品名称']);
   draft.name=' 花信未迟 ';draft.ratio='9:16';draft.duration=60;draft.episodeCount=12;draft.platform='抖音';draft.bible.worldEra='江南';draft.bible.avoidItems='高饱和\n\n磨皮';
+  draft.videoResolution='1080p';draft.videoRatio='21:9';draft.videoDuration=8;draft.videoFormat='mov';
   const payload=projectSetupPayload(draft);
   assert.equal(payload.name,'花信未迟');
   assert.equal(payload.episode_title,'第 01 集');
   assert.equal(payload.episode_count,12);
   assert.equal(payload.platform,'抖音');
-  assert.equal(payload.video_resolution,'720p');
+  assert.equal(payload.video_resolution,'1080p');
+  assert.equal(payload.video_ratio,'21:9');
+  assert.equal(payload.video_duration,8);
+  assert.equal(payload.video_format,'mov');
   assert.deepEqual(payload.generation_policy.text,{providerId:'ark',modelId:'t'});
   assert.deepEqual(payload.film_bible.story,{worldEra:'江南'});
   assert.deepEqual(payload.film_bible.style.avoidItems,['高饱和','磨皮']);
@@ -53,4 +58,14 @@ test('target duration changes only the episode planning target',()=>{
   assert.equal(next.nodes,document.nodes);
   assert.equal(next.timeline,document.timeline);
   assert.equal(next.editor,document.editor);
+});
+
+test('video output setting invalidates video results while preserving assets',()=>{
+  const document={videoRatio:'16:9',nodes:[{id:'image',data:{kind:'image',assetId:'frame'}},{id:'video',data:{kind:'video',assetId:'clip'}}],edges:[],shots:[{imageNode:'image',videoNode:'video'}]};
+  const next=applyVideoOutputSetting(document,{videoRatio:'21:9',videoFormat:'mov'});
+  assert.equal(next.videoRatio,'21:9');
+  assert.equal(next.videoFormat,'mov');
+  assert.equal(next.nodes[0].data.stale,undefined);
+  assert.equal(next.nodes[1].data.stale,true);
+  assert.equal(next.nodes[1].data.assetId,'clip');
 });

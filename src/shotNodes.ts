@@ -1,5 +1,6 @@
 import { nodeDefaults } from "./nodeDefaults.ts";
 import { framesForDuration } from "./shotSync.ts";
+import { imageSizeForRatio } from "./mediaSpecs.ts";
 
 type Value = Record<string, any>;
 
@@ -80,6 +81,7 @@ export function ensureShotNodes<
           label: `${shot.id} · 分镜图`,
           prompt: shot.image_prompt,
           ...nodeDefaults("image", providers, models, (doc as Value).generationPolicy),
+          resolution: imageSizeForRatio((doc as Value).ratio || "16:9"),
         },
       };
       nodes.push(image);

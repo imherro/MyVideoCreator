@@ -43,7 +43,7 @@ export function VisualAssetNode({
   const reference = primaryReference(version);
   const referenceAsset = assets.find((item) => item.id === reference?.assetId);
   return (
-    <div className={`visual-node ${selected ? "selected" : ""}`}>
+    <div className={`visual-node visual-node-${card.kind} ${selected ? "selected" : ""}`}>
       <div className="visual-node-heading">
         <BookImage size={15} />
         <span>{visualKindLabels[card.kind]}</span>

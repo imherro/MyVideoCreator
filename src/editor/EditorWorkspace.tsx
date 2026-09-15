@@ -88,6 +88,20 @@ function EditorSurface({
   const surfaceRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    const surface = surfaceRef.current;
+    if (!surface) return;
+    let frame = 0;
+    const notifyLayout = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+    };
+    const observer = new ResizeObserver(notifyLayout);
+    observer.observe(surface);
+    notifyLayout();
+    return () => { observer.disconnect(); cancelAnimationFrame(frame); };
+  }, []);
+
+  useEffect(() => {
     const frame = requestAnimationFrame(() => {
       const tracks = editor.getTimelineData()?.tracks || [];
       const counters = new Map<string, number>();
@@ -217,7 +231,7 @@ export function EditorWorkspace({
 
   return (
     <section className="mvc-editor-workspace">
-      <LivePlayerProvider>
+      <LivePlayerProvider key={`${projectId}:${ratio}`}>
         <TimelineProvider
           key={projectId}
           contextId={`mvc-editor-${projectId}`}

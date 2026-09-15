@@ -285,6 +285,9 @@ class ProjectCreate(BaseModel):
     ratio:str|None=None
     duration:float|None=Field(default=None,ge=5,le=3000)
     video_resolution:str=Field(default='720p')
+    video_ratio:str=Field(default='16:9')
+    video_duration:int=Field(default=-1)
+    video_format:str=Field(default='mp4')
     episode_count:int=Field(default=1,ge=1,le=500)
     platform:str=Field(default='通用短视频',min_length=1,max_length=100)
     brief:str|None=Field(default=None,max_length=24000)
@@ -308,7 +311,16 @@ def project_create_document(body:ProjectCreate):
     if body.duration is not None:document['duration']=body.duration
     if body.video_resolution not in ('480p','720p','1080p'):
         raise ValueError('视频分辨率只支持 480p、720p 或 1080p')
+    if body.video_ratio not in ('21:9','16:9','4:3','1:1','3:4','9:16','adaptive'):
+        raise ValueError('视频宽高比无效')
+    if body.video_duration!=-1 and not 4<=body.video_duration<=30:
+        raise ValueError('视频输出时长只支持 4–30 秒或 -1')
+    if body.video_format not in ('mp4','mov'):
+        raise ValueError('视频格式只支持 mp4 或 mov')
     document['videoResolution']=body.video_resolution
+    document['videoRatio']=body.video_ratio
+    document['videoDuration']=body.video_duration
+    document['videoFormat']=body.video_format
     if body.brief is not None:document['brief']=body.brief
     if body.generation_policy is not None:
         document['generationPolicy']=validate_generation_policy(
@@ -1707,7 +1719,7 @@ async def run_workflow(pid:str,request:Request):
             if not parents: raise ValueError(f'节点 {data.get("label",node["id"])} 缺少输入')
             data['prompt']={'text':'根据上游信息编写剧本','storyboard':'将上游剧本拆解为结构化分镜','image':'生成上游描述的电影画面','video':'根据上游画面与描述生成动态镜头'}[kind]
         data['project_style']=p['document'].get('style','')
-        data['ratio']=p['document'].get('ratio','16:9')
+        data['ratio']=(p['document'].get('videoRatio') or p['document'].get('ratio','16:9')) if kind=='video' else p['document'].get('ratio','16:9')
         if kind in ('text','storyboard'):
             data['target_duration']=data.get('target_duration') or p['document'].get('duration',15)
         if kind=='storyboard':

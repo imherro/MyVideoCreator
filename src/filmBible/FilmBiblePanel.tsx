@@ -214,6 +214,10 @@ export function FilmBiblePanel({
   const generationRunning = ["queued", "running"].includes(
     referenceJob?.status || "",
   );
+  const parentVersion = selected.parentVersionId ? visual.versions[selected.parentVersionId] : undefined;
+  const stateReferenceBlocked = ["character_state", "scene_state"].includes(card.kind) && (
+    parentVersion?.status !== "locked" || !primaryReference(parentVersion)
+  );
   let resolvedTarget: ReturnType<typeof resolveVisualGenerationTarget> | undefined;
   let targetError = "";
   try {
@@ -543,6 +547,7 @@ export function FilmBiblePanel({
               disabled={
                 referenceBusy ||
                 generationRunning ||
+                stateReferenceBlocked ||
                 Boolean(targetError) ||
                 !resolvedTarget?.providerId ||
                 !resolvedTarget?.modelId
@@ -560,6 +565,7 @@ export function FilmBiblePanel({
               )}
               {reference ? "重新生成参考图" : "生成主参考图"}
             </button>
+            {stateReferenceBlocked && <small>请先生成并锁定基础角色或场景的主参考图。</small>}
           </div>
         )}
         {referenceJob?.status === "failed" && (

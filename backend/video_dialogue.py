@@ -74,7 +74,12 @@ def compile_shot_video_input(document, node_id, kind, input_value, production_co
         shot_duration = 0
     if shot_duration <= 0:
         raise ValueError('分镜时长无效，请先在分镜卡片中设置大于 0 秒的时长')
-    provider_duration = max(1, int(math.ceil(shot_duration)))
+    configured_duration = document.get('videoDuration', -1)
+    try:
+        configured_duration = int(configured_duration)
+    except (TypeError, ValueError):
+        configured_duration = -1
+    provider_duration = configured_duration if 4 <= configured_duration <= 30 else max(1, int(math.ceil(shot_duration)))
     base_prompt = str(result.get('prompt') or shot.get('video_prompt') or '')
     # Job prompts are immutable snapshots, but this also keeps retries and old
     # already-compiled node data idempotent.
@@ -146,7 +151,10 @@ def bind_fixed_dialogue_audio(document, node_id, kind, input_value, assets, prod
         if duration <= 0:
             raise ValueError(f'对白音频“{match.get("name") or match.get("id")}”时长无效，请重新生成')
         selected.append((dialogue, profile, match, duration))
-    shot_duration = float(shot.get('duration') or (result.get('parameters') or {}).get('duration') or 0)
+    shot_duration = max(
+        float(shot.get('duration') or 0),
+        float((result.get('parameters') or {}).get('duration') or 0),
+    )
     gaps = max(0, len(selected) - 1) * .12
     spoken_duration = sum(item[3] for item in selected) + gaps
     effective_duration = max(shot_duration, math.ceil(spoken_duration))

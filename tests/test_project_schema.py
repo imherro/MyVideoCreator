@@ -17,6 +17,9 @@ def test_legacy_migration_is_lossless_and_idempotent():
     assert migrated['filmBible']=={'visual':{'cards':{},'versions':{}},'continuity':{},'style':{},'styleVersion':1,'story':{},'voices':{'profiles':{}}}
     assert migrated['generationPolicy']=={'text':None,'image':None,'video':None}
     assert migrated['videoResolution']=='720p'
+    assert migrated['videoRatio']=='16:9'
+    assert migrated['videoDuration']==-1
+    assert migrated['videoFormat']=='mp4'
     assert migrate_document(migrated)==migrated
     assert migrate_document(old)['shots'][0]['uid']==migrated['shots'][0]['uid']
     assert 'schemaVersion' not in old

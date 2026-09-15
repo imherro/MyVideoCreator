@@ -30,7 +30,7 @@ test('selected pipeline-only shot reuses its stable image and video nodes',()=>{
 });
 test('shot nodes form the script to storyboard to image to video chain',()=>{
  let i=0;const id=()=>String(++i);const providers=[{id:'v',kind:'video',local:true,model:'minimax_h3'}];
- const doc={nodes:[
+ const doc={ratio:'9:16',nodes:[
   {id:'script',data:{kind:'text',text:'故事'}},
   {id:'plan',data:{kind:'storyboard',text:'分镜规划'}}
  ],edges:[],shots:[{id:'s1',duration:5,image_prompt:'首帧',video_prompt:'动作'}]};
@@ -40,6 +40,7 @@ test('shot nodes form the script to storyboard to image to video chain',()=>{
   ['script','plan'],['plan',shot.imageNode],[shot.imageNode,shot.videoNode]
  ]);
  assert.equal(shot.storyboardNode,'plan');
+ assert.equal(result.nodes.find(node=>node.id===shot.imageNode).data.resolution,'1152x2048');
  assert.deepEqual(shot.pipeline,{imageNodeId:shot.imageNode,videoNodeId:shot.videoNode});
  assert.equal(ensureShotNodes(result,providers,[],id,undefined,'plan').edges.length,3);
 });

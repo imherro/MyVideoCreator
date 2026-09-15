@@ -1,6 +1,7 @@
 import { planShotTimeline } from "./shotTimeline";
 import { ensureShotNodes, importStoryboardShots } from "./shotNodes";
 import { autoLayoutCanvas } from "./canvasLayout";
+import { imageSizeForRatio, VIDEO_FORMATS, VIDEO_RATIOS, VIDEO_RESOLUTIONS } from "./mediaSpecs";
 import {
   planBatchGeneration,
   type BatchGenerationKind,
@@ -185,6 +186,7 @@ import {
   applyRatioChange,
   applyTargetDuration,
   applyVideoResolution,
+  applyVideoOutputSetting,
   bibleFields,
   mergeBibleFields,
   projectSetupPayload,
@@ -239,6 +241,9 @@ type Doc = {
   ratio: string;
   duration: number;
   videoResolution: string;
+  videoRatio?: string;
+  videoDuration?: number;
+  videoFormat?: string;
   applied?: string[];
   editor?: EditorDocument;
 };
@@ -645,6 +650,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   const [conflict, setConflict] = useState(false),
     [recoveryBusy, setRecoveryBusy] = useState(false);
   const conflictRef = useRef(false);
+  const storyboardSubmissionRef = useRef(false);
   const workflowStageRef = useRef<WorkflowStage>(initialWorkflowStage);
   const revision = useRef(1),
     productionRevision = useRef(1),
@@ -1350,6 +1356,14 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       {},
       sourceNode.id,
     );
+    if (existingId) {
+      const defaults = nodeDefaults("storyboard", config.providers, system.models, doc.generationPolicy);
+      update((document) => patchNode(document, existingId, {
+        provider: defaults.provider,
+        model: defaults.model,
+        model_capabilities: undefined,
+      }));
+    }
     setSelected(storyboardId);
     setPendingAutoRunNodeId(storyboardId);
     setNotice(existingId ? "正在使用已有分镜规划节点提交任务" : "已建立并连接分镜规划节点，正在提交任务");
@@ -1387,6 +1401,12 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   }
   function startStoryboardPlanning() {
     if (!doc) return;
+    if (storyboardSubmissionRef.current || jobs.some((job) =>
+      job.kind === "storyboard" && ["queued", "running"].includes(job.status),
+    )) {
+      setNotice("分镜规划任务已经在队列中，请等待当前任务完成");
+      return;
+    }
     const scriptNode = doc.nodes.find((node) =>
       node.data?.canonicalScriptProjection && node.data?.scriptStatus === "approved" && String(node.data?.text || "").trim(),
     );
@@ -1395,6 +1415,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       activateWorkflowStage("script");
       return;
     }
+    storyboardSubmissionRef.current = true;
     generateStoryboardFromScript(scriptNode);
   }
   function removeNode() {
@@ -1619,11 +1640,11 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         ...n.data,
         provider: n.data.provider || "local",
         asset_ids: sourceAssets(n.id),
-        parameters: n.data.kind === "video" && ["volcengine_ark", "hc_atom"].includes(targetProvider?.type)
-          ? { resolution: doc?.videoResolution || "720p", ...(n.data.parameters || {}) }
+        parameters: n.data.kind === "video" && ["volcengine_ark", "hc_atom", "runninghub"].includes(targetProvider?.type)
+          ? { resolution: doc?.videoResolution || "720p", outputFormat: doc?.videoFormat || "mp4", ...(n.data.parameters || {}) }
           : n.data.parameters,
         prompt: String(n.data.prompt || ""),
-        ratio: doc?.ratio || "16:9",
+        ratio: n.data.kind === "video" ? (doc?.videoRatio || doc?.ratio || "16:9") : (doc?.ratio || "16:9"),
         size: n.data.resolution || "1024x1024",
         target_duration:
           n.data.kind === "text" || n.data.kind === "storyboard"
@@ -1767,7 +1788,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           throw new Error("所选镜头引用的视觉版本缺少主参考图，请先到“塑角造景”生成或上传");
       }
     }
-    const prepared = deriveManagedGraph(
+    let prepared = deriveManagedGraph(
       ensureShotNodes(
         snapshot.doc,
         config.providers,
@@ -1780,6 +1801,14 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     const nodeIds = selectedShotImageNodeIds(prepared, shotUids);
     if (nodeIds.length !== targetShots.length)
       throw new Error("部分镜头缺少分镜图生成节点");
+    const selectedNodeIds = new Set(nodeIds);
+    const storyboardSize = imageSizeForRatio(snapshot.doc.ratio || "16:9");
+    prepared = {
+      ...prepared,
+      nodes: prepared.nodes.map((item) => selectedNodeIds.has(item.id)
+        ? { ...item, data: { ...item.data, resolution: storyboardSize } }
+        : item),
+    };
     for (const nodeId of nodeIds) {
       const imageNode = prepared.nodes.find((item) => item.id === nodeId);
       if (!String(imageNode?.data?.prompt || "").trim())
@@ -1808,7 +1837,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         }),
       );
       await refresh(snapshot.project.id);
-      setPanel("jobs");
       setNotice(`已提交 ${result.count} 个所选分镜图任务`);
     } catch (reason) {
       report(reason);
@@ -1822,7 +1850,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     const target = doc?.nodes.find((item) => item.id === pendingAutoRunNodeId);
     if (!target) return;
     setPendingAutoRunNodeId(null);
-    void run(target);
+    void run(target).finally(() => { storyboardSubmissionRef.current = false; });
   }, [pendingAutoRunNodeId, doc?.nodes]);
   async function generateShotVideos(shotUids: string[]) {
     const snapshot = current.current;
@@ -1978,7 +2006,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           asset_ids: plan.assetIds,
           asset_category: plan.assetCategory,
           ratio: snapshot.doc.ratio || "16:9",
-          size: "2K",
+          size: imageSizeForRatio(snapshot.doc.ratio || "16:9"),
           visual_reference: {
             versionId,
             targetSource: plan.targetSource,
@@ -1994,6 +2022,11 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       typeof job.production_revision !== "number"
     )
       throw new Error("服务端未返回已持久化的参考图任务归属");
+    if (job.production_revision < productionRevision.current) {
+      await refresh(snapshot.project.id);
+      setNotice("主参考图任务已进入队列；已保留服务器上的较新项目版本");
+      return;
+    }
     const projectedDocument = deriveManagedGraph(job.project_document);
     revision.current = job.project_revision;
     productionRevision.current = job.production_revision;
@@ -2064,7 +2097,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         await refresh(snapshot.project.id);
       }
       if (!submitted && failed.length) throw new Error(failed[0]);
-      setPanel("jobs");
+      if (kind === "shot_videos") setPanel("jobs");
       setNotice(
         `已提交 ${submitted} 个${names[kind]}任务` +
           (plan.blocked.length ? `，${plan.blocked.length} 项条件未满足` : "") +
@@ -2587,7 +2620,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       </header>
       <GlobalNav
         active={panel}
-        taskCount={activeCount || jobs.length}
+        taskCount={activeCount}
         onChange={activateGlobalPanel}
       />
       <main className="work-area">
@@ -2626,6 +2659,10 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               }[workflowStage]}
             </strong>
           )}
+          {!['overview', 'canvas'].includes(workflowStage) && <WorkflowGuideBanner
+            guide={workflowGuide.stages[workflowStage]}
+            onNavigate={activateWorkflowStage}
+          />}
           <div className="view-meta">
             {doc.ratio}
             <span>·</span>
@@ -2670,7 +2707,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 title={`智能生成缺失的资产参考图；${assetBatchPlan.blocked.length} 项尚未满足条件`}
               >
                 <BookOpen size={15} />
-                全部资产 <b>{assetBatchPlan.readyIds.length}</b>
+                生成全部资产 <b>{assetBatchPlan.readyIds.length}</b>
               </button>}
               {["images", "canvas"].includes(workflowStage) && <button
                 className="quiet"
@@ -2703,11 +2740,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               </button>
           )}
         </div>
-        {!['overview', 'canvas'].includes(workflowStage) && <WorkflowGuideBanner
-          guide={workflowGuide.stages[workflowStage]}
-          onNavigate={activateWorkflowStage}
-          onOpenTasks={() => setPanel("jobs")}
-        />}
         {workflowStage === "overview" ? (
           <WorkflowOverview
             projectName={currentProduction?.name || project.name}
@@ -2841,6 +2873,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               } else shotNodes(shot, index);
             }}
             onPreview={setPreview}
+            onOpenVideo={() => activateWorkflowStage("video")}
             onExport={async (columns, page) => {
               await save();
               if (dirty.current) throw new Error("请先解决保存冲突");
@@ -3999,9 +4032,12 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   <label>Episode 标题<input maxLength={100} value={project.name} onChange={(event)=>{setProject({...project,name:event.target.value,episode_title:event.target.value});dirty.current=true;setSaved("未保存");}}/><small>只修改当前 EP{String(project.episode_no).padStart(2,"0")}，不会改变整部作品名称。</small></label>
                   <label>创作简介<textarea value={doc.brief} onChange={(event)=>update((document)=>({...document,brief:event.target.value}))}/></label>
                   <div className="two-fields">
-                    <label>画幅<select value={doc.ratio} onChange={(event)=>{update((document)=>applyRatioChange(document,event.target.value));setNotice("画幅已修改；已有分镜图和视频保留并标记为待更新");}}><option>16:9</option><option>9:16</option><option>1:1</option></select><small>修改后保留镜头、资产和 Timeline。</small></label>
+                    <label>图像画幅<select value={doc.ratio} onChange={(event)=>{update((document)=>applyRatioChange(document,event.target.value));setNotice("画幅已修改；已有分镜图和视频保留并标记为待更新");}}><option>21:9</option><option>16:9</option><option>4:3</option><option>1:1</option><option>3:4</option><option>9:16</option></select><small>资产图与分镜图按该比例生成。</small></label>
                     <label>目标时长（秒）<input type="number" min="5" max="3000" value={doc.duration} onChange={(event)=>update((document)=>applyTargetDuration(document,Number(event.target.value)))}/><small>策划目标，不会裁剪已有镜头或成片。</small></label>
-                    <label>默认视频分辨率<select value={doc.videoResolution || "720p"} onChange={(event)=>{update((document)=>applyVideoResolution(document,event.target.value));setNotice("视频分辨率已修改；已有视频保留并标记为待更新");}}><option value="480p">480p（测试）</option><option value="720p">720p</option><option value="1080p">1080p</option></select><small>用于新提交的视频任务，单镜头参数仍可覆盖。</small></label>
+                    <label>视频分辨率<select value={doc.videoResolution || "720p"} onChange={(event)=>{update((document)=>applyVideoResolution(document,event.target.value));setNotice("视频分辨率已修改；已有视频保留并标记为待更新");}}>{VIDEO_RESOLUTIONS.map((value)=><option key={value} value={value}>{value === "1080p" ? "1080p（10bit 位深）" : `${value}（8bit 位深）`}</option>)}</select><small>所有新视频任务继承该设置。</small></label>
+                    <label>视频宽高比<select value={doc.videoRatio || doc.ratio || "16:9"} onChange={(event)=>update((document)=>applyVideoOutputSetting(document,{videoRatio:event.target.value}))}>{VIDEO_RATIOS.map((value)=><option key={value}>{value}</option>)}</select><small>首帧模型可选择 adaptive。</small></label>
+                    <label>视频输出时长<select value={doc.videoDuration ?? -1} onChange={(event)=>update((document)=>applyVideoOutputSetting(document,{videoDuration:Number(event.target.value)}))}><option value={-1}>-1（按分镜和对白自动）</option>{Array.from({length:27},(_,index)=>index+4).map((value)=><option key={value} value={value}>{value} 秒</option>)}</select><small>默认使用分镜时长；对白更长时自动延长。</small></label>
+                    <label>视频格式<select value={doc.videoFormat || "mp4"} onChange={(event)=>update((document)=>applyVideoOutputSetting(document,{videoFormat:event.target.value}))}>{VIDEO_FORMATS.map((value)=><option key={value}>{value}</option>)}</select><small>用于输出与导出。</small></label>
                   </div>
                   <div className="duration-impact"><span>目标 {doc.duration} 秒</span><span>镜头合计 {doc.shots.reduce((sum,shot)=>sum+Number(shot.duration||0),0).toFixed(1)} 秒</span><span>剪辑 {Math.max(0,...(doc.editor?.timeline?.tracks||[]).flatMap((track)=>track.elements.map((element)=>Number(element.e)||0))).toFixed(1)} 秒</span></div>
                 </>}

@@ -54,6 +54,17 @@ def test_video_job_canonical_duration_overrides_provider_or_stale_node_default()
     assert repeated['prompt'].count('[镜头时长]') == 1
 
 
+def test_project_video_duration_can_explicitly_override_shot_duration():
+    current_shot = {**shot(), 'duration': 2}
+    value = compile_shot_video_input(
+        {'shots': [current_shot], 'videoDuration': 8}, 'video-node', 'video',
+        {'prompt': '项目固定八秒'},
+    )
+    assert value['parameters']['duration'] == 8
+    assert value['planned_shot_duration'] == 2
+    assert '成片总时长必须为 8 秒' in value['prompt']
+
+
 def test_non_video_and_unbound_nodes_are_unchanged():
     original = {'prompt': '保持不变'}
     assert compile_shot_video_input({'shots': [shot()]}, 'video-node', 'image', original) == original

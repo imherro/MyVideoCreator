@@ -13,7 +13,7 @@ function fixture(){
     {id:'visual-scene',type:'visualAsset',position:{x:0,y:0},data:{kind:'visual_asset',managed:true,visualVersionId:'scene-v1'}},
     {id:'video-1',type:'media',position:{x:0,y:0},data:{kind:'video',assetId:'clip-1'}},
   ];
-  return {nodes,edges:[{id:'a',source:'script',target:'storyboard'},{id:'b',source:'storyboard',target:'image-1'},{id:'c',source:'image-1',target:'video-1'}],shots:[
+  return {nodes,filmBible:{visual:{cards:{hero:{id:'hero',kind:'character'},scene:{id:'scene',kind:'scene'}},versions:{'hero-v1':{id:'hero-v1',cardId:'hero'},'scene-v1':{id:'scene-v1',cardId:'scene'}}}},edges:[{id:'a',source:'script',target:'storyboard'},{id:'b',source:'storyboard',target:'image-1'},{id:'c',source:'image-1',target:'video-1'}],shots:[
     {id:'shot-2',uid:'s2',order:2,imageNode:'image-2',videoNode:'video-2'},
     {id:'shot-1',uid:'s1',order:1,imageNode:'image-1',videoNode:'video-1'},
   ]};
@@ -33,6 +33,7 @@ test('auto layout separates dependency lanes and orders shot image/video rows',(
   assert.equal(at('image-2').y,at('video-2').y);
   assert.ok(at('image-1').y<at('image-2').y);
   assert.notDeepEqual(at('visual-hero'),at('visual-scene'));
+  assert.ok(at('visual-hero').x < at('visual-scene').x);
 });
 
 test('auto layout is deterministic and preserves graph/content fields',()=>{

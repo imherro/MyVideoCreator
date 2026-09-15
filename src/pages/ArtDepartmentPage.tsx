@@ -110,6 +110,10 @@ export function ArtDepartmentPage({
             const generationActive = panelProps.jobs.some((job) =>
               job.node_id === `visual-version:${displayed.id}` && ["queued", "running"].includes(job.status),
             );
+            const parentVersion = displayed.parentVersionId ? panelProps.visual.versions[displayed.parentVersionId] : undefined;
+            const stateBlocked = ["character_state", "scene_state"].includes(card.kind) && (
+              parentVersion?.status !== "locked" || !primaryReference(parentVersion)
+            );
             const asset = panelProps.assets.find((item) => item.id === reference?.assetId);
             const currentUsage = usageByVersion.get(displayed?.id);
             let model = "尚未配置";
@@ -140,7 +144,7 @@ export function ArtDepartmentPage({
                   </div>
                   <div className="art-card-actions">
                     <button onClick={() => select(current.id)}><Layers3 size={14} />版本 {versions.length}</button>
-                    {["draft", "pending_reference"].includes(displayed.status) && <button disabled={busyVersionId === displayed.id || generationActive} onClick={() => void perform(displayed.id, () => panelProps.onGenerateReference(displayed.id))}><Sparkles size={14} />{generationActive ? "生成中" : "生成参考"}</button>}
+                    {["draft", "pending_reference"].includes(displayed.status) && <button title={stateBlocked ? "请先生成并锁定基础角色或场景" : "生成参考图"} disabled={busyVersionId === displayed.id || generationActive || stateBlocked} onClick={() => void perform(displayed.id, () => panelProps.onGenerateReference(displayed.id))}><Sparkles size={14} />{generationActive ? "生成中" : stateBlocked ? "等待基础图锁定" : "生成参考"}</button>}
                     {displayed.status === "locked" && card.currentVersionId === displayed.id && <button onClick={() => panelProps.onFork(displayed.id, { description: displayed.spec.description, attributes: displayed.spec.attributes, invariants: displayed.invariants })}><GitBranch size={14} />派生新版</button>}
                     {displayed.status === "locked" && <span className="art-locked"><LockKeyhole size={13} />可跨集引用</span>}
                   </div>

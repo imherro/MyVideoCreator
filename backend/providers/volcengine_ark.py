@@ -268,7 +268,7 @@ def generate_image(worker, job, provider):
     body = {
         'model': job['input'].get('model') or model,
         'prompt': job['input']['prompt'],
-        'size': params.get('size') or '2K',
+        'size': job['input'].get('size') or params.get('size') or '2K',
         'response_format': 'url',
         'watermark': bool(params.get('watermark', False)),
     }

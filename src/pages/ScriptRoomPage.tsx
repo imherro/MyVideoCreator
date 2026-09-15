@@ -27,8 +27,7 @@ export function ScriptRoomPage({
   const fallbackTextProvider = textProviders.find((provider) => !provider.local) || textProviders[0];
   const defaultProviderId = defaultTarget?.providerId || fallbackTextProvider.id;
   const defaultModelId = defaultTarget?.modelId || fallbackTextProvider.models?.text || fallbackTextProvider.model || "";
-  const [providerId, setProviderId] = useState(defaultProviderId);
-  const [model, setModel] = useState(defaultModelId);
+  const configuredDefaultProvider = textProviders.find((provider) => provider.id === defaultProviderId) || fallbackTextProvider;
 
   async function loadList(preferred = active) {
     const [scripts, sourceChapters] = await Promise.all([
@@ -48,10 +47,6 @@ export function ScriptRoomPage({
   useEffect(() => {
     if (currentEpisodeNo !== active) void selectEpisode(currentEpisodeNo).catch(report);
   }, [currentEpisodeNo]);
-  useEffect(() => {
-    setProviderId(defaultProviderId);
-    setModel(defaultModelId);
-  }, [productionId, defaultTarget?.providerId, defaultTarget?.modelId]);
   function run(action: () => Promise<void>) {
     setBusy(true);
     void action().catch(report).finally(() => setBusy(false));
@@ -78,15 +73,16 @@ export function ScriptRoomPage({
     if (!draft) return;
     const value = await request(`/productions/${productionId}/episode-scripts/${active}/${action}`, { method: "POST", body: JSON.stringify({ revision: draft.revision }) });
     setDraft(value); await onChanged(value.project_id); await loadList(active);
-    notify(action === "review" ? "本集剧本已提交审核" : action === "approve" ? "本集剧本已批准" : "本集剧本已退回修改");
+    notify(action === "review" ? "本集剧本已提交审核" : action === "approve" ? "本集剧本已批准；下一步可以进入分镜规划" : "本集剧本已退回修改");
   }
   async function generate(episodeNos: number[]) {
     const normalized = normalizeEpisodeSelection(episodeNos, items.length);
     if (!normalized.length) return;
-    const provider = textProviders.find((value) => value.id === providerId);
-    const modelId = model || provider?.models?.text || provider?.model || "";
-    if (providerId !== "local" && !modelId) throw new Error("请填写文本模型 ID");
-    if (!window.confirm(`将生成 ${normalized.length} 集剧本：${normalized.map((no) => `EP${String(no).padStart(2, "0")}`).join("、")}\n服务：${provider?.name || providerId}\n模型：${modelId || "本地默认"}\n确认创建 ${normalized.length} 个文本任务？`)) return;
+    const provider = textProviders.find((value) => value.id === defaultProviderId) || fallbackTextProvider;
+    const providerId = provider.id;
+    const modelId = defaultModelId || provider?.models?.text || provider?.model || "";
+    if (providerId !== "local" && !modelId) throw new Error("项目默认文本模型尚未配置，请到作品设置中选择");
+    if (!window.confirm(`将使用项目默认模型生成 ${normalized.length} 集剧本：${normalized.map((no) => `EP${String(no).padStart(2, "0")}`).join("、")}\n服务：${provider?.name || providerId}\n模型：${modelId || "本地默认"}\n确认创建 ${normalized.length} 个文本任务？`)) return;
     const result = await request(`/productions/${productionId}/script-generations`, {
       method: "POST",
       body: JSON.stringify({ episode_nos: normalized, provider: providerId, model: modelId, submission_id: `scripts-${Date.now()}` }),
@@ -122,9 +118,9 @@ export function ScriptRoomPage({
           <label>角色（逗号或换行）<textarea rows={3} value={draft.characters.join("、")} onChange={(e) => patch({ characters: splitList(e.target.value) })} /></label>
           <label>场景（逗号或换行）<textarea rows={3} value={draft.scenes.join("、")} onChange={(e) => patch({ scenes: splitList(e.target.value) })} /></label>
           <label>道具（逗号或换行）<textarea rows={3} value={draft.props.join("、")} onChange={(e) => patch({ props: splitList(e.target.value) })} /></label>
-        </div></article><div className="script-state-actions"><button disabled={busy} onClick={() => run(() => transition("needs-changes"))}>退回修改</button><button disabled={busy} onClick={() => run(() => generate([active]))}><Sparkles size={15} />{draft.body ? "重新生成本集" : "生成本集"}</button>{draft.status === "approved" && <button className="primary" disabled={busy || !draft.project_id} onClick={() => run(() => Promise.resolve(onEnterEpisode(active)))} >进入 EP{String(active).padStart(2, "0")} 制作<ArrowRight size={15}/></button>}</div>
+        </div></article><div className="script-state-actions"><button disabled={busy} onClick={() => run(() => transition("needs-changes"))}>退回修改</button><button disabled={busy} onClick={() => run(() => generate([active]))}><Sparkles size={15} />{draft.body ? "重新生成本集" : "生成本集"}</button>{draft.status === "approved" && <button className="primary" disabled={busy || !draft.project_id} onClick={() => run(() => Promise.resolve(onEnterEpisode(active)))} >进入分镜规划<ArrowRight size={15}/></button>}</div>
       </> : <div className="empty-state"><h3>先完成分集规划</h3><p>改编策划批准后，可以在这里逐集生成和修订剧本。</p></div>}</main>
     </div>
-    <footer className="domain-generation-bar"><div><b>批量生成所选剧本</b><small>已选 {selected.size} 集 · 只有已批准的改编策划可以执行</small></div><label>服务<select value={providerId} onChange={(e) => { setProviderId(e.target.value); const p = textProviders.find((x) => x.id === e.target.value); setModel(p?.models?.text || p?.model || ""); }}>{textProviders.map((value) => <option key={value.id} value={value.id}>{value.local ? "本地" : "云端"} · {value.name}</option>)}</select></label><label>模型<input value={model} placeholder="本地默认" onChange={(e) => setModel(e.target.value)} /></label><button className="primary" disabled={busy || !selected.size} onClick={() => run(() => generate([...selected]))}><Sparkles size={15} />生成 {selected.size} 集</button></footer>
+    <footer className="domain-generation-bar"><div><b>批量生成所选剧本</b><small>已选 {selected.size} 集 · 使用项目默认模型：{configuredDefaultProvider.name} · {defaultModelId || "服务默认"}</small></div><button className="primary" disabled={busy || !selected.size} onClick={() => run(() => generate([...selected]))}><Sparkles size={15} />生成 {selected.size} 集</button></footer>
   </section>;
 }

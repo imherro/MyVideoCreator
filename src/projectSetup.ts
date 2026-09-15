@@ -20,6 +20,9 @@ export type ProjectSetupDraft = {
   ratio: "16:9" | "9:16" | "1:1";
   duration: number;
   videoResolution: "480p" | "720p" | "1080p";
+  videoRatio: "21:9" | "16:9" | "4:3" | "1:1" | "3:4" | "9:16" | "adaptive";
+  videoDuration: number;
+  videoFormat: "mp4" | "mov";
   episodeCount: number;
   platform: string;
   brief: string;
@@ -46,6 +49,9 @@ export function defaultProjectSetupDraft(providers: Value[]): ProjectSetupDraft 
     ratio: "16:9",
     duration: 15,
     videoResolution: "720p",
+    videoRatio: "16:9",
+    videoDuration: -1,
+    videoFormat: "mp4",
     episodeCount: 1,
     platform: "通用短视频",
     brief: "",
@@ -72,6 +78,8 @@ export function validateProjectSetupDraft(draft: ProjectSetupDraft): string[] {
     errors.push("目标时长应为 5–3000 秒");
   if (!(["480p", "720p", "1080p"] as string[]).includes(draft.videoResolution))
     errors.push("请选择有效的视频分辨率");
+  if (!(draft.videoDuration === -1 || (Number.isInteger(draft.videoDuration) && draft.videoDuration >= 4 && draft.videoDuration <= 30)))
+    errors.push("视频输出时长应为 4–30 秒或 -1（按镜头自动）");
   if (!Number.isInteger(draft.episodeCount) || draft.episodeCount < 1 || draft.episodeCount > 500)
     errors.push("总集数应为 1–500 的整数");
   if (!draft.platform.trim()) errors.push("请选择发布平台");
@@ -93,6 +101,9 @@ export function projectSetupPayload(draft: ProjectSetupDraft) {
     ratio: draft.ratio,
     duration: draft.duration,
     video_resolution: draft.videoResolution,
+    video_ratio: draft.videoRatio,
+    video_duration: draft.videoDuration,
+    video_format: draft.videoFormat,
     episode_count: draft.episodeCount,
     platform: draft.platform,
     brief: draft.brief,
@@ -169,4 +180,13 @@ export function applyVideoResolution<T extends Value & { nodes: any[]; edges: an
   if (document.videoResolution === resolution) return document;
   const videoNodes = (document.nodes || []).filter((node) => node.data?.kind === "video").map((node) => node.id);
   return invalidate({ ...document, videoResolution: resolution }, videoNodes) as unknown as T;
+}
+
+export function applyVideoOutputSetting<T extends Value & { nodes: any[]; edges: any[]; shots: any[] }>(
+  document: T,
+  patch: { videoRatio?: string; videoDuration?: number; videoFormat?: string },
+): T {
+  if (Object.entries(patch).every(([key, value]) => document[key] === value)) return document;
+  const videoNodes = (document.nodes || []).filter((node) => node.data?.kind === "video").map((node) => node.id);
+  return invalidate({ ...document, ...patch }, videoNodes) as unknown as T;
 }

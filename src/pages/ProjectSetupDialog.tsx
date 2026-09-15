@@ -3,6 +3,7 @@ import { BookOpen, Film, LoaderCircle, Settings2, X } from "lucide-react";
 import { GenerationPolicyPanel } from "../GenerationPolicyPanel";
 import { VisualStylePicker } from "../VisualStylePicker";
 import { DURATION_OPTIONS, PLATFORM_OPTIONS } from "../adaptation";
+import { VIDEO_FORMATS, VIDEO_RATIOS, VIDEO_RESOLUTIONS } from "../mediaSpecs";
 import {
   defaultProjectSetupDraft,
   validateProjectSetupDraft,
@@ -55,7 +56,10 @@ export function ProjectSetupDialog({
             <div className="two-fields">
               <label>画幅 *<select value={draft.ratio} onChange={(event)=>patch({ratio:event.target.value as ProjectSetupDraft["ratio"]})}><option>16:9</option><option>9:16</option><option>1:1</option></select></label>
               <label>单集目标时长（秒）*<input list="project-duration-options" type="number" min={5} max={3000} value={draft.duration} onChange={(event)=>patch({duration:Number(event.target.value)})}/><datalist id="project-duration-options">{DURATION_OPTIONS.map((value)=><option value={value} key={value}/>)}</datalist></label>
-              <label>默认视频分辨率 *<select value={draft.videoResolution} onChange={(event)=>patch({videoResolution:event.target.value as ProjectSetupDraft["videoResolution"]})}><option value="480p">480p（测试）</option><option value="720p">720p</option><option value="1080p">1080p</option></select><small>用于新建视频任务；仍可在单个镜头中覆盖。</small></label>
+              <label>视频输出分辨率 *<select value={draft.videoResolution} onChange={(event)=>patch({videoResolution:event.target.value as ProjectSetupDraft["videoResolution"]})}>{VIDEO_RESOLUTIONS.map((value)=><option value={value} key={value}>{value === "1080p" ? "1080p（10bit 位深）" : value + "（8bit 位深）"}</option>)}</select></label>
+              <label>视频宽高比 *<select value={draft.videoRatio} onChange={(event)=>patch({videoRatio:event.target.value as ProjectSetupDraft["videoRatio"]})}>{VIDEO_RATIOS.map((value)=><option value={value} key={value}>{value}</option>)}</select><small>adaptive 由首帧或模型决定。</small></label>
+              <label>单镜输出时长策略 *<select value={draft.videoDuration} onChange={(event)=>patch({videoDuration:Number(event.target.value)})}><option value={-1}>-1（按分镜及对白自动）</option>{Array.from({length:27},(_,index)=>index+4).map((value)=><option value={value} key={value}>{value} 秒</option>)}</select></label>
+              <label>视频格式 *<select value={draft.videoFormat} onChange={(event)=>patch({videoFormat:event.target.value as ProjectSetupDraft["videoFormat"]})}>{VIDEO_FORMATS.map((value)=><option value={value} key={value}>{value}</option>)}</select></label>
               <label>总集数 *<input type="number" min={1} max={500} value={draft.episodeCount} onChange={(event)=>patch({episodeCount:Number(event.target.value)})}/><small>原著章节数不等于成片集数，可按改编节奏设置。</small></label>
               <label>发布平台 *<select value={draft.platform} onChange={(event)=>patch({platform:event.target.value})}>{PLATFORM_OPTIONS.map((value)=><option value={value} key={value}>{value}</option>)}</select><small>用于 AI 判断节奏、钩子和付费卡点。</small></label>
             </div>

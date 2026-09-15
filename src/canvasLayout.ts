@@ -3,9 +3,12 @@ type Value = Record<string, any>;
 const X = {
   text: 40,
   storyboard: 440,
-  visual: 900,
-  image: 1400,
-  video: 1850,
+  visualCharacter: 780,
+  visualScene: 1040,
+  visualProp: 1300,
+  visualState: 1500,
+  image: 2050,
+  video: 2520,
   other: 440,
 };
 const TOP = 80;
@@ -25,13 +28,19 @@ function orderedShots(shots: Value[]) {
   );
 }
 
-function nodeLane(node: Value) {
-  if (node.type === "visualAsset" || node.data?.kind === "visual_asset")
-    return "visual";
+function nodeLane(node: Value, document?: Value) {
+  if (node.type === "visualAsset" || node.data?.kind === "visual_asset") {
+    const version = document?.filmBible?.visual?.versions?.[node.data?.visualVersionId];
+    const card = version ? document?.filmBible?.visual?.cards?.[version.cardId] : undefined;
+    if (["character_state", "scene_state"].includes(card?.kind)) return "visualState";
+    if (card?.kind === "scene") return "visualScene";
+    if (card?.kind === "prop") return "visualProp";
+    return "visualCharacter";
+  }
   const kind = String(node.data?.kind || "");
   if (kind === "text") return "text";
   if (kind === "storyboard") return "storyboard";
-  if (kind === "reference") return "visual";
+  if (kind === "reference") return "visualProp";
   if (kind === "image") return "image";
   if (kind === "video") return "video";
   return "other";
@@ -58,15 +67,18 @@ export function autoLayoutCanvas<T extends { nodes: Value[]; edges: Value[]; sho
   const laneCounts: Record<string, number> = {
     text: 0,
     storyboard: 0,
-    visual: 0,
+    visualCharacter: 0,
+    visualScene: 0,
+    visualProp: 0,
+    visualState: 0,
     image: shots.length,
     video: shots.length,
     other: 0,
   };
   const ordered = [...document.nodes].sort((left, right) => {
-    const laneOrder = ["text", "storyboard", "visual", "image", "video", "other"];
+    const laneOrder = ["text", "storyboard", "visualCharacter", "visualScene", "visualProp", "visualState", "image", "video", "other"];
     return (
-      laneOrder.indexOf(nodeLane(left)) - laneOrder.indexOf(nodeLane(right)) ||
+      laneOrder.indexOf(nodeLane(left, document)) - laneOrder.indexOf(nodeLane(right, document)) ||
       String(left.data?.visualVersionId || left.id).localeCompare(
         String(right.data?.visualVersionId || right.id),
       )
@@ -74,9 +86,9 @@ export function autoLayoutCanvas<T extends { nodes: Value[]; edges: Value[]; sho
   });
   for (const node of ordered) {
     if (positions.has(node.id)) continue;
-    const lane = nodeLane(node);
+    const lane = nodeLane(node, document);
     const index = laneCounts[lane]++;
-    const gap = lane === "visual" ? VISUAL_GAP : MEDIA_GAP;
+    const gap = lane.startsWith("visual") ? VISUAL_GAP : MEDIA_GAP;
     positions.set(node.id, { x: X[lane as keyof typeof X], y: TOP + index * gap });
   }
 

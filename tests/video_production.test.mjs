@@ -103,5 +103,16 @@ test("Seedance dialogue extends a short shot instead of blocking submission", ()
   assert.equal(rows[0].readinessReason, "");
   assert.equal(rows[0].plannedDuration, 2);
   assert.equal(rows[0].effectiveDuration, 3);
+  assert.equal(rows[0].submissionDuration, 4);
   assert.doesNotThrow(() => validateVideoSubmission(rows, ["u-ready"]));
+});
+
+test("project fixed duration overrides a shorter shot and remains visible as submitted duration", () => {
+  const { document, jobs } = fixture();
+  document.shots[0].duration = 2;
+  document.videoDuration = 8;
+  const rows = deriveVideoProductionRows(document, assets, jobs, providers, capabilities);
+  assert.equal(rows[0].plannedDuration, 2);
+  assert.equal(rows[0].effectiveDuration, 8);
+  assert.equal(rows[0].submissionDuration, 8);
 });

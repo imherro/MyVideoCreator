@@ -28,6 +28,7 @@ export type VideoProductionRow = {
   dialogueAudioAssets: Value[];
   plannedDuration: number;
   effectiveDuration: number;
+  submissionDuration: number;
 };
 
 function latestJob(jobs: Value[], nodeId?: string) {
@@ -68,7 +69,8 @@ export function deriveVideoProductionRows(
     const dialogues = Array.isArray(shot.dialogues) ? shot.dialogues.filter((item: Value) => String(item.text || "").trim()) : [];
     const dialogueAudioAssets: Value[] = [];
     const plannedDuration = Math.max(0, Number(shot.duration || 0));
-    let effectiveDuration = plannedDuration;
+    const configuredDuration = Number(document.videoDuration ?? -1);
+    let effectiveDuration = configuredDuration >= 4 ? configuredDuration : plannedDuration;
     let dialogueReadinessReason = "";
     if (["volcengine_ark", "runninghub"].includes(provider?.type)) {
       for (const dialogue of dialogues) {
@@ -122,10 +124,13 @@ export function deriveVideoProductionRows(
     else if (readinessReason) status = "blocked";
     else status = "ready";
 
+    const submissionDuration = ["volcengine_ark", "runninghub", "hc_atom"].includes(provider?.type)
+      ? Math.max(4, Math.min(30, Math.ceil(effectiveDuration)))
+      : Math.ceil(effectiveDuration);
     return {
       uid: shotIdentity(shot), index, shot, imageNode, videoNode, firstFrame, endFrame,
       videoAsset, job, provider, status, readinessReason, endFrameSupported, dialogueAudioAssets,
-      plannedDuration, effectiveDuration,
+      plannedDuration, effectiveDuration, submissionDuration,
     };
   });
 }

@@ -41,6 +41,10 @@ def test_project_create_with_setup_fields_owns_data_and_has_no_generation_side_e
         "style": "国风电影写实",
         "ratio": "9:16",
         "duration": 60,
+        "video_resolution": "1080p",
+        "video_ratio": "21:9",
+        "video_duration": 8,
+        "video_format": "mov",
         "episode_count": 12,
         "platform": "抖音",
         "brief": "十五秒概念扩展",
@@ -61,6 +65,10 @@ def test_project_create_with_setup_fields_owns_data_and_has_no_generation_side_e
     assert project["name"] == project["episode_title"] == "初见"
     assert document["style"] == "国风电影写实"
     assert document["ratio"] == "9:16" and document["duration"] == 60
+    assert document["videoResolution"] == "1080p"
+    assert document["videoRatio"] == "21:9"
+    assert document["videoDuration"] == 8
+    assert document["videoFormat"] == "mov"
     assert document["brief"] == payload["brief"]
     assert document["generationPolicy"] == payload["generation_policy"]
     assert document["filmBible"]["story"]["worldEra"] == "当代江南"

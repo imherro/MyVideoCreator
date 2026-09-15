@@ -104,6 +104,9 @@ def test_generated_plan_repairs_optional_monetization_outside_episode_range():
     assert result['monetizationPlan']['freeEpisodes'] == 1
     assert result['monetizationPlan']['firstPaywallEpisode'] == 2
     assert [beat['episodeNo'] for beat in result['monetizationPlan']['beats']] == [1]
+    # EP02 is the sentinel for “the single-episode series has no paid episode”.
+    # Saving the generated plan manually must keep accepting that value.
+    assert validate_adaptation_bundle(result)['monetizationPlan']['firstPaywallEpisode'] == 2
 
 
 def test_manual_plan_still_rejects_invalid_first_paywall_episode():
