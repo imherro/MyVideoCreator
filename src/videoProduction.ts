@@ -92,15 +92,15 @@ export function deriveVideoProductionRows(
       if (!dialogueReadinessReason && dialogues.length && !spokenDuration) {
         dialogueReadinessReason = "固定对白音频时长无效";
       } else if (!dialogueReadinessReason && dialogues.length) {
-        effectiveDuration = Math.max(plannedDuration, Math.ceil(spokenDuration));
+        effectiveDuration = Math.max(effectiveDuration, plannedDuration, Math.ceil(spokenDuration));
       }
     }
     const catalogCapabilities = modelCapabilities[
       [String(videoNode?.data?.provider || ""), String(videoNode?.data?.model || "")].join("\u0000")
     ];
     const endFrameSupported = Boolean(
-      videoNode?.data?.model_capabilities?.end_frame ??
       catalogCapabilities?.end_frame ??
+      videoNode?.data?.model_capabilities?.end_frame ??
       provider?.capabilities?.end_frame ??
       false
     );

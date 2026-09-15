@@ -74,6 +74,15 @@ test("Ark end frame visibility follows the selected model capability, not provid
   assert.match(withoutCapability[4].readinessReason, /不支持尾帧/);
 });
 
+test("fresh model catalog overrides a stale cached end-frame capability", () => {
+  const { document, jobs } = fixture();
+  const videoNode = document.nodes.find((node) => node.id === "v-complete");
+  videoNode.data.model_capabilities = { end_frame: false };
+  const rows = deriveVideoProductionRows(document, assets, jobs, providers, capabilities);
+  assert.equal(rows[4].endFrameSupported, true);
+  assert.equal(rows[4].readinessReason, "");
+});
+
 test("Seedance dialogue requires the current locked voice take before paid submission", () => {
   const { document, jobs } = fixture();
   document.shots[0].duration = 5;
@@ -105,6 +114,18 @@ test("Seedance dialogue extends a short shot instead of blocking submission", ()
   assert.equal(rows[0].effectiveDuration, 3);
   assert.equal(rows[0].submissionDuration, 4);
   assert.doesNotThrow(() => validateVideoSubmission(rows, ["u-ready"]));
+});
+
+test("locked dialogue never shortens the fixed project video duration", () => {
+  const { document, jobs } = fixture();
+  document.videoDuration = 12;
+  document.shots[0].duration = 3;
+  document.shots[0].dialogues = [{ id: "dialogue-1", characterCardId: "robot", characterName: "球球", text: "你好" }];
+  document.filmBible = { voices: { profiles: { robot: { status: "locked", voiceType: "robot-speaker", version: 2 } } } };
+  const voiceAsset = { id: "voice-1", kind: "audio", created: 5, metadata: { duration: 1.5, input: { dialogue: { id: "dialogue-1", voiceVersion: 2 } } } };
+  const rows = deriveVideoProductionRows(document, [...assets, voiceAsset], jobs, providers, capabilities);
+  assert.equal(rows[0].effectiveDuration, 12);
+  assert.equal(rows[0].submissionDuration, 12);
 });
 
 test("project fixed duration overrides a shorter shot and remains visible as submitted duration", () => {
