@@ -13,6 +13,27 @@ from . import common
 
 DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
 DEFAULT_VIDEO_MODEL = 'doubao-seedance-2-5-260628'
+SEEDANCE_25_PREFIX = 'doubao-seedance-2-5'
+
+
+def seedance_submission_duration(model, requested):
+    """Return the provider duration without changing canonical shot timing."""
+    duration = int(requested)
+    if str(model).lower().startswith(SEEDANCE_25_PREFIX):
+        return max(4, duration)
+    return duration
+
+
+def seedance_submission_prompt(prompt, requested, submitted):
+    value = str(prompt)
+    if submitted == requested:
+        return value
+    return value.replace(
+        f'本镜头成片总时长必须为 {requested:g} 秒',
+        f'本次模型生成长度为 {submitted:g} 秒；核心动作须在前 {requested:g} 秒内完成',
+    )
+
+
 DISABLED_VIDEO_PREFIXES = ('doubao-seedance-2-0',)
 SUPPORTED_REFERENCE_FORMATS = {'JPEG': 'image/jpeg', 'PNG': 'image/png'}
 MAX_REFERENCE_BYTES = 10 * 1024 * 1024
@@ -350,10 +371,18 @@ def generate_video(worker, job, provider):
                         'image_url':{'url':last['url']},
                         'role':'last_frame',
                     })
+            requested_duration = int(params.get('duration', 5))
+            # Project shots may be shorter than Ark's generation window. Keep
+            # their canonical duration unchanged and generate the minimum valid
+            # Seedance 2.5 clip; timeline assembly trims it back to the plan.
+            submission_duration = seedance_submission_duration(selected_model, requested_duration)
+            prompt = seedance_submission_prompt(
+                job['input']['prompt'], requested_duration, submission_duration,
+            )
             body = {
                 'model': selected_model,
-                'content': content,
-                'duration': int(params.get('duration', 5)),
+                'content': [{**item, 'text': prompt} if item.get('type') == 'text' else item for item in content],
+                'duration': submission_duration,
                 'resolution': str(params.get('resolution', '720p')),
                 'generate_audio': False if job['input'].get('dialogue_audio') else bool(params.get('generate_audio', True)),
             }

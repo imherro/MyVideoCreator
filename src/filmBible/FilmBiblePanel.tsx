@@ -371,10 +371,15 @@ export function FilmBiblePanel({
                 ? "已锁定版本只读；修改会派生新版本，旧版本和旧分镜绑定继续保留。"
                 : "已弃用版本保留历史，但不能编辑或建立新绑定。"}
             </p>
-            {selected.status === "locked" && card.status === "active" && (
-              <button className="secondary full" onClick={() => onFork(selected.id, draft)}>
-                创建新版本
-              </button>
+            {selected.status === "locked" && (
+              <>
+                <button className="secondary full" onClick={() => onFork(selected.id, draft)}>
+                  创建新版本
+                </button>
+                <button className="danger-button full" onClick={() => onStatus(selected.id, "deprecated")}>
+                  弃用此版本（保留分镜引用）
+                </button>
+              </>
             )}
           </>
         )}

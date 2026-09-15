@@ -145,6 +145,18 @@ def test_seedance_persists_task_and_resume_only_queries(monkeypatch):
     ]
 
 
+def test_seedance_25_short_shot_uses_provider_minimum_without_changing_plan():
+    model = 'doubao-seedance-2-5-260628'
+    assert ark.seedance_submission_duration(model, 1) == 4
+    assert ark.seedance_submission_duration(model, 3) == 4
+    assert ark.seedance_submission_duration(model, 4) == 4
+    assert ark.seedance_submission_duration(model, 6) == 6
+    prompt = '动作。\n\n[镜头时长]\n本镜头成片总时长必须为 3 秒；所有动作在这段时间内完成。'
+    submitted = ark.seedance_submission_prompt(prompt, 3, 4)
+    assert '本次模型生成长度为 4 秒；核心动作须在前 3 秒内完成' in submitted
+    assert '本镜头成片总时长必须为 3 秒' not in submitted
+
+
 def test_seedance_dialogue_disables_random_audio_and_returns_muxed_video(monkeypatch,tmp_path):
     item=stored_job('video',provider())
     item['input']['dialogue_audio']=[{'assetId':'voice-1','start':.3,'duration':1.2}]
