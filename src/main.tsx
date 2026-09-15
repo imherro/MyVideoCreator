@@ -338,6 +338,23 @@ const id = () => {
   );
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 };
+function dialoguePerformance(shot: Any, dialogue: Any, profile: Any) {
+  const dialogueEmotion = String(dialogue?.emotion || "").trim();
+  const shotEmotion = String(shot?.emotion || "").trim();
+  const defaultEmotion = String(profile?.parameters?.emotion || "").trim();
+  const emotion = dialogueEmotion || shotEmotion || defaultEmotion;
+  const parts = [
+    shot?.scene ? `场景：${shot.scene}` : "",
+    shot?.action ? `镜头动作：${shot.action}` : "",
+    shotEmotion ? `全镜情绪：${shotEmotion}` : "",
+    emotion ? `本句表演：${emotion}` : "请根据台词语义自然演绎",
+    "保持角色既定声纹，语气与影片表演同步，不要用播报腔",
+  ].filter(Boolean);
+  return {
+    emotion,
+    contextTexts: [`影片对白表演指令。${parts.join("；")}。`],
+  };
+}
 function Media({
   asset,
   controls = true,
@@ -2337,7 +2354,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       const needed = dialogues.filter(({dialogue})=>!existing.has(dialogue.id) && !pending.has(dialogue.id));
       if (!needed.length) throw new Error("该角色本集对白已经生成或正在生成");
       await save();
-      await Promise.all(needed.map(({shot,dialogue,index})=>api(`/projects/${project.id}/jobs`,send("POST",{
+      await Promise.all(needed.map(({shot,dialogue,index})=>{
+        const performance = dialoguePerformance(shot, dialogue, profile);
+        return api(`/projects/${project.id}/jobs`,send("POST",{
         node_id:`dialogue:${dialogue.id}`,
         kind:"audio",
         submission_id:id(),
@@ -2350,11 +2369,12 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           character_name:card?.name || dialogue.characterName,
           output_name:`${shot.id || "分镜"} · ${card?.name || "角色"}对白 ${index+1}.mp3`,
           asset_category:"voice",
-          emotion:dialogue.emotion,
-          parameters:{speech_rate:profile.parameters.speechRate,emotion:dialogue.emotion || profile.parameters.emotion},
-          dialogue:{id:dialogue.id,shotUid:String(shot.uid||shot.id),characterCardId:cardId,voiceVersion:profile.version,text:dialogue.text},
+          emotion:performance.emotion,
+          parameters:{speech_rate:profile.parameters.speechRate,emotion:performance.emotion,context_texts:performance.contextTexts},
+          dialogue:{id:dialogue.id,shotUid:String(shot.uid||shot.id),characterCardId:cardId,voiceVersion:profile.version,text:dialogue.text,emotion:performance.emotion,contextTexts:performance.contextTexts},
         },
-      }))));
+      }));
+      }));
       await refresh(project.id);
       setNotice(`已并发提交 ${needed.length} 条${card?.name || "角色"}对白`);
       return needed.length;
@@ -2373,6 +2393,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       if (active) throw new Error("该对白正在生成，请等待当前任务完成");
       await save();
       if (dirty.current) throw new Error("角色声音设定尚未保存，请先解决保存冲突");
+      const performance = dialoguePerformance(match.shot, match.dialogue, profile);
       await api(`/projects/${project.id}/jobs`,send("POST",{
         node_id:`dialogue:${dialogueId}`,
         kind:"audio",
@@ -2386,9 +2407,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           character_name:card?.name || match.dialogue.characterName,
           output_name:`${match.shot.id || "分镜"} · ${card?.name || "角色"}对白 · 新版本.mp3`,
           asset_category:"voice",
-          emotion:match.dialogue.emotion,
-          parameters:{speech_rate:profile.parameters.speechRate,emotion:match.dialogue.emotion || profile.parameters.emotion},
-          dialogue:{id:dialogueId,shotUid:String(match.shot.uid||match.shot.id),characterCardId:cardId,voiceVersion:profile.version,text:match.dialogue.text},
+          emotion:performance.emotion,
+          parameters:{speech_rate:profile.parameters.speechRate,emotion:performance.emotion,context_texts:performance.contextTexts},
+          dialogue:{id:dialogueId,shotUid:String(match.shot.uid||match.shot.id),characterCardId:cardId,voiceVersion:profile.version,text:match.dialogue.text,emotion:performance.emotion,contextTexts:performance.contextTexts},
         },
       }));
       await refresh(project.id);

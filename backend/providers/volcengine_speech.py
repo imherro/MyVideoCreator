@@ -52,8 +52,20 @@ def synthesize(worker, job, provider):
     loudness_rate = max(-50, min(100, int(params.get('loudness_rate') or 0)))
     additions = {'disable_markdown_filter': True, 'enable_latex_tn': False}
     emotion = str(params.get('emotion') or inp.get('emotion') or '').strip()
-    if emotion:
-        additions.update(enable_emotion=True, emotion=emotion)
+    raw_contexts = params.get('context_texts')
+    if isinstance(raw_contexts, str):
+        context_texts = [raw_contexts.strip()] if raw_contexts.strip() else []
+    elif isinstance(raw_contexts, list):
+        context_texts = [str(item).strip() for item in raw_contexts if str(item).strip()]
+    else:
+        context_texts = []
+    if not context_texts and emotion:
+        context_texts = [f'请以{emotion}的情绪和语气演绎下面这句影片对白。']
+    if context_texts:
+        # Seed TTS 2.0 accepts natural-language performance direction through
+        # additions.context_texts. The former implementation put an arbitrary
+        # Chinese sentence in the legacy emotion enum, which was ignored.
+        additions['context_texts'] = [item[:500] for item in context_texts[:1]]
     body = {
         'user': {'uid': 'anying-studio'},
         'req_params': {

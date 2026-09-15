@@ -31,7 +31,11 @@ def test_speech_v3_sse_uses_fixed_voice_and_registers_dialogue(monkeypatch):
         'voice_version': 3,
         'character_name': '糯糯',
         'output_name': '糯糯试听.wav',
-        'parameters': {'format': 'mp3', 'sample_rate': 24000, 'speech_rate': 8},
+        'parameters': {
+            'format': 'mp3', 'sample_rate': 24000, 'speech_rate': 8,
+            'emotion': '克制的喜悦',
+            'context_texts': ['影片对白表演指令。全镜情绪：久别重逢；本句表演：克制的喜悦。'],
+        },
         'dialogue': {'id': 'dialogue-1', 'shotUid': 'shot-uid-1', 'voiceVersion': 3},
     }
     with s.db() as connection:
@@ -76,6 +80,9 @@ def test_speech_v3_sse_uses_fixed_voice_and_registers_dialogue(monkeypatch):
     assert captured['headers']['x-api-resource-id'] == 'seed-tts-2.0'
     assert captured['body']['req_params']['speaker'] == job_input['voice_type']
     assert captured['body']['req_params']['audio_params']['speech_rate'] == 8
+    additions = json.loads(captured['body']['req_params']['additions'])
+    assert additions['context_texts'] == job_input['parameters']['context_texts']
+    assert 'emotion' not in additions and 'enable_emotion' not in additions
     assert result['assets'][0]['kind'] == 'audio'
     assert result['assets'][0]['name'].endswith('.mp3')
     with s.db() as connection:
@@ -87,4 +94,3 @@ def test_speech_v3_sse_uses_fixed_voice_and_registers_dialogue(monkeypatch):
 def test_speech_verify_does_not_make_a_paid_request():
     result = volcengine_speech.verify({'api_key': 'configured', 'resource_id': 'seed-tts-2.0'})
     assert result['status'] == 'configured'
-
