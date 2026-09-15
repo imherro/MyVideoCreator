@@ -10,13 +10,18 @@ from .. import store as s
 from . import common
 
 
-DEFAULT_BASE_URL = 'https://ai-aigc.fzyinghe.com'
+DEFAULT_BASE_URL = 'https://api-aigc.fzyinghe.com'
+LEGACY_BASE_URL = 'https://ai-aigc.fzyinghe.com'
 KINDS = ('text', 'image', 'video')
 SEEDANCE_PREFIXES = ('doubao-seedance-', 'dreamina-seedance-')
 
 
 def _root(provider):
-    return str(provider.get('url') or DEFAULT_BASE_URL).rstrip('/').removesuffix('/v1')
+    value = str(provider.get('url') or DEFAULT_BASE_URL).rstrip('/').removesuffix('/v1')
+    # The former ai-aigc host accepts requests but misroutes V3 video bodies and
+    # reports that their top-level model field is missing. Keep saved projects
+    # working while directing them to the gateway documented for V3.
+    return DEFAULT_BASE_URL if value == LEGACY_BASE_URL else value
 
 
 def text_base_url(provider):
@@ -43,6 +48,17 @@ def _unwrap(value):
         'code' in value or 'msg' in value
     ):
         return value['data']
+    return value
+
+
+def _checked(response, recoverable=False):
+    """Validate both HTTP status and HC's HTTP-200 business envelope."""
+    value = common.checked(response, recoverable=recoverable)
+    if isinstance(value, dict) and 'code' in value:
+        code = value.get('code')
+        if code not in (0, 200, '0', '200'):
+            detail = value.get('msg') or value.get('message') or value.get('error') or code
+            raise ValueError('幻场 AI 返回业务错误：' + str(detail)[:500])
     return value
 
 
@@ -75,7 +91,7 @@ def list_models(provider):
     """Read the authenticated catalogue. This endpoint does not run a model."""
     try:
         with httpx.Client(timeout=30, headers=_headers(provider), trust_env=True) as client:
-            value = common.checked(client.get(_root(provider) + '/v1/models'))
+            value = _checked(client.get(_root(provider) + '/v1/models'))
     except httpx.HTTPError as exc:
         raise ValueError('幻场 AI 连接失败，请检查网络、服务地址和代理设置') from exc
     data = value.get('data') if isinstance(value, dict) else None
@@ -179,7 +195,7 @@ def _post_task(worker, job, client, path, body):
         if worker.cancelled(job):
             raise InterruptedError()
         try:
-            return common.checked(client.post(path, json=body))
+            return _checked(client.post(path, json=body))
         except httpx.TransportError as exc:
             last = exc
             worker.progress(job, f'幻场 AI 提交连接中断，正在重试（{attempt}/3）')
@@ -187,7 +203,7 @@ def _post_task(worker, job, client, path, body):
 
 
 def _task_value(client, path):
-    return _unwrap(common.checked(client.get(path), recoverable=True))
+    return _unwrap(_checked(client.get(path), recoverable=True))
 
 
 def _wait_task(worker, job, client, path, remote, kind):
@@ -221,7 +237,7 @@ def _wait_seedance_v3(worker, job, client, path, remote):
                 client.delete(path + '/' + quote(str(remote), safe=''))
             finally:
                 raise InterruptedError()
-        value = common.checked(
+        value = _checked(
             client.get(path + '/' + quote(str(remote), safe='')), recoverable=True,
         )
         status = str(value.get('status') or '').lower()
@@ -314,7 +330,7 @@ def generate_image(worker, job, provider):
                 }
                 if refs:
                     body['input']['images'] = [_data_uri(asset) for asset in refs]
-                value = _unwrap(common.checked(client.post(path, json=body)))
+                value = _unwrap(_checked(client.post(path, json=body)))
                 remote = value.get('taskId') or value.get('task_id') or value.get('id')
                 if not remote:
                     raise ValueError('幻场 AI 图片任务未返回 taskId')
@@ -328,7 +344,7 @@ def generate_image(worker, job, provider):
             'response_format': params.get('response_format') or 'url',
         }
         worker.progress(job, '幻场 AI 生成图片')
-        value = common.checked(client.post(_root(provider) + '/v1/images/generations', json=body))
+        value = _checked(client.post(_root(provider) + '/v1/images/generations', json=body))
         outputs = []
         for item in value.get('data', []):
             if item.get('url'):

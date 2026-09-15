@@ -29,6 +29,32 @@ def provider():
     }
 
 
+def test_legacy_gateway_is_redirected_to_documented_v3_host():
+    configured = provider()
+    configured['url'] = hc_atom.LEGACY_BASE_URL
+    assert hc_atom._root(configured) == hc_atom.DEFAULT_BASE_URL
+
+
+def test_http_200_business_error_is_not_treated_as_created_task(monkeypatch):
+    configured = provider()
+    configured['models']['video'] = 'doubao-seedance-2.5'
+    item = stored_job('video', configured)
+    item['input'].update({'model': 'doubao-seedance-2.5', 'parameters': {'duration': 4}})
+    original = httpx.Client
+
+    def handle(request):
+        return httpx.Response(200, json={'code': 500, 'msg': '当前用户未分配该模型可用的厂商', 'data': None})
+
+    monkeypatch.setattr(hc_atom.httpx, 'Client', lambda **kw: original(**kw, transport=httpx.MockTransport(handle)))
+    worker = Worker()
+    worker.halt = NoWait()
+    try:
+        hc_atom.generate_video(worker, item, configured)
+        assert False, 'business errors must fail before polling'
+    except ValueError as exc:
+        assert str(exc) == '幻场 AI 返回业务错误：当前用户未分配该模型可用的厂商'
+
+
 def stored_job(kind, provider_value, provider_job_id=None):
     pid = 'hc-project-' + uuid.uuid4().hex
     jid = 'hc-job-' + uuid.uuid4().hex

@@ -4759,7 +4759,7 @@ function SettingsPanel({
                           type: e.target.value,
                           kind: undefined,
                           local: false,
-                          url: e.target.value === "hc_atom" ? "https://ai-aigc.fzyinghe.com" : e.target.value === "runninghub" ? "https://www.runninghub.ai" : "https://ark.cn-beijing.volces.com/api/v3",
+                          url: e.target.value === "hc_atom" ? "https://api-aigc.fzyinghe.com" : e.target.value === "runninghub" ? "https://www.runninghub.ai" : "https://ark.cn-beijing.volces.com/api/v3",
                           models: p.models || { text: "", image: "", video: "" },
                         }
                       : e.target.value === "volcengine_speech"
@@ -5093,7 +5093,7 @@ function SettingsPanel({
                   id: id(),
                   name: "幻场 AI",
                   type: "hc_atom",
-                  url: "https://ai-aigc.fzyinghe.com",
+                  url: "https://api-aigc.fzyinghe.com",
                   local: false,
                   models: { text: "", image: "", video: "" },
                   parameters: {
