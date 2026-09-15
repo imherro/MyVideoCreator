@@ -3475,7 +3475,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               })()}
             {data.kind === "video" &&
               config.providers.find((p: Any) => p.id === data.provider)
-                ?.type === "volcengine_ark" && (
+                ?.type && ["volcengine_ark", "runninghub"].includes(config.providers.find((p: Any) => p.id === data.provider)?.type) && (
                 <label>
                   尾帧（可选，首尾帧视频）
                   <select
@@ -4541,7 +4541,7 @@ function SettingsPanel({
         [current.id]: { ...checks[current.id], [changedKind]: undefined },
       }));
     }
-    if (["volcengine_ark", "volcengine_speech", "hc_atom"].includes(current?.type) && ("api_key" in patch || "url" in patch)) {
+    if (["volcengine_ark", "volcengine_speech", "hc_atom", "runninghub"].includes(current?.type) && ("api_key" in patch || "url" in patch)) {
       setArkVerified((verified) => ({ ...verified, [current.id]: false }));
       setArkCatalogs((catalogs) => ({ ...catalogs, [current.id]: [] }));
       setArkChecks((checks) => ({ ...checks, [current.id]: {} }));
@@ -4754,12 +4754,12 @@ function SettingsPanel({
                 onChange={(e) =>
                   patchProvider(
                     i,
-                    ["volcengine_ark", "hc_atom"].includes(e.target.value)
+                    ["volcengine_ark", "hc_atom", "runninghub"].includes(e.target.value)
                       ? {
                           type: e.target.value,
                           kind: undefined,
                           local: false,
-                          url: e.target.value === "hc_atom" ? "https://ai-aigc.fzyinghe.com" : "https://ark.cn-beijing.volces.com/api/v3",
+                          url: e.target.value === "hc_atom" ? "https://ai-aigc.fzyinghe.com" : e.target.value === "runninghub" ? "https://www.runninghub.ai" : "https://ark.cn-beijing.volces.com/api/v3",
                           models: p.models || { text: "", image: "", video: "" },
                         }
                       : e.target.value === "volcengine_speech"
@@ -4771,7 +4771,7 @@ function SettingsPanel({
                             model: p.model || "zh_female_vv_uranus_bigtts",
                             resource_id: p.resource_id || "seed-tts-2.0",
                           }
-                      : ["volcengine_ark", "hc_atom"].includes(p.type)
+                      : ["volcengine_ark", "hc_atom", "runninghub"].includes(p.type)
                         ? { type: e.target.value, kind: "text", model: p.models?.text || "", models: undefined }
                         : { type: e.target.value },
                   )
@@ -4785,10 +4785,11 @@ function SettingsPanel({
                 <option value="replicate">Replicate 模型平台</option>
                 <option value="volcengine_ark">火山方舟（文本 / 图像 / 视频）</option>
                 <option value="hc_atom">幻场 AI / HC-ATOM（文本 / 图像 / 视频）</option>
+                <option value="runninghub">RunningHub（文本 / 图像 / 视频）</option>
                 <option value="volcengine_speech">豆包语音（角色固定音色）</option>
               </select>
             </label>
-            {["volcengine_ark", "hc_atom"].includes(p.type) ? (
+            {["volcengine_ark", "hc_atom", "runninghub"].includes(p.type) ? (
               <label>用途<input value="统一：文本、图像、视频" readOnly /></label>
             ) : p.type === "volcengine_speech" ? (
               <label>用途<input value="角色对白与旁白" readOnly /></label>
@@ -4814,7 +4815,7 @@ function SettingsPanel({
               placeholder="http://127.0.0.1:8188"
             />
           </label>
-          {!["volcengine_ark", "hc_atom"].includes(p.type) && (
+          {!["volcengine_ark", "hc_atom", "runninghub"].includes(p.type) && (
             <label>
               {p.type === "volcengine_speech" ? "默认音色 ID" : "默认模型 ID"}
               {p.type === "volcengine_speech" ? <>
@@ -4838,7 +4839,7 @@ function SettingsPanel({
               onChange={(e) => patchProvider(i, { api_key: e.target.value })}
             />
           </label>
-          {["volcengine_ark", "hc_atom"].includes(p.type) ? (
+          {["volcengine_ark", "hc_atom", "runninghub"].includes(p.type) ? (
             <>
               <ArkProviderSettings
                 provider={p}
@@ -4849,9 +4850,9 @@ function SettingsPanel({
                 onPatch={(patch) => patchProvider(i, patch)}
                 onVerify={() => void verifyArk(p.id)}
                 onTest={(kind) => void testArkModel(p.id, kind)}
-                serviceName={p.type === "hc_atom" ? "幻场 AI" : "火山方舟"}
+                serviceName={p.type === "hc_atom" ? "幻场 AI" : p.type === "runninghub" ? "RunningHub" : "火山方舟"}
               />
-              <p className="muted">{p.type === "hc_atom" ? "一个幻场 AI Key 统一调用文本、图片和异步视频模型；模型 ID 可从目录选择或手工填写。" : "一个 ARK API Key 统一调用豆包文本、Seedream 图片与 Seedance 视频。"}</p>
+              <p className="muted">{p.type === "hc_atom" ? "一个幻场 AI Key 统一调用文本、图片和异步视频模型；模型 ID 可从目录选择或手工填写。" : p.type === "runninghub" ? "一个 RunningHub Enterprise-Shared Key 统一调用文本、Seedream 5 Pro 图片与 Seedance 2.5 视频；本地参考素材会先安全上传。" : "一个 ARK API Key 统一调用豆包文本、Seedream 图片与 Seedance 视频。"}</p>
             </>
           ) : p.type === "volcengine_speech" ? (
             <>
@@ -5096,6 +5097,34 @@ function SettingsPanel({
           }
         >
           添加幻场 AI
+        </button>
+        <button
+          onClick={() =>
+            setValue({
+              ...value,
+              providers: [
+                ...value.providers,
+                {
+                  id: id(),
+                  name: "RunningHub",
+                  type: "runninghub",
+                  url: "https://www.runninghub.ai",
+                  local: false,
+                  models: {
+                    text: "bytedance/doubao-seed-2.1-pro",
+                    image: "seedream-v5-pro",
+                    video: "bytedance/seedance-2.5-token",
+                  },
+                  parameters: {
+                    image: { size: "1024x1024", resolution: "2k", outputFormat: "jpeg", max_references: 10 },
+                    video: { duration: 5, resolution: "720p", ratio: "16:9", generateAudio: true },
+                  },
+                },
+              ],
+            })
+          }
+        >
+          添加 RunningHub
         </button>
         <button
           onClick={() =>

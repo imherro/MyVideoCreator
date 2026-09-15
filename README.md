@@ -67,6 +67,8 @@ Replicate 模型平台也可作为云端服务添加。它能运行平台提供�
 
 火山方舟作为统一 Provider 接入：在“模型与服务”中点击“添加火山方舟”，保存一次 ARK API Key，再点击“保存并验证 Key”。服务端通过方舟 `/models` 验证 Key 并读取模型目录，不提交生成任务；验证成功后，文本、图片和视频模型均可从目录选择，也可手动填写自定义接入点 ID。每类模型旁的“检测”用于确认所选 ID 是否出现在方舟目录中，不产生图片或视频费用；目录存在不代表账号已经开通该模型，实际权限以首次生成结果为准。默认地址为 `https://ark.cn-beijing.volces.com/api/v3`。文本与分镜复用 OpenAI-compatible `/chat/completions`；Seedream 文生图及单张/多张参考图调用 `/images/generations`，参考图由服务端从当前项目素材库读取并转换为 data URI；视频统一使用 `doubao-seedance-2-5-260628` 调用 `/contents/generations/tasks`，Seedance 2.0 已从目录隐藏且禁止新任务提交。首尾帧分别以 `first_frame` / `last_frame` 角色发送，task id 会立即持久化，服务中断后只恢复查询原任务。启动时会把 Provider、项目和制作层仍在使用的 Seedance 2.0 配置迁移到 2.5，历史任务快照保持原样。媒体结果仍下载并登记到当前项目素材库。浏览器读取配置时只获得 `api_key_set`，不会取得完整 Key。当前尚不向 Seedance 发送一般参考图、参考音频或参考视频。
 
+RunningHub 也作为统一 Provider 接入：在“模型与服务”中点击“添加 RunningHub”，填写 Enterprise-Shared API Key 后保存并验证。验证读取账号类型和实时 LLM 目录，不发起付费生成；文本默认使用 RunningHub 的 OpenAI-compatible LLM 接口。图片配置 `seedream-v5-pro` 时会按有无参考图自动选择文生图或图生图端点，最多上传 10 张参考图；视频配置 Seedance 2.5 Token 时会按无参考、首帧、首尾帧、多图或固定对白音频参考自动选择对应端点。所有媒体任务在取得 taskId 后持久化并轮询 `/openapi/v2/query`，结果下载到项目素材库。RunningHub 当前未提供这些 Model API 任务的统一取消端点，因此取消只会停止本地等待，远端任务可能继续计费。
+
 角色跨镜头音色通过 Film Bible 的“角色固定音色”管理。先在“设置 → 模型服务”添加“豆包语音”，填写独立的 Speech API Key、Resource ID 和默认音色 ID；配置检查只验证字段，不产生费用。随后在角色资产卡保存声音设定、生成试听并锁定版本，再批量生成本集结构化对白。对白音频保存为项目人声素材，初始剪辑会建立 `A1 · 角色对白` 轨；镜头已有固定对白时会关闭该视频片段的原始音轨，避免双重人声。豆包语音凭证与火山方舟 ARK API Key 分开管理，默认 V3 SSE 地址为 `https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse`。
 
 ## 项目 Schema 与默认模型策略

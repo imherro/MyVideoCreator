@@ -70,7 +70,7 @@ export function deriveVideoProductionRows(
     const plannedDuration = Math.max(0, Number(shot.duration || 0));
     let effectiveDuration = plannedDuration;
     let dialogueReadinessReason = "";
-    if (provider?.type === "volcengine_ark") {
+    if (["volcengine_ark", "runninghub"].includes(provider?.type)) {
       for (const dialogue of dialogues) {
         const profile = profiles[dialogue.characterCardId] || {};
         if (profile.status !== "locked" || !String(profile.voiceType || "").trim()) {

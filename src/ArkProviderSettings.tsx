@@ -95,7 +95,7 @@ export function ArkProviderSettings({
       {modelField("image")}
       {modelField("video")}
       <label>
-        Seedream 参考图上限
+        图片模型参考图上限
         <input
           type="number"
           min="1"
@@ -113,7 +113,7 @@ export function ArkProviderSettings({
             })
           }
         />
-        <small>按当前图片模型能力设置，最多 10 张；图片会在服务端编码后发送。</small>
+        <small>按当前图片模型能力设置，最多 10 张；图片会由服务端安全上传或编码后发送。</small>
       </label>
     </>
   );

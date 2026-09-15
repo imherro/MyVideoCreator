@@ -189,6 +189,9 @@ class Worker:
             elif provider['type']=='hc_atom':
                 from .providers.hc_atom import model_for, text_base_url
                 provider={**provider,'url':text_base_url(provider),'model':model_for(provider,'text')}
+            elif provider['type']=='runninghub':
+                from .providers.runninghub import model_for, text_base_url
+                provider={**provider,'url':text_base_url(provider),'model':model_for(provider,'text')}
             try: return self.text(job,provider)
             finally:
                 if provider_id=='local': runtime.schedule_idle()
@@ -208,6 +211,9 @@ class Worker:
             return execute(self,job,provider)
         if provider['type']=='hc_atom':
             from .providers.hc_atom import execute
+            return execute(self,job,provider)
+        if provider['type']=='runninghub':
+            from .providers.runninghub import execute
             return execute(self,job,provider)
         raise ValueError('所选服务不支持此任务类型，请更换模型服务。')
 

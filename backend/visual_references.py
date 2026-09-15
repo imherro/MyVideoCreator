@@ -26,6 +26,9 @@ def resolve_image_model_capabilities(provider, model_id):
     elif provider_type == 'hc_atom':
         from .providers.hc_atom import list_models
         models = list_models(provider)
+    elif provider_type == 'runninghub':
+        from .providers.runninghub import list_models
+        models = list_models(provider)
     elif provider_type == 'maestro':
         from .capabilities import maestro_model
         headers = {'Authorization': 'Bearer ' + provider['api_key']} if provider.get('api_key') else {}
