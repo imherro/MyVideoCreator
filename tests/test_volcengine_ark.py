@@ -175,6 +175,8 @@ def test_seedance_25_short_shot_uses_provider_minimum_without_changing_plan():
 
 def test_seedance_25_sends_locked_dialogue_as_audio_reference(monkeypatch):
     item=stored_job('video',provider())
+    frame_id,_=add_image_asset(item,'对白镜头首帧',(24,48,96))
+    item['input']['asset_ids']=[frame_id]
     item['input']['dialogue_audio']=[{'assetId':'voice-1','start':.3,'duration':1.2}]
     item['input']['dialogue_audio_asset_ids']=['voice-1']
     item['input']['dialogue_audio_mode']='seedance_reference'
@@ -193,10 +195,13 @@ def test_seedance_25_sends_locked_dialogue_as_audio_reference(monkeypatch):
     body=submitted[0]
     assert body['generate_audio'] is True
     assert body['omni_reference_task_type']=='reference'
+    assert body['ratio']=='16:9'
+    assert body['content'][1]['role']=='reference_image'
+    assert all(part.get('role') not in ('first_frame','last_frame') for part in body['content'])
     assert body['content'][-1]=={
         'type':'audio_url','audio_url':{'url':'data:audio/mpeg;base64,ZmFrZQ=='},'role':'reference_audio',
     }
-    assert '@音频1' in body['content'][0]['text']
+    assert '@图片1' in body['content'][0]['text'] and '@音频1' in body['content'][0]['text']
 
 
 def test_seedance_dialogue_reference_preserves_timing_in_one_audio_file(tmp_path):

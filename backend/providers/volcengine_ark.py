@@ -388,10 +388,16 @@ def _dialogue_reference_audio(job, duration):
         output.unlink(missing_ok=True)
 
 
-def _dialogue_reference_prompt(prompt):
+def _dialogue_reference_prompt(prompt, image_count=0):
+    visual = ''
+    if image_count:
+        visual = '使用@图片1作为镜头起始构图、角色外观和场景视觉参考；'
+        if image_count > 1:
+            visual += '使用@图片2作为镜头结束构图参考；'
     return (
         str(prompt).rstrip()
-        + '\n\n[Seedance 音频参考]\n'
+        + '\n\n[Seedance 全模态参考]\n'
+        + visual
         + '严格使用@音频1作为本镜头对白的音色、情绪、语速、节奏和开口时序参考；'
         + '角色按对白内容表演并准确匹配口型，不得改词，不得增加额外对白。'
     )
@@ -426,7 +432,10 @@ def generate_video(worker, job, provider):
                 content.append({
                     'type':'image_url',
                     'image_url':{'url':first['url']},
-                    'role':'first_frame',
+                    # Ark rejects first/last-frame roles mixed with reference
+                    # audio. In full-modal mode the same still is a visual
+                    # reference and the prompt asks for it as the opening shot.
+                    'role':'reference_image' if dialogue_reference else 'first_frame',
                 })
                 if job['input'].get('end_asset_id'):
                     tail=common.assets_for({**job,'input':{'asset_ids':[job['input']['end_asset_id']]}})[0]
@@ -436,7 +445,7 @@ def generate_video(worker, job, provider):
                     content.append({
                         'type':'image_url',
                         'image_url':{'url':last['url']},
-                        'role':'last_frame',
+                        'role':'reference_image' if dialogue_reference else 'last_frame',
                     })
             requested_duration = int(params.get('duration', 5))
             # Project shots may be shorter than Ark's generation window. Keep
@@ -448,7 +457,9 @@ def generate_video(worker, job, provider):
             )
             if dialogue_reference:
                 worker.progress(job, '编排固定对白音频参考')
-                prompt = _dialogue_reference_prompt(prompt)
+                prompt = _dialogue_reference_prompt(
+                    prompt, sum(item.get('role') == 'reference_image' for item in content),
+                )
                 content.append({
                     'type': 'audio_url',
                     'audio_url': {'url': _dialogue_reference_audio(job, submission_duration)},
@@ -467,7 +478,7 @@ def generate_video(worker, job, provider):
                 body['omni_reference_task_type'] = 'reference'
             # Seedance derives image-to-video output ratio from the first frame
             # and rejects an explicit ratio for first-frame/first-last-frame jobs.
-            if not assets:
+            if not assets or dialogue_reference:
                 body['ratio'] = str(job['input'].get('ratio') or params.get('ratio') or '16:9')
             if worker.cancelled(job):
                 raise InterruptedError()
