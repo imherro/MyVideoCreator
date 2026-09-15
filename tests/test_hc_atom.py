@@ -56,13 +56,18 @@ def test_catalog_is_read_only_and_classifies_unified_models(monkeypatch):
         assert request.headers['authorization'] == 'Bearer yh-secret'
         return httpx.Response(200, json={'data': [
             {'id': 'qwen-text'}, {'id': 'flux-image'}, {'id': 'kling-video'}, {'id': 'embedding-v1'},
+            {'id': 'wan2.7-i2v'}, {'id': 'happyhorse-1.1-r2v'}, {'id': 'MiniMax-H3'},
+            {'id': 'wan2.5-i2i-preview'}, {'id': 'tencent-mps-superres'},
         ]})
 
     monkeypatch.setattr(hc_atom.httpx, 'Client', lambda **kw: original(**kw, transport=httpx.MockTransport(handle)))
     models = hc_atom.list_models(provider())
-    assert [(row['id'], row['kind']) for row in models] == [
-        ('flux-image', 'image'), ('kling-video', 'video'), ('qwen-text', 'text'),
-    ]
+    classified = {row['id']: row['kind'] for row in models}
+    assert classified == {
+        'flux-image': 'image', 'happyhorse-1.1-r2v': 'video', 'kling-video': 'video',
+        'MiniMax-H3': 'video', 'qwen-text': 'text', 'wan2.7-i2v': 'video',
+        'wan2.5-i2i-preview': 'image',
+    }
 
 
 def test_text_reuses_openai_compatible_streaming_endpoint(monkeypatch):
@@ -126,4 +131,3 @@ def test_reference_image_uses_async_task_protocol(monkeypatch):
     worker = Worker()
     worker.halt = NoWait()
     assert hc_atom.generate_image(worker, item, provider())['assets'][0]['id'] == 'image-asset'
-

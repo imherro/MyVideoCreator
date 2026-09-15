@@ -55,14 +55,17 @@ def _catalog_kind(model_id, provider, item=None):
     domain = str(item.get('domain') or item.get('type') or '').lower()
     lowered = model_id.lower()
     if 'video/generation' in path or 'video' in domain or any(
-        token in lowered for token in ('video', 'seedance', 'kling', 'hailuo', 'veo', 'wan2.6-v')
+        token in lowered for token in (
+            'video', 'seedance', 'kling', 'hailuo', 'veo', 'happyhorse', 'minimax-h3',
+            '-t2v', '-i2v', '-r2v', 'videoedit',
+        )
     ):
         return 'video'
     if 'image' in path or 'image' in domain or any(
-        token in lowered for token in ('image', 'seedream', 'flux', 'midjourney', 'wan2.6-t2i', 'wan2.7')
+        token in lowered for token in ('image', 'seedream', 'flux', 'midjourney', '-t2i', '-i2i', 'wan2.7')
     ):
         return 'image'
-    if any(token in lowered for token in ('embedding', 'rerank', 'tts', 'speech', 'asr', 'music')):
+    if any(token in lowered for token in ('embedding', 'rerank', 'tts', 'speech', 'asr', 'music', 'superres')):
         return None
     return 'text'
 
