@@ -18,6 +18,7 @@ export function ArkProviderSettings({
   onPatch,
   onVerify,
   onTest,
+  serviceName = "火山方舟",
 }: {
   provider: Value;
   catalog: Value[];
@@ -27,6 +28,7 @@ export function ArkProviderSettings({
   onPatch: (patch: Value) => void;
   onVerify: () => void;
   onTest: (kind: ArkKind) => void;
+  serviceName?: string;
 }) {
   function modelField(kind: ArkKind) {
     const options = catalog.filter((model) => model.kind === kind);
@@ -65,7 +67,7 @@ export function ArkProviderSettings({
         <small>
           {verified
             ? options.length
-              ? `方舟目录中有 ${options.length} 个；也可以直接填写自定义接入点 ID。`
+              ? `${serviceName} 目录中有 ${options.length} 个；也可以直接填写自定义模型 ID。`
               : "目录中没有自动识别到此类模型，可以手动填写接入点 ID。"
             : "请先保存并验证 Key。"}
         </small>

@@ -186,6 +186,9 @@ class Worker:
             if provider['type']=='volcengine_ark':
                 from .providers.volcengine_ark import model_for
                 provider={**provider,'model':model_for(provider,'text')}
+            elif provider['type']=='hc_atom':
+                from .providers.hc_atom import model_for, text_base_url
+                provider={**provider,'url':text_base_url(provider),'model':model_for(provider,'text')}
             try: return self.text(job,provider)
             finally:
                 if provider_id=='local': runtime.schedule_idle()
@@ -202,6 +205,9 @@ class Worker:
         if kind=='video' and provider['type']=='video_api': return self.video_api(job,provider)
         if provider['type']=='volcengine_ark':
             from .providers.volcengine_ark import execute
+            return execute(self,job,provider)
+        if provider['type']=='hc_atom':
+            from .providers.hc_atom import execute
             return execute(self,job,provider)
         raise ValueError('所选服务不支持此任务类型，请更换模型服务。')
 

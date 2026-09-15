@@ -655,7 +655,7 @@ async def update_settings(request:Request):
         old={p['id']:p for p in s.get_setting('providers',[])}
         for p in body['providers']:
             masked_key_set=bool(p.pop('api_key_set',False))
-            if not p.get('id') or p.get('type') not in ('openai','comfy','maestro','video_api','minimax','replicate','volcengine_ark','volcengine_speech'): raise ValueError('模型服务配置无效')
+            if not p.get('id') or p.get('type') not in ('openai','comfy','maestro','video_api','minimax','replicate','volcengine_ark','volcengine_speech','hc_atom'): raise ValueError('模型服务配置无效')
             if p.get('type')=='volcengine_ark':
                 from .providers.volcengine_ark import DEFAULT_BASE_URL
                 p['url']=p.get('url') or DEFAULT_BASE_URL
@@ -670,6 +670,12 @@ async def update_settings(request:Request):
                 p['local']=False
                 p['kind']='audio'
                 p['resource_id']=str(p.get('resource_id') or DEFAULT_RESOURCE_ID).strip()
+            if p.get('type')=='hc_atom':
+                from .providers.hc_atom import DEFAULT_BASE_URL
+                p['url']=p.get('url') or DEFAULT_BASE_URL
+                p['local']=False
+                p.pop('kind',None)
+                if not isinstance(p.get('models'),dict):raise ValueError('幻场 AI 模型配置无效')
             url=p.get('url','')
             if urlparse(url).scheme not in ('http','https') or urlparse(url).username: raise ValueError('请输入 HTTP(S) 服务地址')
             # A masked settings round-trip may omit the key or send an empty
@@ -704,6 +710,12 @@ def provider_models(provider_id:str,kind:str|None=None):
         if kind in ('text','image','video'):
             models=[model for model in models if model['kind']==kind]
         return {'models':models,'status':'ready'}
+    if provider['type']=='hc_atom':
+        from .providers.hc_atom import list_models
+        models=list_models(provider)
+        if kind in ('text','image','video'):
+            models=[model for model in models if model['kind']==kind]
+        return {'models':models,'status':'ready'}
     if provider['type']=='maestro' and provider.get('local') and provider.get('auto_start') and url=='http://127.0.0.1:7870':
         state=runtime.start_maestro()
         if state['status']=='starting':
@@ -732,17 +744,25 @@ def verify_provider(provider_id:str):
     if provider and provider.get('type')=='volcengine_speech':
         from .providers.volcengine_speech import verify
         return verify(provider)
-    if not provider or provider.get('type')!='volcengine_ark':raise ValueError('火山方舟服务配置不存在')
-    from .providers.volcengine_ark import list_models
+    if not provider or provider.get('type') not in ('volcengine_ark','hc_atom'):raise ValueError('统一模型服务配置不存在')
+    if provider.get('type')=='hc_atom':
+        from .providers.hc_atom import list_models
+        service='幻场 AI'
+    else:
+        from .providers.volcengine_ark import list_models
+        service='ARK'
     models=list_models(provider)
     counts={kind:sum(model['kind']==kind for model in models) for kind in ('text','image','video')}
-    return {'status':'ready','message':f'ARK API Key 鉴权通过，读取到 {len(models)} 个适用模型','models':models,'counts':counts}
+    return {'status':'ready','message':f'{service} API Key 鉴权通过，读取到 {len(models)} 个适用模型','models':models,'counts':counts}
 
 @app.post('/api/providers/{provider_id}/test')
 def test_provider(provider_id:str,kind:str='text'):
     provider=next((p for p in s.get_setting('providers',[]) if p['id']==provider_id),None)
-    if not provider or provider.get('type')!='volcengine_ark':raise ValueError('火山方舟服务配置不存在')
-    from .providers.volcengine_ark import check_configured_model
+    if not provider or provider.get('type') not in ('volcengine_ark','hc_atom'):raise ValueError('统一模型服务配置不存在')
+    if provider.get('type')=='hc_atom':
+        from .providers.hc_atom import check_configured_model
+    else:
+        from .providers.volcengine_ark import check_configured_model
     return check_configured_model(provider,kind)
 
 class JobCreate(BaseModel):
@@ -834,7 +854,7 @@ def create_job_record(c,pid,body):
         configured={p['id']:p for p in s.get_setting('providers',[])}
         selected=configured.get(body.input['provider'])
         if not selected: raise ValueError('模型服务未配置')
-        if selected.get('type')=='volcengine_ark':
+        if selected.get('type') in ('volcengine_ark','hc_atom'):
             # Defend jobs created from settings saved by an older build.
             selected={**selected,'local':False}
         if selected.get('kind') and selected['kind']!=('text' if body.kind=='storyboard' else body.kind):raise ValueError('模型服务用途与节点不匹配，请选择适用服务')
@@ -842,6 +862,9 @@ def create_job_record(c,pid,body):
         if selected.get('type')=='volcengine_ark':
             from .providers.volcengine_ark import model_for
             if not model_for(selected,body.kind):raise ValueError('请先配置火山方舟对应类型的模型 ID')
+        if selected.get('type')=='hc_atom':
+            from .providers.hc_atom import model_for
+            if not model_for(selected,body.kind):raise ValueError('请先配置幻场 AI 对应类型的模型 ID')
     if selected and selected['type']=='minimax':
         from .minimax_video import payload
         if body.kind!='video':raise ValueError('MiniMax 原生服务仅支持视频节点')
@@ -865,6 +888,13 @@ def create_job_record(c,pid,body):
                 raise ValueError('所选火山方舟视频模型不支持尾帧控制')
         if body.kind=='image' and len(references)>max_image_references(selected):
             raise ValueError(f'当前火山方舟图片模型最多支持 {max_image_references(selected)} 张参考图，请移除多余引用')
+    if selected and selected.get('type')=='hc_atom':
+        if body.kind=='video' and len(body.input.get('asset_ids',[]))>1:
+            raise ValueError('幻场 AI 通用视频接口最多提交一张参考图')
+        if body.kind=='video' and body.input.get('end_asset_id'):
+            raise ValueError('幻场 AI 通用视频接口暂未声明尾帧协议，请清除尾帧')
+        if body.kind=='image' and len(references)>10:
+            raise ValueError('幻场 AI 图片任务最多提交 10 张参考图')
     for aid in references:
         asset=reference_asset(pid,aid)
         if body.kind in ('image','video') and asset['kind']!='image':raise ValueError('当前图像和视频适配器只接受图像参考素材')
@@ -1596,6 +1626,14 @@ async def run_workflow(pid:str,request:Request):
                 raise ValueError('使用火山方舟尾帧时必须同时保留一张首帧')
             if kind=='image' and reference_count>max_image_references(provider):
                 raise ValueError(f'当前火山方舟图片模型最多支持 {max_image_references(provider)} 张参考图，请移除多余引用')
+        if provider and provider.get('type')=='hc_atom':
+            reference_count=len(data['asset_ids'])+generated_image_parents
+            if kind=='video' and reference_count>1:
+                raise ValueError('幻场 AI 通用视频接口最多提交一张参考图')
+            if kind=='video' and data.get('end_asset_id'):
+                raise ValueError('幻场 AI 通用视频接口暂未声明尾帧协议，请清除尾帧')
+            if kind=='image' and reference_count>10:
+                raise ValueError('幻场 AI 图片任务最多提交 10 张参考图')
         if provider and provider.get('type')=='minimax':
             # Hailuo accepts exactly one initial image.  Detect multiple
             # upstream image branches before any expensive parent job starts.
@@ -1675,6 +1713,13 @@ def cancel(jid:str):
                     s.cancelled_phase(jid,'已取消本地等待，并已请求供应商取消远端任务')
                 elif remote_cancelled is False:
                     s.cancelled_phase(jid,'本地已取消；供应商可能继续生成并产生费用')
+            elif provider.get('type')=='hc_atom':
+                from .providers.hc_atom import cancel as cancel_hc
+                remote_cancelled=cancel_hc(job,provider)
+                if remote_cancelled is True:
+                    s.cancelled_phase(jid,'已取消本地等待，并已请求幻场 AI 取消远端任务')
+                elif remote_cancelled is False:
+                    s.cancelled_phase(jid,'本地已取消；幻场 AI 远端任务可能继续生成并产生费用')
     return read_job(jid)
 
 @app.post('/api/jobs/{jid}/resume')
@@ -1690,7 +1735,7 @@ def resume(jid:str):
         snapshot=c.execute('SELECT provider FROM job_private WHERE job_id=?',(jid,)).fetchone()
         provider=json.loads(snapshot['provider']) if snapshot else {}
         if job['provider_job_id']:
-            if provider.get('type') not in ('maestro','comfy','video_api','minimax','replicate','volcengine_ark'):
+            if provider.get('type') not in ('maestro','comfy','video_api','minimax','replicate','volcengine_ark','hc_atom'):
                 raise HTTPException(409,'此任务的上游服务不支持恢复查询，请核对服务配置')
             phase='恢复查询已有上游任务'
         else:

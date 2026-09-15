@@ -683,6 +683,38 @@ def test_volcengine_ark_unified_settings_and_connection(authenticated,monkeypatc
     assert all(call==('GET','https://ark.cn-beijing.volces.com/api/v3/models','Bearer ark-secret') for call in calls)
 
 
+def test_hc_atom_unified_settings_and_connection(authenticated,monkeypatch):
+    import httpx
+    from backend.providers import hc_atom
+    c=authenticated
+    previous=s.get_setting('providers',[])
+    provider={
+        'id':'hc','name':'幻场 AI','type':'hc_atom','local':True,
+        'url':'https://ai-aigc.fzyinghe.com','api_key':'yh-secret',
+        'models':{'text':'qwen-text','image':'flux-image','video':'kling-video'},
+    }
+    try:
+        saved=c.put('/api/settings',json={'providers':[provider]})
+        assert saved.status_code==200,saved.text
+        public=saved.json()['providers'][0]
+        assert public['type']=='hc_atom' and public['local'] is False
+        assert public['api_key_set'] is True and 'api_key' not in public
+        original=httpx.Client
+        def handle(request):
+            assert request.method=='GET' and request.url.path=='/v1/models'
+            assert request.headers['authorization']=='Bearer yh-secret'
+            return httpx.Response(200,json={'data':[
+                {'id':'qwen-text'},{'id':'flux-image'},{'id':'kling-video'},
+            ]})
+        monkeypatch.setattr(hc_atom.httpx,'Client',lambda **kw:original(**kw,transport=httpx.MockTransport(handle)))
+        verified=c.post('/api/providers/hc/verify')
+        assert verified.status_code==200,verified.text
+        assert verified.json()['counts']=={'text':1,'image':1,'video':1}
+        assert c.get('/api/providers/hc/models?kind=video').json()['models'][0]['id']=='kling-video'
+    finally:
+        s.set_setting('providers',previous)
+
+
 def test_ark_cancel_rereads_handle_attached_after_initial_snapshot(authenticated,monkeypatch):
     c=authenticated;p=project(c)
     now=time.time();jid='ark-cancel-reverse-race'

@@ -23,6 +23,9 @@ def resolve_image_model_capabilities(provider, model_id):
     if provider_type == 'volcengine_ark':
         from .providers.volcengine_ark import list_models
         models = list_models(provider)
+    elif provider_type == 'hc_atom':
+        from .providers.hc_atom import list_models
+        models = list_models(provider)
     elif provider_type == 'maestro':
         from .capabilities import maestro_model
         headers = {'Authorization': 'Bearer ' + provider['api_key']} if provider.get('api_key') else {}
