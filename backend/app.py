@@ -1314,8 +1314,10 @@ def generate_adaptation(production_id:str,body:TextGenerationCreate):
         sources=source_snapshot(c,production_id)
         if not sources:raise ValueError('请先在原著资料库提取事件，再生成改编策划')
         context=state['production_context'];format_value=context['adaptationPlan']['format']
+        episode_count = int(format_value['episodeCount'])
         prompt='''请依据原著事件生成完整改编策划。所有 sourceEventIds/sourceChapterRefs 只能使用输入中已有 ID。
-目标规格：'''+s.dumps(format_value)+'\n原著事件：\n'+s.dumps(sources)
+商业字段必须服从总集数：freeEpisodes 范围为 0–{count}；firstPaywallEpisode 范围为 1–{after}，其中 {after} 表示全剧不设付费集；每个付费卡点 episodeNo 范围为 1–{count}。
+目标规格：'''.format(count=episode_count, after=episode_count + 1)+s.dumps(format_value)+'\n原著事件：\n'+s.dumps(sources)
         job_body=JobCreate(node_id='adaptation:'+production_id,kind='text',submission_id=body.submission_id,input={
             'provider':body.provider,'model':body.model,
             'stage':'adaptation_generation','prompt':prompt,'max_tokens':12000,

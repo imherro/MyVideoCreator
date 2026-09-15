@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from backend import store as s
 from backend.app import app
 from backend.worker import Worker
+from backend.adaptation import validate_adaptation_bundle
 
 
 @pytest.fixture(scope="module")
@@ -75,6 +76,54 @@ def save_and_approve(client, production, adaptation):
     )
     assert approved.status_code == 200, approved.text
     return approved.json()
+
+
+def test_generated_plan_repairs_optional_monetization_outside_episode_range():
+    generated = {
+        'adaptationPlan': {
+            'format': {'episodeCount': 1, 'targetDuration': 15, 'ratio': '16:9', 'platform': '通用短视频'},
+            'storyCore': {'premise': '', 'theme': '', 'protagonist': '', 'goal': '', 'stakes': ''},
+            'storyArc': {'opening': '', 'development': '', 'turningPoint': '', 'climax': '', 'ending': ''},
+            'adaptationStrategy': {'audience': '', 'tone': '', 'changes': '', 'constraints': ''},
+            'sourceEventIds': [],
+        },
+        'episodePlans': [{
+            'episodeNo': 1, 'sourceChapterRefs': [], 'logline': '', 'coreConflict': '',
+            'emotionalBeat': '', 'hook': '', 'cliffhanger': '', 'paywallRole': 'none',
+            'targetDuration': 15,
+        }],
+        'monetizationPlan': {
+            'mode': 'free_then_paid', 'freeEpisodes': 8, 'firstPaywallEpisode': 4,
+            'beats': [
+                {'episodeNo': 1, 'type': 'hook', 'setup': '', 'cliffhanger': '', 'expectedEmotion': '', 'rationale': ''},
+                {'episodeNo': 3, 'type': 'paywall', 'setup': '', 'cliffhanger': '', 'expectedEmotion': '', 'rationale': ''},
+            ],
+        },
+    }
+    result = validate_adaptation_bundle(generated, generated=True)
+    assert result['monetizationPlan']['freeEpisodes'] == 1
+    assert result['monetizationPlan']['firstPaywallEpisode'] == 2
+    assert [beat['episodeNo'] for beat in result['monetizationPlan']['beats']] == [1]
+
+
+def test_manual_plan_still_rejects_invalid_first_paywall_episode():
+    manual = {
+        'adaptationPlan': {
+            'status': 'draft',
+            'format': {'episodeCount': 1, 'targetDuration': 15, 'ratio': '16:9', 'platform': '通用短视频'},
+            'storyCore': {}, 'storyArc': {}, 'adaptationStrategy': {}, 'sourceEventIds': [],
+        },
+        'episodePlans': [{
+            'episodeNo': 1, 'sourceChapterRefs': [], 'logline': '', 'coreConflict': '',
+            'emotionalBeat': '', 'hook': '', 'cliffhanger': '', 'paywallRole': 'none',
+            'targetDuration': 15, 'status': 'draft',
+        }],
+        'monetizationPlan': {
+            'mode': 'free_then_paid', 'freeEpisodes': 1, 'firstPaywallEpisode': 4, 'beats': [],
+        },
+    }
+    with pytest.raises(ValueError, match='首个付费集编号无效'):
+        validate_adaptation_bundle(manual)
 
 
 def test_60_episode_plan_and_paywall_are_canonical_editable_and_no_job_is_automatic(adaptation_client):

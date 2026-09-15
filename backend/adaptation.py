@@ -208,9 +208,18 @@ def validate_adaptation_bundle(value, *, generated=False):
     free_episodes = money['freeEpisodes']
     first_paywall = money['firstPaywallEpisode']
     if isinstance(free_episodes, bool) or not isinstance(free_episodes, int) or not 0 <= free_episodes <= episode_count:
-        raise ValueError('免费集数无效')
+        if generated and isinstance(free_episodes, int) and not isinstance(free_episodes, bool):
+            free_episodes = min(max(0, free_episodes), episode_count)
+        else:
+            raise ValueError('免费集数无效')
     if isinstance(first_paywall, bool) or not isinstance(first_paywall, int) or not 1 <= first_paywall <= episode_count + 1:
-        raise ValueError('首个付费集编号无效')
+        if generated and isinstance(first_paywall, int) and not isinstance(first_paywall, bool):
+            # Monetization is advisory output. Do not discard an otherwise
+            # valid story plan because the model chose an episode outside the
+            # requested format. episode_count + 1 explicitly means no paywall.
+            first_paywall = min(max(1, first_paywall), episode_count + 1)
+        else:
+            raise ValueError('首个付费集编号无效')
     beats = money['beats']
     if not isinstance(beats, list):
         raise ValueError('付费卡点 beats 必须是数组')
@@ -221,6 +230,10 @@ def validate_adaptation_bundle(value, *, generated=False):
             raise ValueError('付费卡点字段不完整或包含未知字段')
         episode_no = beat['episodeNo']
         if isinstance(episode_no, bool) or not isinstance(episode_no, int) or not 1 <= episode_no <= episode_count:
+            if generated:
+                # A beat outside the requested series has no meaningful place
+                # in the plan, so omit only that optional commercial note.
+                continue
             raise ValueError('付费卡点集数无效')
         normalized_beats.append({
             'episodeNo': episode_no,
@@ -514,11 +527,11 @@ ADAPTATION_SCHEMA = {
         'monetizationPlan': {'type': 'object', 'additionalProperties': False,
             'required': ['mode','freeEpisodes','firstPaywallEpisode','beats'],
             'properties': {
-                'mode': {'type': 'string'}, 'freeEpisodes': {'type': 'integer'},
-                'firstPaywallEpisode': {'type': 'integer'},
+                'mode': {'type': 'string'}, 'freeEpisodes': {'type': 'integer', 'minimum': 0},
+                'firstPaywallEpisode': {'type': 'integer', 'minimum': 1},
                 'beats': {'type': 'array', 'items': {'type': 'object', 'additionalProperties': False,
                     'required': ['episodeNo','type','setup','cliffhanger','expectedEmotion','rationale'],
-                    'properties': {'episodeNo': {'type': 'integer'}, **{key: {'type': 'string'} for key in ('type','setup','cliffhanger','expectedEmotion','rationale')}}}},
+                    'properties': {'episodeNo': {'type': 'integer', 'minimum': 1}, **{key: {'type': 'string'} for key in ('type','setup','cliffhanger','expectedEmotion','rationale')}}}},
             }},
     },
 }
