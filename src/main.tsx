@@ -160,6 +160,7 @@ import { AnYingMark } from "./app/AnYingMark";
 import { GlobalNav, type GlobalPanel } from "./app/GlobalNav";
 import { planGlobalPanelAction } from "./app/globalNavigation";
 import { WorkflowStageNav } from "./app/WorkflowStageNav";
+import { readApiErrorMessage } from "./apiResponse";
 import { WorkflowGuideBanner } from "./app/WorkflowGuideBanner";
 import { deriveWorkflowGuide } from "./app/workflowGuide";
 import {
@@ -314,14 +315,9 @@ const api = async (path: string, options: RequestInit = {}) => {
           : { "Content-Type": "application/json", ...options.headers },
     });
     if (!r.ok) {
-      let error;
-      try {
-        error = (await r.json()).detail;
-      } catch {
-        error = await r.text();
-      }
+      const error = await readApiErrorMessage(r);
       throw Object.assign(
-        new Error(typeof error === "string" ? error : JSON.stringify(error)),
+        new Error(error),
         { kind: "api", status: r.status, url: requestUrl },
       );
     }
