@@ -3813,7 +3813,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             )
               ? panel === "filmBible"
                 ? "film-bible-wide"
-                : "wide"
+                : panel === "settings"
+                  ? "settings-wide"
+                  : "wide"
               : "")
           }
         >
@@ -4573,6 +4575,10 @@ function SettingsPanel({
     [arkCatalogs, setArkCatalogs] = useState<Record<string, Any[]>>({}),
     [arkVerified, setArkVerified] = useState<Record<string, boolean>>({}),
     [arkChecks, setArkChecks] = useState<Record<string, Record<string, Any>>>({});
+  const cloudProviders = (value.providers || []).filter((provider: Any) => !provider.local);
+  const activeProviderId = cloudProviders.some((provider: Any) => provider.id === openProviderId)
+    ? openProviderId
+    : cloudProviders[0]?.id || "";
   function patchProvider(index: number, patch: Any) {
     const current = value.providers[index];
     const changedKind = patch.changed_model_kind;
@@ -4691,6 +4697,37 @@ function SettingsPanel({
         内置推理基于 Maestro /
         WanGP，供个人非商业学习使用。推理代码、环境和模型路径均在本项目内。
       </p>
+      <div className="local-provider-heading">
+        <div><h3>本地模型服务</h3><p className="muted">管理本机或局域网内的文本、图像和视频推理端点。</p></div>
+        <div className="local-provider-actions">
+          {!value.providers.some((provider: Any) => provider.type === "maestro") && <button onClick={() => setValue({
+            ...value,
+            providers: [...value.providers, { id: id(), name: "Maestro 图像", type: "maestro", url: "http://127.0.0.1:7860", local: true, kind: "image", model: "" }],
+          })}>连接 Maestro</button>}
+          <button onClick={() => setValue({
+            ...value,
+            providers: [...value.providers, { id: id(), name: "本地模型服务", type: "openai", url: "http://127.0.0.1:8080/v1", local: true, kind: "text", model: "" }],
+          })}><Plus size={14}/>添加本地服务</button>
+        </div>
+      </div>
+      <div className="local-provider-list">
+        {value.providers.map((provider: Any, index: number) => provider.local ? (
+          <article key={provider.id} className="local-provider-card">
+            <div className="field-heading">
+              <input aria-label="本地服务名称" value={provider.name} onChange={(event) => patchProvider(index, { name: event.target.value })}/>
+              <button className="icon-button" title="移除本地服务" onClick={() => setValue({ ...value, providers: value.providers.filter((_: Any, itemIndex: number) => itemIndex !== index) })}><X size={15}/></button>
+            </div>
+            <div className="two-fields">
+              <label>接口类型<select value={provider.type} onChange={(event) => patchProvider(index, { type: event.target.value })}><option value="openai">OpenAI 兼容</option><option value="maestro">Maestro / WanGP</option><option value="comfy">ComfyUI</option><option value="video_api">异步视频网关</option></select></label>
+              <label>用途<select value={provider.kind || "text"} onChange={(event) => patchProvider(index, { kind: event.target.value })}><option value="text">文本</option><option value="image">图像</option><option value="video">视频</option></select></label>
+            </div>
+            <label>服务地址<input value={provider.url || ""} onChange={(event) => patchProvider(index, { url: event.target.value })}/></label>
+            <label>默认模型 ID<input value={provider.model || ""} onChange={(event) => patchProvider(index, { model: event.target.value })}/></label>
+            {provider.type === "comfy" && <label>API 工作流 JSON<textarea className="code-input compact" defaultValue={JSON.stringify(provider.workflow || {}, null, 2)} onBlur={(event) => { try { patchProvider(index, { workflow: JSON.parse(event.target.value) }); } catch { onError(new Error("工作流 JSON 格式不正确")); } }}/></label>}
+          </article>
+        ) : null)}
+        {!value.providers.some((provider: Any) => provider.local) && <p className="muted local-provider-empty">尚未配置本地模型服务；云端模型仍可正常使用。</p>}
+      </div>
       <h3>默认模型组件</h3>
       {system.inventory?.models?.map((group: Any) => (
         <details className="model-inventory" key={group.kind}>
@@ -4772,17 +4809,24 @@ function SettingsPanel({
       </section>}
       {settingsTab === "providers" && <section className="settings-section">
       <h3>模型服务</h3>
-      <p className="muted">每张卡片对应一个供应商。先填写 Key 并验证，再为文本、图片、视频或声音圈选系统可用模型；项目只能从这些模型中选择。</p>
-      {value.providers.map((p: Any, i: number) => (
-        <details className="provider-card" key={p.id} open={openProviderId === p.id} onToggle={(event) => {
-          const opened = event.currentTarget.open;
-          if (opened && openProviderId !== p.id) setOpenProviderId(p.id);
-          if (!opened && openProviderId === p.id) setOpenProviderId("");
-        }}>
-          <summary className="provider-summary">
+      <p className="muted">从左侧选择云端供应商，在右侧分别维护连接凭证和项目可用模型。本地端点已移到“本地运行设置”。</p>
+      <div className="provider-workbench">
+        <nav className="provider-master-list" aria-label="云端供应商">
+          {cloudProviders.map((provider: Any) => <button key={provider.id} className={activeProviderId === provider.id ? "active" : ""} onClick={() => setOpenProviderId(provider.id)}>
+            <span><b>{provider.name || "未命名供应商"}</b><small>{provider.type}</small></span>
+            <em>{Object.values(provider.enabled_models || {}).flat().length || (provider.model || Object.values(provider.models || {}).filter(Boolean).length) ? "已配置" : "待配置"}</em>
+          </button>)}
+          {!cloudProviders.length && <p>还没有云端供应商</p>}
+        </nav>
+        <div className="provider-detail-pane">
+      {value.providers.map((p: Any, i: number) => !p.local && p.id === activeProviderId ? (
+        <div className="provider-card provider-detail" key={p.id}>
+          <header className="provider-summary">
             <span><b>{p.name || "未命名供应商"}</b><small>{p.type} · {p.local ? "本地" : "云端"}</small></span>
             <em>{Object.values(p.enabled_models || {}).flat().length || (p.model || Object.values(p.models || {}).filter(Boolean).length) ? "已配置" : "待配置"}</em>
-          </summary>
+          </header>
+          <section className="provider-config-block provider-connection-card">
+          <h4>连接与用途</h4>
           <div className="field-heading">
             <input
               aria-label="服务名称"
@@ -4875,18 +4919,6 @@ function SettingsPanel({
               placeholder="http://127.0.0.1:8188"
             />
           </label>
-          {!["volcengine_ark", "hc_atom", "runninghub"].includes(p.type) && (
-            <label>
-              {p.type === "volcengine_speech" ? "默认音色 ID" : "默认模型 ID"}
-              {p.type === "volcengine_speech" ? <>
-                <select value={catalogVoice(p.model || "")?.id || CUSTOM_VOICE_ID} onChange={(e)=>patchProvider(i,{model:e.target.value === CUSTOM_VOICE_ID ? "" : e.target.value})}>
-                  {[...new Set(DOUBAO_TTS2_VOICES.map((item)=>item.category))].map((category)=><optgroup key={category} label={category}>{DOUBAO_TTS2_VOICES.filter((item)=>item.category===category).map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</optgroup>)}
-                  <option value={CUSTOM_VOICE_ID}>自定义 / 声音复刻 ID…</option>
-                </select>
-                {!catalogVoice(p.model || "") && <input value={p.model || ""} placeholder="粘贴自定义 Speaker ID" onChange={(e)=>patchProvider(i,{model:e.target.value})}/>}
-              </> : <input value={p.model || ""} onChange={(e) => patchProvider(i, { model: e.target.value })}/>}
-            </label>
-          )}
           <label>
             API Key
             <input
@@ -4899,6 +4931,21 @@ function SettingsPanel({
               onChange={(e) => patchProvider(i, { api_key: e.target.value })}
             />
           </label>
+          </section>
+          <section className="provider-config-block provider-model-card">
+          <h4>可用模型与高级参数</h4>
+          {!["volcengine_ark", "hc_atom", "runninghub"].includes(p.type) && (
+            <label>
+              {p.type === "volcengine_speech" ? "默认音色 ID" : "默认模型 ID"}
+              {p.type === "volcengine_speech" ? <>
+                <select value={catalogVoice(p.model || "")?.id || CUSTOM_VOICE_ID} onChange={(e)=>patchProvider(i,{model:e.target.value === CUSTOM_VOICE_ID ? "" : e.target.value})}>
+                  {[...new Set(DOUBAO_TTS2_VOICES.map((item)=>item.category))].map((category)=><optgroup key={category} label={category}>{DOUBAO_TTS2_VOICES.filter((item)=>item.category===category).map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</optgroup>)}
+                  <option value={CUSTOM_VOICE_ID}>自定义 / 声音复刻 ID…</option>
+                </select>
+                {!catalogVoice(p.model || "") && <input value={p.model || ""} placeholder="粘贴自定义 Speaker ID" onChange={(e)=>patchProvider(i,{model:e.target.value})}/>}
+              </> : <input value={p.model || ""} onChange={(e) => patchProvider(i, { model: e.target.value })}/>}
+            </label>
+          )}
           {["volcengine_ark", "hc_atom", "runninghub"].includes(p.type) ? (
             <>
               {p.type === "hc_atom" && <label>
@@ -5068,8 +5115,11 @@ function SettingsPanel({
               <small>需匹配返回 id、status 与 video_url 的网关协议。</small>
             </>
           )}
-        </details>
-      ))}
+          </section>
+        </div>
+      ) : null)}
+        </div>
+      </div>
       <div className="settings-actions">
         <button
           onClick={() =>
@@ -5079,10 +5129,10 @@ function SettingsPanel({
                 ...value.providers,
                 {
                   id: id(),
-                  name: "新服务",
+                  name: "自定义云服务",
                   type: "openai",
-                  url: "http://127.0.0.1:8080/v1",
-                  local: true,
+                  url: "https://api.openai.com/v1",
+                  local: false,
                   kind: "text",
                   model: "",
                 },
@@ -5091,8 +5141,9 @@ function SettingsPanel({
           }
         >
           <Plus size={15} />
-          添加服务
+          添加自定义云服务
         </button>
+        {!value.providers.some((provider: Any) => provider.type === "replicate") && (
         <button
           onClick={() =>
             setValue({
@@ -5115,6 +5166,8 @@ function SettingsPanel({
         >
           添加 Replicate
         </button>
+        )}
+        {!value.providers.some((provider: Any) => provider.type === "volcengine_ark") && (
         <button
           onClick={() =>
             setValue({
@@ -5148,6 +5201,8 @@ function SettingsPanel({
         >
           添加火山方舟
         </button>
+        )}
+        {!value.providers.some((provider: Any) => provider.type === "hc_atom") && (
         <button
           onClick={() =>
             setValue({
@@ -5173,6 +5228,8 @@ function SettingsPanel({
         >
           添加幻场 AI
         </button>
+        )}
+        {!value.providers.some((provider: Any) => provider.type === "runninghub") && (
         <button
           onClick={() =>
             setValue({
@@ -5206,6 +5263,8 @@ function SettingsPanel({
         >
           添加 RunningHub
         </button>
+        )}
+        {!value.providers.some((provider: Any) => provider.type === "volcengine_speech") && (
         <button
           onClick={() =>
             setValue({
@@ -5230,27 +5289,8 @@ function SettingsPanel({
         >
           添加豆包语音
         </button>
-        <button
-          onClick={() =>
-            setValue({
-              ...value,
-              providers: [
-                ...value.providers,
-                {
-                  id: id(),
-                  name: "Maestro 图像",
-                  type: "maestro",
-                  url: "http://127.0.0.1:7860",
-                  local: true,
-                  kind: "image",
-                  model: "",
-                },
-              ],
-            })
-          }
-        >
-          连接 Maestro
-        </button>
+        )}
+
       </div>
       </section>}
       {settingsTab === "runtime" && <section className="settings-section">
