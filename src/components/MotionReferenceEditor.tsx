@@ -58,7 +58,7 @@ export function MotionReferenceEditor(props: Props) {
     <div className="motion-reference-actions">
     <label>本镜头生成模式<select value={props.shot.videoReferenceMode || ''} onChange={event=>props.onPatch({videoReferenceMode:event.target.value || undefined})}><option value="">继承项目设置（{({multimodal:'多模态参考',first_frame:'严格首帧',first_last_frame:'严格首尾帧',legacy:'兼容历史'} as Value)[props.document.videoReferenceMode || 'legacy']}）</option><option value="multimodal">多模态参考</option><option value="first_frame">严格首帧（高级）</option><option value="first_last_frame">严格首尾帧（高级）</option></select></label>
     <label>本镜对白方式<select value={props.shot.dialogueMode || ''} onChange={event=>props.onPatch({dialogueMode:event.target.value || undefined})}><option value="">继承项目设置（{dialogueModeLabels[props.document.dialogueMode || 'full_dialogue']}）</option><option value="voice_sample">音色样本参考（无需逐句合成）</option><option value="full_dialogue">完整对白参考（先合成本镜对白）</option></select></label>
-      <label>从项目素材选择动作参考<select aria-label="动作参考视频" disabled={working || props.busy} value={reference?.assetId || ''} onChange={e => bind(e.target.value)}>
+      <label>从项目素材选择动作参考（支持白模）<select aria-label="动作参考视频" disabled={working || props.busy} value={reference?.assetId || ''} onChange={e => bind(e.target.value)}>
         <option value="">不使用动作参考</option>
         {reference && (!asset || asset.category !== "motion_reference") && <option value={reference.assetId}>{asset ? `${asset.name}（历史绑定）` : "素材已丢失或删除"}</option>}
         {props.assets.filter(a => a.kind === 'video' && a.category === 'motion_reference' && !a.metadata?.motionDerivedFrom).map(a => <option key={a.id} value={a.id}>{a.name} · {Number(a.metadata?.duration || 0).toFixed(2)} 秒</option>)}
