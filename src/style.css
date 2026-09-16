@@ -256,13 +256,15 @@
 .motion-reference-actions{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:end}
 .motion-reference-actions>label{min-width:0}
 .motion-reference-actions select,.motion-reference-actions input{width:100%;min-width:0}
-.motion-reference-gallery{display:flex;flex-wrap:wrap;gap:12px;padding:8px 0}
-.motion-reference-gallery figure{margin:0;width:180px;position:relative;min-width:0;background:#15202b;border-radius:8px;padding:8px}
-.motion-reference-gallery figcaption{display:grid;gap:4px;margin-bottom:6px;font-size:12px}
-.motion-reference-gallery figcaption span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.motion-reference-gallery img,.motion-reference-gallery video{width:100%;height:110px;object-fit:contain;background:#080d14;border-radius:6px;transition:transform .18s;transform-origin:center}
-.motion-reference-gallery audio{width:100%}
-.motion-reference-gallery figure:hover,.motion-reference-gallery figure:focus-within{z-index:5}
-.motion-reference-gallery img:hover,.motion-reference-gallery video:hover,.motion-reference-gallery video:focus{transform:scale(1.35);box-shadow:0 5px 24px #0009}
 @media(max-width:1000px){.motion-reference-actions{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(prefers-reduced-motion:reduce){.motion-reference-gallery img,.motion-reference-gallery video{transition:none}}
+/* Reference thumbnails stay inline with the exact submitted prompt tokens. */
+.motion-inline-prompt{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:2.3;padding:8px 0}
+.motion-inline-reference{display:inline-block;position:relative;vertical-align:middle;white-space:normal;margin:0 3px}
+.motion-inline-reference>button{display:inline-flex;align-items:center;gap:4px;padding:1px 4px;font:inherit;line-height:1.4;vertical-align:middle}
+.motion-inline-reference>button img,.motion-inline-play{width:26px;height:26px;object-fit:cover;border-radius:3px}
+.motion-inline-play{display:inline-grid;place-items:center;background:#21384a;color:#a9dbff}
+.motion-inline-popover{display:none;position:absolute;top:100%;left:0;width:240px;max-width:65vw;padding:8px;background:#15202b;border:1px solid #456079;border-radius:8px;box-shadow:0 6px 24px #0009;z-index:30;white-space:normal}
+.motion-inline-reference:hover>.motion-inline-popover,.motion-inline-reference:focus-within>.motion-inline-popover,.motion-inline-reference.is-open>.motion-inline-popover{display:block}
+.motion-inline-popover strong{display:block;font-size:12px;line-height:1.5;margin-bottom:6px}
+.motion-inline-popover img,.motion-inline-popover video{display:block;width:100%;max-height:240px;object-fit:contain}
+.motion-inline-popover audio{width:100%;margin:0}

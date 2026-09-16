@@ -94,15 +94,29 @@ export function MotionReferenceEditor(props: Props) {
         {preview.dialogue_mode && <p>对白方式：{dialogueModeLabels[preview.dialogue_mode.actual]}</p>}
         {(preview.voice_samples || []).map((sample:Value)=><p key={sample.characterCardId}>{sample.characterName} → @音频{sample.index} · 声音 V{sample.voiceVersion} · 仅参考音色</p>)}
         {(preview.motion_warnings || []).map((warning: string) => <p key={warning} className="warning">{warning}</p>)}
-        <div className="motion-reference-gallery">{(preview.reference_manifest || []).map((item: Value) => {
-          const media = props.assets.find(a => a.id === item.assetId) || (item.kind === 'video' ? asset : undefined);
-          const label = `${({image:'图片',video:'动作参考',audio:'声音'} as Value)[item.kind]}${item.index}`;
-          return <figure key={`${item.kind}:${item.index}`}>
-            <figcaption><b>{label}</b><span title={item.name}>{item.name}</span></figcaption>
-            {media?.url ? item.kind === 'image' ? <img src={media.url} alt={item.name} loading="lazy"/> : item.kind === 'video' ? <video src={media.url} controls preload="metadata"/> : <audio src={media.url} controls preload="none"/> : <small>素材暂未加载</small>}
-          </figure>;
-        })}</div><pre>{preview.prompt}</pre>
+        <div className="motion-inline-prompt">{String(preview.prompt || '').split(/(@(?:图片|视频|音频)\d+)/g).map((part, index) => {
+          const match = /^@(图片|视频|音频)(\d+)$/.exec(part);
+          if (!match) return part;
+          const kind = ({图片:'image',视频:'video',音频:'audio'} as Value)[match[1]];
+          const item = (preview.reference_manifest || []).find((entry: Value) => entry.kind === kind && Number(entry.index) === Number(match[2]));
+          const media = item && (props.assets.find(a => a.id === item.assetId) || (kind === 'video' ? asset : undefined));
+          return media?.url ? <InlineReference key={`${index}:${media.id}`} label={part} kind={kind} name={item.name || media.name} url={media.url}/> : part;
+        })}</div>
       </div>}
     {error && <p className="error" role="alert">{error}</p>}
   </section>;
+}
+
+function InlineReference({label, kind, name, url}: {label: string; kind: string; name: string; url: string}) {
+  const [open, setOpen] = useState(false);
+  return <span className={`motion-inline-reference${open ? ' is-open' : ''}`} onKeyDown={event => { if (event.key === 'Escape') setOpen(false); }}>
+    <button type="button" aria-label={`预览${label}：${name}`} aria-expanded={open} onClick={() => setOpen(value => !value)}>
+      {kind === 'image' ? <img src={url} alt="" loading="lazy"/> : <span className="motion-inline-play" aria-hidden="true">▶</span>}
+      <span>{label}</span>
+    </button>
+    <span className="motion-inline-popover">
+      <strong>{name}</strong>
+      {kind === 'image' ? <img src={url} alt={name} loading="lazy"/> : kind === 'video' ? <video src={url} controls preload="none"/> : <audio src={url} controls preload="none"/>}
+    </span>
+  </span>;
 }
