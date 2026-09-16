@@ -153,7 +153,12 @@ function EditorSurface({
   const { editor, videoResolution, changeLog, setSelectedItem } = useTimelineContext();
   const { getCurrentTime, setCurrentTime, setSeekTime, setPlayerState } = useLivePlayerContext();
   const [message, setMessage] = useState("编辑会随当前项目自动保存");
+  const [messageTone, setMessageTone] = useState<"normal" | "error" | "success">("normal");
   const surfaceRef = useRef<HTMLDivElement>(null);
+  const showMessage = (value: string) => {
+    setMessageTone("normal");
+    setMessage(value);
+  };
 
   useEffect(() => {
     const surface = surfaceRef.current;
@@ -241,11 +246,13 @@ function EditorSurface({
       () => crypto.randomUUID(),
     );
     if (plan.issues.length) {
-      setMessage(`暂未生成：${plan.issues.join("；")}`);
+      setMessageTone("error");
+      setMessage(`无法生成初剪：${plan.issues.join("；")}`);
       return;
     }
     if (!plan.clipCount) {
-      setMessage("暂未生成：分镜中还没有可用的视频素材");
+      setMessageTone("error");
+      setMessage("无法生成初剪：分镜中还没有可用的视频素材");
       return;
     }
     const hasExistingEdit = (editor.getProject().tracks || []).some(
@@ -261,6 +268,7 @@ function EditorSurface({
     setCurrentTime(0);
     setSeekTime(0);
     requestAnimationFrame(() => setPlayerState(PLAYER_STATE.PLAYING));
+    setMessageTone("success");
     setMessage(`已按分镜顺序建立 ${plan.clipCount} 个镜头，并开始预览`);
   }
 
@@ -268,18 +276,18 @@ function EditorSurface({
     <>
       <TimelinePersistence initialTimeline={initialTimeline} assets={assets} onChange={onChange} />
       <PlaybackEndReset />
-      <EditorShortcuts onMessage={setMessage} />
+      <EditorShortcuts onMessage={showMessage} />
       <div className="mvc-editor-actionbar">
         <button className="primary compact" onClick={generateInitialEdit}>
           <Sparkles size={15} /> 生成初剪并预览
         </button>
         <TimelineDurationFloor projectDuration={duration} />
-        <span><b>{productionName} · {episodeLabel}</b>　{message}</span>
-        <EditorToolbar assets={assets} onMessage={setMessage} onExport={onExport} />
+        <span className={`mvc-editor-message ${messageTone}`} role={messageTone === "error" ? "alert" : "status"}><b>{productionName} · {episodeLabel}</b>　{message}</span>
+        <EditorToolbar assets={assets} onMessage={showMessage} onExport={onExport} />
       </div>
       <div className="mvc-editor-surface" ref={surfaceRef} onDragOverCapture={handleDragOver} onDropCapture={handleDrop}>
         <VideoEditor
-          leftPanel={<ProjectAssetPanel assets={assets} shots={shots} onMessage={setMessage} />}
+          leftPanel={<ProjectAssetPanel assets={assets} shots={shots} onMessage={showMessage} />}
           rightPanel={<EditorInspector assets={assets} />}
           editorConfig={{
             canvasMode: true,

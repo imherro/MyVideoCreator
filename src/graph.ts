@@ -92,11 +92,14 @@ export function acceptResult<T extends Graph>(graph:T,job:ResultJob,jobs:ResultJ
     }
   }
   const next=invalidate(graph,[job.node_id],expectedNodes);
+  const compiledPrompt=Boolean(
+    job.input.reference_compiler||job.input.shot_video_projection||job.input.dialogue_projection
+  );
   return {...next,nodes:next.nodes.map(node=>node.id!==job.node_id?node:{...node,data:{...node.data,
     text:job.result.text||node.data.text,assetId:job.result.assets?.[0]?.id||node.data.assetId,resultJob:job.id,
     generationFingerprint:job.result.assets?.[0]?.generationFingerprint||job.input.generation_fingerprint||node.data.generationFingerprint,
     stale:(
-      !job.input.reference_compiler&&!job.input.dialogue_projection&&node.data.prompt!==job.input.prompt
+      !compiledPrompt&&node.data.prompt!==job.input.prompt
     )||Number(node.data.generation_revision||0)!==Number(job.input.generation_revision||0),
     ...(node.data.kind==='image'&&job.result.assets?.[0]?{state_reviewed:false}:{})
   }})};
@@ -108,7 +111,12 @@ export function reconcileCompiledVideoResults<T extends Graph>(graph:T,jobs:Resu
   const nodes=graph.nodes.map(node=>{
     if(!node.data.stale||node.data.kind!=='video'||!node.data.resultJob)return node;
     const job=byId.get(String(node.data.resultJob));
-    const sameTake=job?.status==='succeeded'&&job.input?.dialogue_projection&&
+    // planned_shot_duration repairs results submitted before
+    // shot_video_projection was introduced; those jobs already contain the
+    // canonical duration marker and are safe when revision and asset match.
+    const compiled=job?.input?.shot_video_projection||job?.input?.dialogue_projection||
+      job?.input?.planned_shot_duration!=null;
+    const sameTake=job?.status==='succeeded'&&compiled&&
       job.result?.assets?.[0]?.id===node.data.assetId&&
       Number(node.data.generation_revision||0)===Number(job.input.generation_revision||0);
     if(!sameTake)return node;

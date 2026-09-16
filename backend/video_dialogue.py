@@ -88,6 +88,14 @@ def compile_shot_video_input(document, node_id, kind, input_value, production_co
         base_prompt, shot,
     )
     result = _apply_duration(result, provider_duration, shot_duration)
+    # The submitted prompt is a compiled snapshot: canonical timing (and,
+    # when present, dialogue) is appended to the editable node prompt.  Keep
+    # that distinction durable so the client does not mistake a successful
+    # result for an edit made after submission.
+    result['shot_video_projection'] = {
+        'version': 'shot-video/v1',
+        'shotUid': str(shot.get('uid') or shot.get('id') or ''),
+    }
     dialogues = [item for item in (shot.get('dialogues') or []) if isinstance(item, dict) and str(item.get('text') or '').strip()]
     if dialogues:
         result['dialogue_projection'] = {

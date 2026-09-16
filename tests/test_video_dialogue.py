@@ -37,6 +37,7 @@ def test_video_job_compiles_dialogue_for_existing_node_and_records_projection():
     assert '本镜头成片总时长必须为 2 秒' in value['prompt']
     assert value['shot_duration'] == 2
     assert value['parameters']['duration'] == 2
+    assert value['shot_video_projection'] == {'version': 'shot-video/v1', 'shotUid': 'shot-uid'}
     assert value['dialogue_projection']['shotUid'] == 'shot-uid'
     assert value['dialogue_projection']['dialogues'][0]['text'] == '下一步直接拔电源。'
 

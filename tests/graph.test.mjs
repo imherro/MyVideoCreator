@@ -37,6 +37,13 @@ test('compiled dialogue prompt does not make its fresh video stale',()=>{
  assert.equal(next.nodes[0].data.stale,false);
  assert.equal(next.nodes[0].data.assetId,'new-video');
 });
+test('compiled duration prompt does not make a video without dialogue stale',()=>{
+ const original={nodes:[{id:'video',data:{kind:'video',prompt:'可编辑动作',generation_revision:5}}],edges:[]};
+ const job={id:'duration-video',node_id:'video',status:'succeeded',input:{prompt:'可编辑动作\n[镜头时长]\n必须为 3 秒',generation_revision:5,shot_video_projection:{version:'shot-video/v1'}},result:{assets:[{id:'new-video'}]}};
+ const next=acceptResult(original,job,[]);
+ assert.equal(next.nodes[0].data.stale,false);
+ assert.equal(next.nodes[0].data.assetId,'new-video');
+});
 test('repairs persisted false stale from a compiled dialogue take but preserves real edits',()=>{
  const job={id:'dialogue-video',node_id:'video',status:'succeeded',input:{generation_revision:2,dialogue_projection:{version:'shot-dialogue/v1'}},result:{assets:[{id:'new-video'}]}};
  const falseStale={nodes:[{id:'video',data:{kind:'video',assetId:'new-video',resultJob:'dialogue-video',generation_revision:2,stale:true}}],edges:[]};
@@ -44,6 +51,11 @@ test('repairs persisted false stale from a compiled dialogue take but preserves 
  assert.equal(repaired.nodes[0].data.stale,false);
  const edited={...falseStale,nodes:[{...falseStale.nodes[0],data:{...falseStale.nodes[0].data,generation_revision:3}}]};
  assert.equal(reconcileCompiledVideoResults(edited,[job]),edited);
+});
+test('repairs legacy duration-compiled video results that were falsely marked stale',()=>{
+ const job={id:'duration-video',node_id:'video',status:'succeeded',input:{generation_revision:5,planned_shot_duration:2.5},result:{assets:[{id:'new-video'}]}};
+ const falseStale={nodes:[{id:'video',data:{kind:'video',assetId:'new-video',resultJob:'duration-video',generation_revision:5,stale:true}}],edges:[]};
+ assert.equal(reconcileCompiledVideoResults(falseStale,[job]).nodes[0].data.stale,false);
 });
 test('removing an image reference removes its duplicate manual and edge sources',()=>{
  const original=graph();original.nodes[1].data.asset_ids=['asset-a','independent-image'];
