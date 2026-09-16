@@ -56,20 +56,17 @@ export function planInitialTimeline(
     const plannedDuration = Number(shot.duration);
     const mediaDuration = Number(asset.metadata?.duration);
     if (
-      !Number.isFinite(plannedDuration) ||
-      plannedDuration <= 0 ||
       !Number.isFinite(mediaDuration) ||
       mediaDuration <= 0
     ) {
-      issues.push(`${label}时长无效`);
-      return;
-    }
-    if (plannedDuration > mediaDuration + 0.08) {
-      issues.push(`${label}需要 ${plannedDuration} 秒，素材仅 ${mediaDuration.toFixed(2)} 秒`);
+      issues.push(`${label}素材时长无效`);
       return;
     }
 
-    const duration = Math.min(plannedDuration, mediaDuration);
+    // “完整镜头” means the generated media itself. The shot duration is a
+    // planning value and must not silently trim usable footage during rough cut.
+    // Target-fit mode below keeps the complete source by changing playback rate.
+    const duration = mediaDuration;
     const elementId = `e-${newId()}`;
     const trackId = `t-v${videoTracks.length + 1}`;
     const element: ElementJSON = {
@@ -92,6 +89,8 @@ export function planInitialTimeline(
         assetSource: "my-video-creator",
         shotId: shot.id || shot.shot_id,
         nodeId: node.id,
+        plannedDuration: Number.isFinite(plannedDuration) && plannedDuration > 0 ? plannedDuration : undefined,
+        sourceDuration: mediaDuration,
         generatedInitialEdit: true,
       },
       frame: { x: 0, y: 0, size: [resolution.width, resolution.height] },

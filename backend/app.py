@@ -58,7 +58,11 @@ async def auth(request: Request, call_next):
     result = await call_next(request)
     result.headers['X-Content-Type-Options'] = 'nosniff'
     result.headers['Referrer-Policy'] = 'same-origin'
-    if request.url.path.startswith('/api/'):
+    if request.url.path.startswith('/api/assets/') and request.url.path.endswith('/file'):
+        # Asset IDs are immutable. Private browser caching lets adjacent editor
+        # clips reuse downloaded media while still preventing shared-proxy cache.
+        result.headers['Cache-Control'] = 'private, max-age=31536000, immutable'
+    elif request.url.path.startswith('/api/'):
         result.headers['Cache-Control'] = 'no-store'
     return result
 

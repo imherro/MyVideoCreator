@@ -832,6 +832,7 @@ def test_media_upload_range_and_project_boundary(authenticated):
     result=c.get(asset['url'],headers={'Range':'bytes=0-9'})
     assert result.status_code==206
     assert len(result.content)==10
+    assert result.headers['cache-control']=='private, max-age=31536000, immutable'
     request={'node_id':'n','kind':'image','submission_id':'wrong-project-ref-001','input':{'prompt':'reference','asset_ids':[asset['id']]}}
     assert c.post('/api/projects/'+other['id']+'/jobs',json=request).status_code==400
     assert c.post('/api/projects/'+p['id']+'/assets',files={'file':('bad.html',b'<script>x</script>','text/html')}).status_code==400
