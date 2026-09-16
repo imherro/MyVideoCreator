@@ -652,9 +652,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   const [mediaRetryKey, setMediaRetryKey] = useState(0);
   const [pendingAutoRunNodeId, setPendingAutoRunNodeId] = useState<string | null>(null);
   const [uploadCategory, setUploadCategory] = useState("other");
-  const [conflict, setConflict] = useState(false),
-    [recoveryBusy, setRecoveryBusy] = useState(false);
-  const conflictRef = useRef(false);
   const storyboardSubmissionRef = useRef(false);
   const workflowStageRef = useRef<WorkflowStage>(initialWorkflowStage);
   const revision = useRef(1),
@@ -802,7 +799,10 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     const openedProject = { ...p, document: projectedDocument };
     revision.current = p.revision;
     productionRevision.current = p.production_revision;
-    dirty.current = projectedDocument !== p.document;
+    // Managed canvas nodes are a deterministic view of the canonical project.
+    // Merely opening the project must not create a new revision, otherwise two
+    // browsers that only view the same project will race each other's autosave.
+    dirty.current = false;
     // Update the imperative snapshot before scheduling React state changes.
     // This prevents an autosave tick from pairing the new project id with the
     // previous project's document while the project switch is being rendered.
@@ -823,7 +823,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setPanorama(null);
     setTimelineOpen(false);
     setView(defaultViewForStage(workflowStageRef.current));
-    setSaved(projectedDocument === p.document ? "已保存" : "未保存");
+    setSaved("已保存");
     setPanel(null);
     setTimeout(() => {
       fitView({ padding: 0.2 });
@@ -948,52 +948,27 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       window.removeEventListener("online", retryOnNetworkRecovery);
     };
   }, [refresh]);
-  async function recoverConflict() {
-    setRecoveryBusy(true);
-    try {
-      const snapshot = current.current;
-      if (!snapshot.project || !snapshot.doc) return;
-      const latest = await api("/projects/" + snapshot.project.id);
-      const backup = JSON.stringify(
-        {
-          format: "yingxu-project-draft-v1",
-          project_id: snapshot.project.id,
-          name: snapshot.project.name,
-          revision: revision.current,
-          production_revision: productionRevision.current,
-          document: snapshot.doc,
-        },
-        null,
-        2,
-      );
-      sessionStorage.setItem("yingxu-conflict-" + snapshot.project.id, backup);
-      const url = URL.createObjectURL(
-        new Blob([backup], { type: "application/json" }),
-      );
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `安影-冲突草稿-${Date.now()}.json`;
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
-      revision.current = latest.revision;
-      productionRevision.current = latest.production_revision;
-      dirty.current = false;
-      conflictRef.current = false;
-      setConflict(false);
-      setProject(latest);
-      setDoc(latest.document);
-      setSelected(null);
-      setSaved("已保存");
-      setError("");
-      setNotice("本页草稿已下载备份，已载入主机最新版本");
-    } catch (e) {
-      report(e);
-    } finally {
-      setRecoveryBusy(false);
-    }
+  async function syncLatestProject(pid: string) {
+    const latest = await api("/projects/" + pid);
+    if (current.current.project?.id !== pid) return;
+    const projectedDocument = deriveManagedGraph(
+      migrateLinkedNodePrompts(latest.document),
+    );
+    const openedProject = { ...latest, document: projectedDocument };
+    revision.current = latest.revision;
+    productionRevision.current = latest.production_revision;
+    dirty.current = false;
+    current.current = { project: openedProject, doc: projectedDocument };
+    setProject(openedProject);
+    setDoc(projectedDocument);
+    setSelected(null);
+    setSaved("已同步");
+    setError("");
+    sessionStorage.removeItem("yingxu-conflict-" + pid);
+    setNotice("项目已在另一页面更新，已自动载入最新版本");
+    void refresh(pid).catch(() => {});
   }
   async function save() {
-    if (conflictRef.current) return;
     if (saveFlight.current) {
       await saveFlight.current;
       return save();
@@ -1043,9 +1018,12 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       } catch (e: any) {
         dirty.current = true;
         if (e.status === 409) {
-          conflictRef.current = true;
-          setConflict(true);
-          setSaved("保存冲突");
+          try {
+            await syncLatestProject(projectSnapshot.id);
+          } catch (syncError) {
+            setSaved("同步失败");
+            report(syncError);
+          }
         } else {
           setSaved("保存失败");
           report(e);
@@ -1444,34 +1422,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setSelected(null);
   }
   async function prepareProjectSwitch() {
-    let preservedDraft = false;
     if (dirty.current || saveFlight.current) await save();
-    if (dirty.current) {
-      if (!conflictRef.current)
-        throw new Error("项目尚未保存，请先解决保存失败后再新建项目。");
-      const snapshot = current.current;
-      if (!snapshot.project || !snapshot.doc)
-        throw new Error("当前项目草稿不可用，无法安全切换项目。");
-      const backup = JSON.stringify(
-        {
-          format: "yingxu-project-draft-v1",
-          project_id: snapshot.project.id,
-          name: snapshot.project.name,
-          revision: revision.current,
-          production_revision: productionRevision.current,
-          document: snapshot.doc,
-        },
-        null,
-        2,
-      );
-      sessionStorage.setItem("yingxu-conflict-" + snapshot.project.id, backup);
-      dirty.current = false;
-      conflictRef.current = false;
-      setConflict(false);
-      setSaved("已保存");
-      preservedDraft = true;
-    }
-    return preservedDraft;
+    if (dirty.current)
+      throw new Error("项目尚未保存，请等待网络恢复后再切换项目。");
   }
   async function refreshProductionHierarchy() {
     const [productionList, episodeList] = await Promise.all([
@@ -1487,18 +1440,14 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setProjectSetupOpen(true);
   }
   async function createProduction(draft: ProjectSetupDraft) {
-    const preservedDraft = await prepareProjectSwitch();
+    await prepareProjectSwitch();
     const productionName = draft.name.trim();
     const episode = await api("/projects", send("POST", projectSetupPayload(draft)));
     await refreshProductionHierarchy();
     activateWorkflowStage("overview", "replace");
     await openProject(episode.id);
     setProjectSetupOpen(false);
-    setNotice(
-      preservedDraft
-        ? `已新建“${productionName}”；原集冲突草稿已保存在本浏览器`
-        : `已新建作品“${productionName}”并进入 EP01`,
-    );
+    setNotice(`已新建作品“${productionName}”并进入 EP01`);
   }
   async function createEpisode(production: ProductionSummary, title: string) {
     await prepareProjectSwitch();
@@ -1560,8 +1509,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setProductions(await api("/productions"));
     if (target.id === project?.id) {
       dirty.current = false;
-      conflictRef.current = false;
-      setConflict(false);
       if (list.length) await openProject(list[0].id);
       else {
         current.current = { project: null, doc: null };
@@ -3988,31 +3935,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   <button className={projectSettingsTab === "production" ? "active" : ""} onClick={() => setProjectSettingsTab("production")}>整部作品</button>
                   <button className={projectSettingsTab === "episode" ? "active" : ""} onClick={() => setProjectSettingsTab("episode")}>当前制作集</button>
                 </div>
-                {sessionStorage.getItem("yingxu-conflict-" + project.id) && (
-                  <div className="error">
-                    <p>
-                      本页保留了一份冲突草稿。恢复后将作为新的编辑保存；主机当前版本仍可在历史版本中找到。
-                    </p>
-                    <button
-                      onClick={() => {
-                        try {
-                          const draft = JSON.parse(
-                            sessionStorage.getItem(
-                              "yingxu-conflict-" + project.id,
-                            )!,
-                          );
-                          update(() => draft.document);
-                          setProject({ ...project, name: draft.name });
-                          setNotice("冲突草稿已恢复为当前编辑");
-                        } catch (e) {
-                          report(e);
-                        }
-                      }}
-                    >
-                      恢复本页冲突草稿
-                    </button>
-                  </div>
-                )}
                 {projectSettingsTab === "production" ? <>
                   <h3>整部作品设置</h3>
                   <label>作品名称<div className="inline-save-field"><input maxLength={100} value={productionNameDraft} onChange={(event)=>setProductionNameDraft(event.target.value)}/><button disabled={!productionNameDraft.trim() || productionNameDraft.trim() === currentProduction?.name} onClick={()=>renameProduction(productionNameDraft).catch(report)}>保存名称</button></div><small>修改作品名称不会改变任何 Episode 标题，也不会触发生成。</small></label>
@@ -4438,29 +4360,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           e.target.value = "";
         }}
       />
-      {conflict && (
-        <div className="modal-overlay">
-          <div
-            className="panorama-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label="解决保存冲突"
-          >
-            <h2>项目已在另一页面更新</h2>
-            <p>
-              本页编辑仍然保留，自动保存已暂停。先将本页草稿下载为 JSON
-              备份，再载入主机最新版本继续编辑。
-            </p>
-            <button
-              className="primary"
-              disabled={recoveryBusy}
-              onClick={recoverConflict}
-            >
-              {recoveryBusy ? "正在载入" : "备份本页草稿并载入最新版本"}
-            </button>
-          </div>
-        </div>
-      )}
       {notice && (
         <div className="toast">
           <Check size={16} />
