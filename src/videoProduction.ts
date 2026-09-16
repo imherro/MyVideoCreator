@@ -1,6 +1,7 @@
 import { requiresInitialStateReview } from "./graph.ts";
 import { shotIdentity } from "./storyboard.ts";
 import { supportsMotionReference, videoGenerationMode } from "./motionReference.ts";
+import { dialogueMode, voiceSampleRows } from './dialogueMode.ts';
 
 type Value = Record<string, any>;
 
@@ -73,7 +74,15 @@ export function deriveVideoProductionRows(
     const configuredDuration = Number(document.videoDuration ?? -1);
     let effectiveDuration = configuredDuration >= 4 ? configuredDuration : plannedDuration;
     let dialogueReadinessReason = "";
-    if (["volcengine_ark", "runninghub"].includes(provider?.type)) {
+    if (dialogueMode(document,shot) === 'voice_sample' && dialogues.length) {
+      const samples = voiceSampleRows(document,shot,assets);
+      if (videoGenerationMode(document,shot) !== 'multimodal') dialogueReadinessReason = '音色样本需明确选择多模态参考生成';
+      else if (!supportsMotionReference(provider,String(videoNode?.data?.model || ''))) dialogueReadinessReason = '当前适配器尚不支持音色样本参考';
+      else {
+        const missing = samples.find((row:Value)=>!row.ready);
+        if (missing) dialogueReadinessReason = `${missing.name}尚未确认当前版本的声音参考`;
+      }
+    } else if (["volcengine_ark", "runninghub"].includes(provider?.type)) {
       for (const dialogue of dialogues) {
         const profile = profiles[dialogue.characterCardId] || {};
         if (profile.status !== "locked" || !String(profile.voiceType || "").trim()) {

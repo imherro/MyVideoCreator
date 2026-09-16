@@ -291,6 +291,10 @@ def generate_video(worker, job, provider):
                         'realPersonMode': True, 'conversionSlots': ['all'], 'omniReferenceTaskType': 'reference'}
                 if job['input'].get('motion_reference'):
                     body['videoUrls'] = [_upload(client, root, silent_motion_asset(job))]
+                if job['input'].get('voice_samples'):
+                    from ..voice_samples import submission_assets
+                    body['audioUrls'] = [_upload(client, root, asset) for asset in submission_assets(job)]
+                    body['generateAudio'] = True
                 if dialogue_reference:
                     # This endpoint documents URI media inputs. Upload the
                     # compiled dialogue track just like the other local media.

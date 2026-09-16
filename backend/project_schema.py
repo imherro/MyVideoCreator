@@ -30,6 +30,7 @@ def new_document(generation_policy=None, model_pool=None):
         'brief': '', 'style': '电影写实', 'ratio': '16:9', 'duration': 15,
         'videoResolution': '720p',
         'videoReferenceMode': 'multimodal',
+        'dialogueMode': 'voice_sample',
         'videoRatio': '16:9', 'videoDuration': -1, 'videoFormat': 'mp4',
     }
 
@@ -130,4 +131,5 @@ def migrate_document(document):
         else:
             raise ValueError(f'缺少项目 Schema v{version} 的迁移程序')
     value.setdefault('videoReferenceMode', 'legacy')
+    value.setdefault('dialogueMode', 'full_dialogue')
     return value

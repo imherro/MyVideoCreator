@@ -293,6 +293,7 @@ class ProjectCreate(BaseModel):
     video_duration:int=Field(default=-1)
     video_format:str=Field(default='mp4')
     video_reference_mode:str=Field(default='multimodal')
+    dialogue_mode:str=Field(default='voice_sample')
     episode_count:int=Field(default=1,ge=1,le=500)
     platform:str=Field(default='通用短视频',min_length=1,max_length=100)
     brief:str|None=Field(default=None,max_length=24000)
@@ -332,6 +333,9 @@ def project_create_document(body:ProjectCreate):
     if body.video_reference_mode not in ('legacy','multimodal','first_frame','first_last_frame'):
         raise ValueError('视频生成模式无效')
     document['videoReferenceMode']=body.video_reference_mode
+    if body.dialogue_mode not in ('voice_sample','full_dialogue'):
+        raise ValueError('对白生成方式无效')
+    document['dialogueMode']=body.dialogue_mode
     if body.brief is not None:document['brief']=body.brief
     if body.generation_policy is not None:
         document['generationPolicy']=validate_generation_policy(
@@ -404,6 +408,7 @@ class ProjectSave(BaseModel):
 
 @app.put('/api/projects/{pid}')
 def save_project(pid:str,body:ProjectSave):
+    voice_affected_episodes=[]
     document=migrate_document(body.document)
     # Preserve deleted provider ids so ordinary project edits remain savable;
     # the resolver reports the invalid target before any generation starts.
@@ -470,6 +475,18 @@ def save_project(pid:str,body:ProjectSave):
         c.execute('UPDATE projects SET name=?,episode_title=?,revision=revision+1,document=?,updated=? WHERE id=?',(name,name,encoded_episode,updated,pid))
         production_revision=production_row['revision']
         if shared_changed:
+            old_voices=(state['production_context'].get('filmBible') or {}).get('voices')
+            new_voices=(incoming_context.get('filmBible') or {}).get('voices')
+            if old_voices != new_voices:
+                for other in c.execute('SELECT id,revision,document FROM projects WHERE production_id=? AND id<>?',(old['production_id'],pid)).fetchall():
+                    episode=migrate_document(json.loads(other['document']))
+                    before=compose_project_document(episode,state['production_context'])
+                    after=compose_project_document(episode,incoming_context)
+                    revised=invalidate_motion_changes(before,after)
+                    if revised.get('nodes') != after.get('nodes'):
+                        c.execute('INSERT INTO revisions VALUES(?,?,?,?,?)',(s.uid(),other['id'],other['revision'],s.dumps(before),updated))
+                        c.execute('UPDATE projects SET document=?,revision=revision+1,updated=? WHERE id=?',(s.dumps(episode_document_from_document(revised)),updated,other['id']))
+                        voice_affected_episodes.append((other['id'],other['revision']+1))
             c.execute('INSERT INTO production_revisions(id,production_id,revision,shared_context,created) VALUES(?,?,?,?,?)',(
                 s.uid(),old['production_id'],production_revision,production_row['shared_context'],updated,
             ))
@@ -480,6 +497,8 @@ def save_project(pid:str,body:ProjectSave):
         else:
             c.execute('UPDATE productions SET updated=? WHERE id=?',(updated,old['production_id']))
     s.event(pid,{'type':'project','revision':body.revision+1})
+    for episode_id,revision in voice_affected_episodes:
+        s.event(episode_id,{'type':'project','revision':revision})
     return {
         'revision':body.revision+1,
         'production_revision':production_revision,
@@ -1060,7 +1079,7 @@ def video_submission_preview(pid:str,node_id:str):
     if provider and provider.get('type') in ('volcengine_ark','runninghub'):
         data=bind_fixed_dialogue_audio(document,node_id,'video',data,production_assets(saved['production_id'],kind='audio'))
     data=compile_motion_input(document,node_id,'video',data,pid,provider)
-    return {key:data.get(key) for key in ('prompt','reference_manifest','motion_reference','motion_warnings','planned_shot_duration','shot_duration','motion_compiler','generation_mode')}
+    return {key:data.get(key) for key in ('prompt','reference_manifest','motion_reference','motion_warnings','planned_shot_duration','shot_duration','motion_compiler','generation_mode','dialogue_mode','voice_samples')}
 
 @app.post('/api/projects/{pid}/jobs')
 def submit(pid:str,body:JobCreate):

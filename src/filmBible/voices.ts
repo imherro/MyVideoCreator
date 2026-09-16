@@ -1,4 +1,5 @@
 import type { FilmBibleDocument, VoiceProfile } from "./types";
+import { invalidate } from '../graph.ts';
 
 export function voiceProfilesOf(document: FilmBibleDocument) {
   return document.filmBible?.voices?.profiles || {};
@@ -33,6 +34,8 @@ export function saveVoiceProfile<T extends FilmBibleDocument>(document: T, cardI
     version: identityChanged ? current.version + 1 : Math.max(1, input.version || 1),
     status: identityChanged ? "draft" : input.status,
     previewAssetId: identityChanged ? undefined : input.previewAssetId,
+    referenceAssetId: identityChanged ? undefined : input.referenceAssetId,
+    referenceVersion: identityChanged ? undefined : input.referenceVersion,
     generationJobId: identityChanged ? undefined : input.generationJobId,
     parameters: {
       speechRate: Math.max(-50, Math.min(100, Number(input.parameters?.speechRate) || 0)),
@@ -73,15 +76,20 @@ export function setVoiceLocked<T extends FilmBibleDocument>(document: T, cardId:
   if (!current) throw new Error("请先保存并生成角色试听音频");
   if (locked && !current.previewAssetId) throw new Error("请先生成并试听角色音色");
   const next = locked
-    ? { ...current, status: "locked" as const }
+    ? { ...current, status: "locked" as const, referenceAssetId: current.referenceAssetId || current.previewAssetId, referenceVersion: current.version }
     : current.status === "locked"
-      ? { ...current, version: current.version + 1, status: "draft" as const, previewAssetId: undefined, generationJobId: undefined }
+      ? { ...current, version: current.version + 1, status: "draft" as const, previewAssetId: undefined, referenceAssetId: undefined, referenceVersion: undefined, generationJobId: undefined }
       : { ...current, status: "draft" as const };
-  return {
+  const updated = {
     ...document,
     filmBible: {
       ...(document.filmBible || {}),
       voices: { profiles: { ...voiceProfilesOf(document), [cardId]: next } },
     },
   } as T;
+  if (JSON.stringify(next) === JSON.stringify(current)) return document;
+  const affected = document.shots.filter(shot => (shot.dialogues || []).some((line: Record<string, any>) => line.characterCardId === cardId)
+    && (next.version !== current.version || next.status !== current.status || (shot.dialogueMode || document.dialogueMode) === 'voice_sample'))
+    .map(shot => shot.videoNode || shot.pipeline?.videoNodeId).filter(Boolean);
+  return invalidate(updated as any, affected) as T;
 }

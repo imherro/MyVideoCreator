@@ -428,10 +428,13 @@ export function FilmBiblePanel({
               {voiceDraft.status !== "locked" && <button onClick={()=>onSaveVoice(card.id,voiceDraft)}>保存声音设定</button>}
               {voiceDraft.status !== "locked" && <button className="primary" disabled={voiceBusy} onClick={()=>{setVoiceBusy(true);setVoiceError("");void onGenerateVoice(card.id,voiceDraft).catch((reason)=>setVoiceError(reason?.message||String(reason))).finally(()=>setVoiceBusy(false));}}>{voiceBusy?<LoaderCircle className="spin" size={14}/>:<Volume2 size={14}/>}生成试听</button>}
               {storedVoice?.previewAssetId && <button className="secondary" onClick={()=>{const asset=assets.find((item)=>item.id===storedVoice.previewAssetId);if(asset)onPreviewAsset(asset);}}>试听声音</button>}
-              {storedVoice?.status === "locked" ? <button onClick={()=>onLockVoice(card.id,false)}>创建新声音版本</button> : storedVoice?.previewAssetId ? <button onClick={()=>onLockVoice(card.id,true)}>锁定主音色 V{storedVoice.version}</button> : null}
+              {storedVoice?.status === "locked" ? <button onClick={()=>onLockVoice(card.id,false)}>创建新声音版本</button> : storedVoice?.previewAssetId ? <button onClick={()=>onLockVoice(card.id,true)}>锁定为角色声音参考 V{storedVoice.version}</button> : null}
+              {storedVoice?.status === 'locked' && !storedVoice.referenceAssetId && storedVoice.previewAssetId && <button onClick={()=>onLockVoice(card.id,true)}>将试听确认为角色声音参考</button>}
+              {storedVoice?.referenceAssetId && <button onClick={()=>{const asset=assets.find(item=>item.id===storedVoice.referenceAssetId);if(asset)onPreviewAsset(asset);}}>试听已确认声音参考</button>}
               {storedVoice?.status === "locked" && <button className="primary" disabled={voiceBusy} onClick={()=>{setVoiceBusy(true);setVoiceError("");void onGenerateCharacterDialogue(card.id).catch((reason)=>setVoiceError(reason?.message||String(reason))).finally(()=>setVoiceBusy(false));}}><Volume2 size={14}/>生成本集全部对白</button>}
             </div>
             <p className="muted">{storedVoice ? `声音 V${storedVoice.version} · ${storedVoice.status === "locked" ? "已锁定" : "草稿"}` : "保存并试听后可锁定为角色主音色。"}</p>
+            <p className="muted">音色样本参考模式下，无需生成本集全部对白。建议每个角色用 3–6 秒清晰、自然的样本；本镜情绪由分镜决定。完整对白参考模式仍需先合成对白。</p>
             <div className="voice-dialogue-heading">
               <b>本集对白</b>
               <small>{dialogueRows.length ? `${dialogueRows.filter((item)=>item.status==="ready").length}/${dialogueRows.length} 已生成` : "分镜中暂无该角色对白"}</small>

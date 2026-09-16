@@ -25,6 +25,7 @@ export type ProjectSetupDraft = {
   videoDuration: number;
   videoFormat: "mp4" | "mov";
   videoReferenceMode: "multimodal" | "first_frame" | "first_last_frame";
+  dialogueMode: "voice_sample" | "full_dialogue";
   episodeCount: number;
   platform: string;
   brief: string;
@@ -71,6 +72,7 @@ export function defaultProjectSetupDraft(providers: Value[], _localModels: Value
     videoDuration: -1,
     videoFormat: "mp4",
     videoReferenceMode: "multimodal",
+    dialogueMode: "voice_sample",
     episodeCount: 1,
     platform: "通用短视频",
     brief: "",
@@ -125,6 +127,7 @@ export function projectSetupPayload(draft: ProjectSetupDraft) {
     video_duration: draft.videoDuration,
     video_format: draft.videoFormat,
     video_reference_mode: draft.videoReferenceMode,
+    dialogue_mode: draft.dialogueMode,
     episode_count: draft.episodeCount,
     platform: draft.platform,
     brief: draft.brief,
@@ -206,12 +209,12 @@ export function applyVideoResolution<T extends Value & { nodes: any[]; edges: an
 
 export function applyVideoOutputSetting<T extends Value & { nodes: any[]; edges: any[]; shots: any[] }>(
   document: T,
-  patch: { videoRatio?: string; videoDuration?: number; videoFormat?: string; videoReferenceMode?: string },
+  patch: { videoRatio?: string; videoDuration?: number; videoFormat?: string; videoReferenceMode?: string; dialogueMode?: string },
 ): T {
   if (Object.entries(patch).every(([key, value]) => document[key] === value)) return document;
-  const videoNodes = (document.nodes || []).filter((node) => node.data?.kind === "video" && (
-    !patch.videoReferenceMode || Object.keys(patch).length > 1 ||
-    !document.shots.find(shot => (shot.videoNode || shot.pipeline?.videoNodeId) === node.id)?.videoReferenceMode
+  const modeKey = Object.keys(patch).length === 1 ? (patch.dialogueMode ? 'dialogueMode' : patch.videoReferenceMode ? 'videoReferenceMode' : '') : '';
+  const videoNodes = (document.nodes || []).filter((node) => node.data?.kind === "video" && (!modeKey ||
+    !document.shots.find(shot => (shot.videoNode || shot.pipeline?.videoNodeId) === node.id)?.[modeKey]
   )).map((node) => node.id);
   return invalidate({ ...document, ...patch }, videoNodes) as unknown as T;
 }

@@ -25,7 +25,7 @@ def authenticated(client):
     return client
 
 def project(c):
-    response=c.post('/api/projects',json={'name':'测试短片','video_reference_mode':'legacy'})
+    response=c.post('/api/projects',json={'name':'测试短片','video_reference_mode':'legacy','dialogue_mode':'full_dialogue'})
     assert response.status_code==200,response.text
     return response.json()
 

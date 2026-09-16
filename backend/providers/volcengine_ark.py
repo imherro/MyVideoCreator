@@ -470,12 +470,16 @@ def generate_video(worker, job, provider):
                     'audio_url': {'url': _dialogue_reference_audio(job, submission_duration)},
                     'role': 'reference_audio',
                 })
+            if job['input'].get('voice_samples'):
+                from ..voice_samples import submission_assets, sample_data_uri
+                for sample in submission_assets(job):
+                    content.append({'type': 'audio_url', 'audio_url': {'url': sample_data_uri(sample)}, 'role': 'reference_audio'})
             body = {
                 'model': selected_model,
                 'content': [{**item, 'text': prompt} if item.get('type') == 'text' else item for item in content],
                 'duration': submission_duration,
                 'resolution': str(params.get('resolution', '720p')),
-                'generate_audio': True if dialogue_reference else (
+                'generate_audio': True if dialogue_reference or job['input'].get('voice_samples') else (
                     False if job['input'].get('dialogue_audio') else bool(params.get('generate_audio', True))
                 ),
             }

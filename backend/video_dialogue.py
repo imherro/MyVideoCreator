@@ -30,7 +30,7 @@ def _shot_for_video_node(document, node_id):
     ), None)
 
 
-def compile_video_prompt(base_prompt, shot):
+def compile_video_prompt(base_prompt, shot, force=False):
     """Append exact structured dialogue without duplicating an older projection."""
     base = str(base_prompt or '').split(MARKER, 1)[0].rstrip()
     dialogues = [
@@ -39,7 +39,7 @@ def compile_video_prompt(base_prompt, shot):
     ]
     if not dialogues:
         return base
-    if all(str(item.get('text') or '').strip() in base for item in dialogues):
+    if not force and all(str(item.get('text') or '').strip() in base for item in dialogues):
         return base
     lines = [
         base,
@@ -84,9 +84,8 @@ def compile_shot_video_input(document, node_id, kind, input_value, production_co
     # Job prompts are immutable snapshots, but this also keeps retries and old
     # already-compiled node data idempotent.
     base_prompt = base_prompt.split(DURATION_MARKER, 1)[0].rstrip()
-    result['prompt'] = compile_video_prompt(
-        base_prompt, shot,
-    )
+    from .voice_samples import dialogue_mode
+    result['prompt'] = compile_video_prompt(base_prompt, shot, force=dialogue_mode(document, shot) == 'voice_sample')
     result = _apply_duration(result, provider_duration, shot_duration)
     # The submitted prompt is a compiled snapshot: canonical timing (and,
     # when present, dialogue) is appended to the editable node prompt.  Keep
@@ -128,6 +127,10 @@ def bind_fixed_dialogue_audio(document, node_id, kind, input_value, assets, prod
     shot = _shot_for_video_node(document, node_id)
     if not shot:
         return result
+    from .voice_samples import dialogue_mode, bind_voice_samples
+    mode = dialogue_mode(document, shot)
+    result['dialogue_mode'] = {'requested': mode, 'actual': mode, 'source': 'shot' if shot.get('dialogueMode') else 'project'}
+    result.pop('voice_samples', None)
     dialogues = [
         item for item in (shot.get('dialogues') or [])
         if isinstance(item, dict) and str(item.get('text') or '').strip()
@@ -137,6 +140,11 @@ def bind_fixed_dialogue_audio(document, node_id, kind, input_value, assets, prod
         result.pop('dialogue_audio', None)
         result.pop('dialogue_audio_mode', None)
         return result
+    if mode == 'voice_sample':
+        for key in ('dialogue_audio_asset_ids', 'dialogue_audio', 'dialogue_audio_mode', 'duration_adjustment'):
+            result.pop(key, None)
+        result['prompt'] = str(result.get('prompt') or '').split(TIMING_MARKER, 1)[0].rstrip()
+        return bind_voice_samples(document, shot, result, assets)
     profiles = (((document.get('filmBible') or {}).get('voices') or {}).get('profiles') or {})
     candidates = sorted(assets or [], key=lambda item: float(item.get('created') or 0), reverse=True)
     selected = []

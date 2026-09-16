@@ -33,9 +33,9 @@ def capability(provider, model):
         newer = model.startswith('doubao-seedance-2-5')
         return {'supported': True, 'max_images': 30 if newer else 9,
                 'max_duration': 30 if newer else 15, 'max_reference_duration': 30 if newer else 15,
-                'audio_only': newer}
+                'audio_only': newer, 'max_audio': 10 if newer else 3}
     if kind == 'runninghub' and model in ('bytedance/seedance-2.5-token', 'bytedance/seedance-2.5-global-token'):
-        return {'supported': True, 'max_images': 30, 'max_duration': 30, 'max_reference_duration': 30, 'audio_only': True}
+        return {'supported': True, 'max_images': 30, 'max_duration': 30, 'max_reference_duration': 30, 'audio_only': True, 'max_audio': 10}
     return {'supported': False, 'reason': '当前供应商/模型尚未核实多模态参考协议；请选择火山方舟 Seedance 2.0/2.5 或 RunningHub Seedance 2.5。绑定会保留。'}
 
 
@@ -106,6 +106,17 @@ def compile_motion_input(document, node_id, kind, input_value, project_id, provi
     reference = (shot or {}).get('motionReference')
     mode = resolve_generation_mode(document, shot, result)
     result['generation_mode'] = mode
+    from .voice_samples import dialogue_mode, validate_samples
+    samples_requested = dialogue_mode(document, shot or {}) == 'voice_sample' and any(str(x.get('text') or '').strip() for x in (shot or {}).get('dialogues', []))
+    if samples_requested:
+        if mode['requested'] != 'multimodal':
+            raise ValueError('音色样本参考需要明确选择多模态参考生成；不会自动改变首帧约束')
+        if not capability(provider, result.get('model') or (provider or {}).get('models', {}).get('video'))['supported']:
+            raise ValueError('当前适配器尚未实现音色样本参考，请选择已支持的方舟或 RunningHub Seedance 模型')
+        if not result.get('voice_samples'):
+            raise ValueError('未编译角色声音参考，请先确认角色样本后重新提交')
+    else:
+        result.pop('voice_samples', None)
     if mode['requested'] in ('first_frame', 'first_last_frame'):
         nodes = {n['id']: n.get('data', {}) for n in document.get('nodes', [])}
         ids = list(nodes.get(node_id, {}).get('asset_ids', []))
@@ -235,9 +246,19 @@ def compile_motion_input(document, node_id, kind, input_value, project_id, provi
     if result.get('dialogue_audio'):
         manifest.append({'kind': 'audio', 'index': 1, 'assetIds': result.get('dialogue_audio_asset_ids', []),
                          'name': '固定音色对白时序合成', 'duration': duration})
-    if not ids and not asset and not result.get('dialogue_audio'):
+    if result.get('voice_samples'):
+        if result.get('dialogue_audio'):
+            raise ValueError('音色样本与完整对白不能同时作为同一镜头的对白方式')
+        result['voice_samples'] = validate_samples({'project_id': project_id, 'input': result}, caps)
+        for sample in result['voice_samples']:
+            if not any(x['kind'] == 'audio' and x.get('assetId') == sample['assetId'] for x in manifest):
+                manifest.append({'kind': 'audio', 'index': sample['index'], 'assetId': sample['assetId'],
+                                 'name': sample['media']['name'], 'purpose': '仅参考音色，不复述样本',
+                                 'duration': sample['media']['duration']})
+    audio_reference = bool(result.get('dialogue_audio') or result.get('voice_samples'))
+    if not ids and not asset and not audio_reference:
         raise ValueError('多模态参考模式至少需要一项图片、视频或音频参考')
-    if not ids and not asset and result.get('dialogue_audio') and not caps['audio_only']:
+    if not ids and not asset and audio_reference and not caps['audio_only']:
         raise ValueError('当前模型不支持仅音频参考，请同时提供图片或动作视频')
     lines = [START, '生成模式：多模态参考。所有图片均为参考语义，不是严格首帧或尾帧约束。', *image_lines]
     for item in manifest:
@@ -258,12 +279,17 @@ def compile_motion_input(document, node_id, kind, input_value, project_id, provi
                   'media': metadata, 'silent_derivative': VERSION}
     if result.get('dialogue_audio'):
         lines.append('严格使用@音频1的音色、情绪、语速及开口时序表演对白并匹配口型，不得改词或增加对白。')
+    for sample in result.get('voice_samples') or []:
+        visual_role = f"（@图片{actor_indices[sample['characterCardId']]}中的角色）" if sample['characterCardId'] in actor_indices else ''
+        lines.append(f"{sample['characterName']}{visual_role}仅参考@音频{sample['index']}的音色与声线。不要复述、混入或播放样本台词，不沿用样本情绪、语调或说话时长。")
+    if result.get('voice_samples'):
+        lines.append('对白内容、情绪、语速和开口时机以本镜分镜及台词为准；不要串用其他角色的声音，未分配台词的角色不说话。')
     lines.append(END)
     result.update(prompt=result['prompt'].rstrip() + '\n\n' + '\n'.join(filter(None, lines)),
                   asset_ids=ids, image_reference_sources=[{'type': 'asset', 'asset_id': aid} for aid in ids],
                   motion_reference=frozen, reference_manifest=manifest, motion_warnings=warnings,
                   motion_compiler={'version': VERSION, 'mode': 'multimodal',
-                                   'fingerprint': hashlib.sha256(s.dumps([mode, frozen, manifest]).encode()).hexdigest()},
+                                   'fingerprint': hashlib.sha256(s.dumps([mode, frozen, manifest, result.get('dialogue_mode'), result.get('voice_samples')]).encode()).hexdigest()},
                   generation_revision=node.get('generation_revision', 0))
     # Explicit multimodal choice changes the protocol role, never drops the image.
     result.pop('end_asset_id', None)
@@ -312,6 +338,14 @@ def invalidate_motion_changes(previous, incoming):
     """Enforce revisions also for non-UI saves and in-flight reference edits."""
     old_shots = {x.get('uid') or x.get('id'): x for x in previous.get('shots', [])}
     affected = set()
+    old_profiles = ((previous.get('filmBible') or {}).get('voices') or {}).get('profiles') or {}
+    new_profiles = ((incoming.get('filmBible') or {}).get('voices') or {}).get('profiles') or {}
+    voice_changed = {cid for cid in set(old_profiles) | set(new_profiles) if any(
+        (old_profiles.get(cid) or {}).get(key) != (new_profiles.get(cid) or {}).get(key)
+        for key in ('referenceAssetId', 'referenceVersion', 'status', 'version'))}
+    identity_changed = {cid for cid in voice_changed if any(
+        (old_profiles.get(cid) or {}).get(key) != (new_profiles.get(cid) or {}).get(key)
+        for key in ('status', 'version'))}
     if previous.get('videoReferenceMode', 'legacy') != incoming.get('videoReferenceMode', 'legacy'):
         overridden = {(x.get('videoNode') or (x.get('pipeline') or {}).get('videoNodeId'))
                       for x in incoming.get('shots', []) if x.get('videoReferenceMode')}
@@ -321,7 +355,10 @@ def invalidate_motion_changes(previous, incoming):
         if (shot.get('uid') or shot.get('id')) not in old_shots and not shot.get('videoReferenceMode') and incoming.get('videoReferenceMode', 'legacy') == 'legacy':
             shot['videoReferenceMode'] = 'multimodal'
         old = old_shots.get(shot.get('uid') or shot.get('id'), {})
-        if any(old.get(key) != shot.get(key) for key in ('motionReference', 'videoReferenceMode')) or (not shot.get('videoReferenceMode') and previous.get('videoReferenceMode') != incoming.get('videoReferenceMode')):
+        if (any(old.get(key) != shot.get(key) for key in ('motionReference', 'videoReferenceMode', 'dialogueMode'))
+                or (not shot.get('videoReferenceMode') and previous.get('videoReferenceMode') != incoming.get('videoReferenceMode'))
+                or (not shot.get('dialogueMode') and previous.get('dialogueMode', 'full_dialogue') != incoming.get('dialogueMode', 'full_dialogue'))
+                or any(d.get('characterCardId') in (voice_changed if (shot.get('dialogueMode') or incoming.get('dialogueMode')) == 'voice_sample' else identity_changed) for d in shot.get('dialogues', []))):
             affected.add(shot.get('videoNode') or (shot.get('pipeline') or {}).get('videoNodeId'))
     pending = list(affected)
     while pending:

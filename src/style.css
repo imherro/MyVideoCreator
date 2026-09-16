@@ -242,6 +242,7 @@
 .motion-reference-editor header,.motion-reference-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .motion-reference-editor header small{margin-left:auto;opacity:.7}
 .motion-reference-editor p{margin:0;font-size:12px;line-height:1.6}
+.motion-reference-editor audio{display:block;width:min(100%,280px);height:32px;margin:6px 0}
 .motion-reference-actions>label{flex:1;min-width:160px}
 .motion-upload input{max-width:100%;font-size:12px}
 .motion-reference-media{display:flex;align-items:center;gap:12px}
