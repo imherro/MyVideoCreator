@@ -76,7 +76,7 @@ export function adaptationReviewSummary(value: Record<string, any>) {
     const status = pending.some((plan: EpisodePlan) => plan.status === "stale") ? "stale" : pending.some((plan: EpisodePlan) => plan.status === "review") ? "review" : "draft";
     const labels = pending.filter((plan: EpisodePlan) => plan.status === status).map((plan: EpisodePlan) => `EP${String(plan.episodeNo).padStart(2, "0")}`).join("、");
     return { status, headline: `${labels} ${status === "review" ? "规划已生成，待审核" : status === "stale" ? "规划需要更新" : "规划待完善"}`,
-      reason: status === "review" ? "检查当前集规划后点击“批准当前集”，再进入剧本；无需重复生成。" : "全剧故事骨架沿用已批准版本，仅需处理对应分集。" };
+      reason: status === "review" ? "检查当前集规划后点击右上角“批准当前集”，再进入剧本；无需重复生成。" : "全剧故事骨架沿用已批准版本，仅需处理对应分集。" };
   }
   return { status: shared, headline: shared === "approved" ? "改编策划已批准" : shared === "review" ? "改编策划等待审核" : "可以建立改编策划", reason: shared === "review" ? "批准后才可生成逐集剧本。" : "" };
 }
