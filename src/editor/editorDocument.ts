@@ -7,6 +7,8 @@ export type EditorAsset = {
   url: string;
   created?: number;
   metadata: Record<string, any>;
+  category?: string;
+  source?: string;
 };
 
 export type EditorDocument = {

@@ -2007,6 +2007,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           prompt: plan.prompt,
           asset_ids: plan.assetIds,
           asset_category: plan.assetCategory,
+          output_name: `${card.name} · ${isStateCard(card) ? "状态参考图" : "主参考图"} · V${version.version}.png`,
           ratio: snapshot.doc.ratio || "16:9",
           size: imageSizeForRatio(snapshot.doc.ratio || "16:9"),
           visual_reference: {
@@ -2591,6 +2592,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           states={Object.fromEntries(Object.entries(workflowGuide.stages).map(([stage, guide]: any) => [stage, guide.state]))}
           episodeControl={<EpisodeSelector episode={project} episodes={currentEpisodes} onSelect={(projectId) => openProject(projectId).catch(report)} />}
         />
+        <div className="workflow-header-meta" title="当前项目规格">
+          <span>{doc.ratio}</span><i>·</i><span>{doc.style}</span><i>·</i><span>{doc.duration} 秒</span>
+        </div>
         <button
           className="project-settings-button"
           aria-label={currentWorkflowScope === "production" ? "打开作品设置" : "打开当前集设置"}
@@ -2667,13 +2671,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             guide={workflowGuide.stages[workflowStage]}
             onNavigate={activateWorkflowStage}
           />}
-          <div className="view-meta">
-            {doc.ratio}
-            <span>·</span>
-            {doc.style}
-            <span>·</span>
-            {doc.duration} 秒
-          </div>
           {workflowStage === "canvas" && view === "canvas" && (
             <>
             <button className="quiet" onClick={() => setPanel(panel === "add" ? null : "add")}>

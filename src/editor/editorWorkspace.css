@@ -29,3 +29,18 @@
 .mvc-editor-workspace .twick-editor-loading-spinner{display:none}
 
 .mvc-editor-workspace .twick-editor-view-section{min-height:240px}
+
+/* Give project media enough room to be identified before it is dragged. */
+.mvc-editor-assets{width:360px}
+.mvc-editor-assets-title{align-items:center}
+.mvc-editor-assets-title small{max-width:205px;line-height:1.35;text-align:right}
+.mvc-editor-asset-tabs button{gap:5px}
+.mvc-editor-asset-tabs button b{min-width:18px;padding:1px 5px;border-radius:9px;background:#ffffff0b;font-size:9px}
+.mvc-editor-asset{align-items:flex-start;padding:9px}
+.mvc-editor-asset-preview{width:92px;height:62px}
+.mvc-editor-asset-copy b{color:#d9c196;font-size:12px}
+.mvc-editor-asset-copy span{display:-webkit-box;overflow:hidden;margin-top:4px;color:#b4bdc0;font-size:10px;line-height:1.4;-webkit-box-orient:vertical;-webkit-line-clamp:2}
+.mvc-editor-asset-copy small{color:#738087;font-size:9px}
+.mvc-editor-asset>button{align-self:center;flex:0 0 auto}
+@media(max-width:1350px){.mvc-editor-assets{width:300px}.mvc-editor-asset-preview{width:76px;height:52px}}
+@media(max-width:1100px){.mvc-editor-assets{width:270px}.mvc-editor-asset-preview{width:68px;height:48px}}

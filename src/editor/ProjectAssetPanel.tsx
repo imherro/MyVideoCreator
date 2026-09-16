@@ -4,23 +4,20 @@ import { TIMELINE_DROP_MEDIA_TYPE } from "@twick/video-editor";
 import { useTimelineContext } from "@twick/timeline";
 import { addAssetToTimeline } from "./assetAdapter";
 import type { EditorAsset } from "./editorDocument";
+import { presentEditorAssets } from "./projectAssets";
 
 const supportedKinds = new Set(["video", "image", "audio"]);
 
-export function ProjectAssetPanel({ assets, onMessage }: { assets: EditorAsset[]; onMessage: (message: string) => void }) {
+export function ProjectAssetPanel({ assets, shots, onMessage }: { assets: EditorAsset[]; shots: Record<string, any>[]; onMessage: (message: string) => void }) {
   const [kind, setKind] = useState("video");
   const [query, setQuery] = useState("");
   const { editor, setSelectedItem, videoResolution } = useTimelineContext();
-  const visible = useMemo(
-    () =>
-      assets.filter(
-        (asset) =>
-          supportedKinds.has(asset.kind) &&
-          asset.kind === kind &&
-          asset.name.toLowerCase().includes(query.trim().toLowerCase()),
-      ),
-    [assets, kind, query],
-  );
+  const presented = useMemo(() => presentEditorAssets(assets, shots), [assets, shots]);
+  const counts = useMemo(() => Object.fromEntries(["video", "image", "audio"].map((item) => [item, assets.filter((asset) => asset.kind === item).length])), [assets]);
+  const visible = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    return presented.filter(({ asset, searchText }) => supportedKinds.has(asset.kind) && asset.kind === kind && (!normalized || searchText.includes(normalized)));
+  }, [kind, presented, query]);
 
   async function add(asset: EditorAsset) {
     try {
@@ -36,25 +33,25 @@ export function ProjectAssetPanel({ assets, onMessage }: { assets: EditorAsset[]
     <aside className="mvc-editor-assets">
       <div className="mvc-editor-assets-title">
         <strong>项目素材</strong>
-        <small>双击、点 + 或拖入时间线</small>
+        <small>{assets.filter((asset) => supportedKinds.has(asset.kind)).length} 项 · 可搜索镜头和内容</small>
       </div>
       <div className="mvc-editor-asset-tabs">
         <button className={kind === "video" ? "active" : ""} onClick={() => setKind("video")}>
-          <Video size={15} /> 视频
+          <Video size={15} /> 视频 <b>{counts.video || 0}</b>
         </button>
         <button className={kind === "image" ? "active" : ""} onClick={() => setKind("image")}>
-          <Image size={15} /> 图片
+          <Image size={15} /> 图片 <b>{counts.image || 0}</b>
         </button>
         <button className={kind === "audio" ? "active" : ""} onClick={() => setKind("audio")}>
-          <Music size={15} /> 音频
+          <Music size={15} /> 音频 <b>{counts.audio || 0}</b>
         </button>
       </div>
       <label className="mvc-editor-asset-search">
         <Search size={14} />
-        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索当前项目素材" />
+        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索镜头、角色、内容或模型" />
       </label>
       <div className="mvc-editor-asset-list">
-        {visible.map((asset) => (
+        {visible.map(({ asset, title, subtitle, details }) => (
           <article
             key={asset.id}
             className="mvc-editor-asset"
@@ -77,13 +74,10 @@ export function ProjectAssetPanel({ assets, onMessage }: { assets: EditorAsset[]
                 <Music size={24} />
               )}
             </div>
-            <div className="mvc-editor-asset-copy">
-              <b title={asset.name}>{asset.name}</b>
-              <small>
-                {Number(asset.metadata?.duration) > 0
-                  ? `${Number(asset.metadata.duration).toFixed(1)} 秒`
-                  : asset.kind}
-              </small>
+            <div className="mvc-editor-asset-copy" title={`${title}\n${subtitle}\n${details}\n原始名称：${asset.name}`}>
+              <b>{title}</b>
+              <span>{subtitle}</span>
+              <small>{details}</small>
             </div>
             <button title="加入时间线" onClick={() => void add(asset)}>
               <Plus size={15} />

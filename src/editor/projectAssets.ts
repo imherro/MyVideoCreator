@@ -1,0 +1,103 @@
+import type { EditorAsset } from "./editorDocument";
+
+export type EditorAssetPresentation = {
+  asset: EditorAsset;
+  title: string;
+  subtitle: string;
+  details: string;
+  searchText: string;
+};
+
+const kindLabels: Record<string, string> = {
+  video: "视频",
+  image: "图片",
+  audio: "音频",
+};
+
+const categoryLabels: Record<string, string> = {
+  character: "角色",
+  scene: "场景",
+  prop: "道具",
+  shot: "镜头",
+  music: "音乐",
+  sfx: "音效",
+  voice: "对白",
+  reference: "参考图",
+};
+
+function humanizeLabel(value: unknown) {
+  return String(value || "")
+    .replace(/\bshot[-_ ]?(\d+)\b/gi, (_, number) => `镜头 ${String(Number(number)).padStart(2, "0")}`)
+    .trim();
+}
+
+function genericGeneratedName(value: string) {
+  return /^(生成结果|Seedream 生成图|幻场 AI 生成图)(?:\s*·[^.]*)?\.[^.]+$/i.test(value.trim());
+}
+
+function nodeIdOf(asset: EditorAsset) {
+  return String(asset.metadata?.node_id || "");
+}
+
+function shotNodeIds(shot: Record<string, any>) {
+  return new Set([
+    shot.imageNode,
+    shot.videoNode,
+    shot.pipeline?.imageNodeId,
+    shot.pipeline?.videoNodeId,
+  ].filter(Boolean).map(String));
+}
+
+export function presentEditorAssets(
+  assets: EditorAsset[],
+  shots: Record<string, any>[],
+): EditorAssetPresentation[] {
+  const versions = new Map<string, Map<string, number>>();
+  const grouped = new Map<string, EditorAsset[]>();
+  for (const asset of assets) {
+    const nodeId = nodeIdOf(asset);
+    if (!nodeId) continue;
+    const key = `${nodeId}:${asset.kind}`;
+    grouped.set(key, [...(grouped.get(key) || []), asset]);
+  }
+  for (const [key, items] of grouped) {
+    const ranks = new Map<string, number>();
+    [...items]
+      .sort((left, right) => Number(left.created || 0) - Number(right.created || 0) || left.id.localeCompare(right.id))
+      .forEach((asset, index) => ranks.set(asset.id, index + 1));
+    versions.set(key, ranks);
+  }
+
+  return assets.map((asset) => {
+    const input = asset.metadata?.input || {};
+    const nodeId = nodeIdOf(asset);
+    const shotIndex = nodeId ? shots.findIndex((shot) => shotNodeIds(shot).has(nodeId)) : -1;
+    const shot = shotIndex >= 0 ? shots[shotIndex] : undefined;
+    const shotNumber = shot
+      ? Number(String(shot.id || shot.uid || "").match(/(\d+)/)?.[1] || shotIndex + 1)
+      : 0;
+    const kindLabel = kindLabels[asset.kind] || asset.kind;
+    const sourceLabel = humanizeLabel(input.output_name || input.asset_label || input.label);
+    const fallback = genericGeneratedName(asset.name) && sourceLabel ? sourceLabel : asset.name;
+    const title = shot ? `镜头 ${String(shotNumber).padStart(2, "0")} · ${kindLabel}` : fallback;
+    const subtitle = shot
+      ? String(shot.title || shot.action || shot.description || sourceLabel || "生成素材")
+      : String(input.character_name || input.dialogue?.text || sourceLabel || categoryLabels[(asset as any).category] || "项目素材");
+    const duration = Number(asset.metadata?.duration);
+    const rank = nodeId ? versions.get(`${nodeId}:${asset.kind}`)?.get(asset.id) : undefined;
+    const versionCount = nodeId ? grouped.get(`${nodeId}:${asset.kind}`)?.length || 0 : 0;
+    const details = [
+      Number.isFinite(duration) && duration > 0 ? `${duration.toFixed(1)} 秒` : undefined,
+      versionCount > 1 && rank ? `V${rank}` : undefined,
+      (asset as any).category ? categoryLabels[(asset as any).category] || (asset as any).category : undefined,
+      input.model ? String(input.model) : undefined,
+    ].filter(Boolean).join(" · ") || kindLabel;
+    return {
+      asset,
+      title,
+      subtitle,
+      details,
+      searchText: [title, subtitle, details, asset.name, nodeId].join(" ").toLowerCase(),
+    };
+  });
+}

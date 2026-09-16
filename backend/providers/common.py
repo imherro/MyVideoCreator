@@ -1,5 +1,6 @@
 """Provider-neutral access to assets, HTTP errors and result registration."""
 import mimetypes
+import re
 import shutil
 import time
 from pathlib import Path
@@ -9,6 +10,43 @@ import httpx
 
 from .. import store as s
 from ..media import probe
+
+
+_GENERIC_RESULT_NAMES = {
+    '生成结果',
+    'Seedream 生成图',
+    '幻场 AI 生成图',
+}
+
+
+def _clean_asset_label(value):
+    label = str(value or '').strip()
+    label = re.sub(
+        r'\bshot[-_ ]?(\d+)\b',
+        lambda match: f'镜头 {int(match.group(1)):02d}',
+        label,
+        flags=re.IGNORECASE,
+    )
+    return re.sub(r'[<>:"/\\|?*\x00-\x1f]', '-', label).strip(' .-')
+
+
+def _registered_asset_name(job, requested_name, ext, existing_versions=0):
+    """Use durable task context for human-readable generated media names."""
+    requested = Path(requested_name or '').name
+    requested_stem = Path(requested).stem
+    requested_suffix = Path(requested).suffix or ext
+    inp = job.get('input') or {}
+    explicit = _clean_asset_label(inp.get('output_name') or inp.get('asset_name'))
+    if explicit:
+        explicit_path = Path(explicit)
+        return explicit_path.stem + requested_suffix if explicit_path.suffix else explicit + requested_suffix
+    is_generic = requested_stem in _GENERIC_RESULT_NAMES or requested_stem.startswith('生成结果 ·')
+    label = _clean_asset_label(inp.get('asset_label') or inp.get('label'))
+    if not is_generic or not label:
+        return requested or ('生成素材' + requested_suffix)
+    qualifier = requested_stem.removeprefix('生成结果').strip(' ·') if requested_stem.startswith('生成结果 ·') else ''
+    base = ' · '.join(part for part in (label, qualifier, f'V{existing_versions + 1}') if part)
+    return base + requested_suffix
 
 
 class RecoverableProviderError(Exception):
@@ -111,13 +149,19 @@ def register(job,path,name=None,category=None,asset_source='generated'):
             if not state or state['status']=='cancelled':raise InterruptedError('结果登记前任务已取消')
             origin=c.execute('SELECT production_id FROM projects WHERE id=?',(job['project_id'],)).fetchone()
             if not origin:raise ValueError('生成任务所属项目不存在')
+            existing_versions=0
+            for existing in c.execute('SELECT metadata FROM assets WHERE project_id=? AND kind=?',(job['project_id'],kind)).fetchall():
+                try: existing_metadata=s.unpack(existing).get('metadata') or {}
+                except (TypeError,ValueError): continue
+                if existing_metadata.get('node_id')==job.get('node_id'): existing_versions+=1
+            registered_name=_registered_asset_name(job,name or source.name,ext,existing_versions)
             semantic=category or job.get('input',{}).get('asset_category') or ('shot' if kind in ('image','video') else 'other')
             if semantic not in {'character','scene','prop','shot','music','sfx','voice','reference','other'}:raise ValueError('生成素材分类无效')
-            c.execute('INSERT INTO assets(id,project_id,name,kind,path,mime,metadata,created,category,source,production_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)',(aid,job['project_id'],name or source.name,kind,target.name,mime,s.dumps(metadata),time.time(),semantic,asset_source,origin['production_id']))
+            c.execute('INSERT INTO assets(id,project_id,name,kind,path,mime,metadata,created,category,source,production_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)',(aid,job['project_id'],registered_name,kind,target.name,mime,s.dumps(metadata),time.time(),semantic,asset_source,origin['production_id']))
     except BaseException:
         target.unlink(missing_ok=True)
         raise
-    result={'id':aid,'url':f'/api/assets/{aid}/file','name':name or source.name,'kind':kind,'category':semantic,'source':asset_source}
+    result={'id':aid,'url':f'/api/assets/{aid}/file','name':registered_name,'kind':kind,'category':semantic,'source':asset_source}
     if fingerprint:result['generationFingerprint']=fingerprint
     return result
 
