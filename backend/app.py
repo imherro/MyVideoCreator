@@ -1118,7 +1118,7 @@ def video_submission_preview(pid:str,node_id:str):
     from .motion_references import compile_motion_input
     data=compile_shot_video_input(document,node_id,'video',node['data'])
     provider=next((p for p in s.get_setting('providers',[]) if p.get('id')==data.get('provider')),None)
-    if provider and provider.get('type') in ('volcengine_ark','runninghub'):
+    if provider and provider.get('type') in ('volcengine_ark','runninghub','hc_atom'):
         data=bind_fixed_dialogue_audio(document,node_id,'video',data,production_assets(saved['production_id'],kind='audio'))
     data=compile_motion_input(document,node_id,'video',data,pid,provider)
     return {key:data.get(key) for key in ('prompt','reference_manifest','motion_reference','motion_warnings','planned_shot_duration','shot_duration','motion_compiler','generation_mode','dialogue_mode','voice_samples')}
@@ -1140,7 +1140,7 @@ def submit(pid:str,body:JobCreate):
         production_context=project_state['production_context'],
     )
     selected_provider=next((item for item in s.get_setting('providers',[]) if item.get('id')==prepared_input.get('provider')),None)
-    if body.kind=='video' and selected_provider and selected_provider.get('type') in ('volcengine_ark','runninghub'):
+    if body.kind=='video' and selected_provider and selected_provider.get('type') in ('volcengine_ark','runninghub','hc_atom'):
         prepared_input=bind_fixed_dialogue_audio(
             project_state['episode_document'],body.node_id,body.kind,prepared_input,
             production_assets(saved_project['production_id'],kind='audio'),
@@ -1936,6 +1936,12 @@ async def run_workflow(pid:str,request:Request):
             if kind=='image' and reference_count>max_image_references(provider):
                 raise ValueError(f'当前火山方舟图片模型最多支持 {max_image_references(provider)} 张参考图，请移除多余引用')
         if provider and provider.get('type')=='hc_atom':
+            if kind=='video':
+                data=bind_fixed_dialogue_audio(
+                    project_state['episode_document'],node['id'],kind,data,
+                    available_audio_assets,
+                    production_context=project_state['production_context'],
+                )
             reference_count=len(data['asset_ids'])+generated_image_parents
             if kind=='video' and reference_count>1 and not (p['document'].get('videoReferenceMode')=='multimodal' or any((shot.get('videoNode') or (shot.get('pipeline') or {}).get('videoNodeId'))==node['id'] and shot.get('videoReferenceMode')=='multimodal' for shot in p['document'].get('shots',[]))):
                 raise ValueError('幻场 AI 通用视频接口最多提交一张参考图')

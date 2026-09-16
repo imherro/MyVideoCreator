@@ -140,10 +140,19 @@ def test_sample_change_invalidates_only_speaking_video_and_downstream(sample_vid
     assert revised['nodes'][3]['data']['stale'] is True
 
 
-def test_api_preview_single_batch_and_shared_voice_invalidation(sample_video):
+@pytest.mark.parametrize("provider_type", ["volcengine_ark", "hc_atom"])
+def test_api_preview_single_batch_and_shared_voice_invalidation(sample_video, provider_type):
     from fastapi.testclient import TestClient
     from backend.app import app
     doc, provider, fixture_job, _ = voice_fixture(sample_video)
+    if provider_type == 'hc_atom':
+        provider['type'] = 'hc_atom'
+        provider['models']['video'] = 'doubao-seedance-2.5'
+        fixture_job['input']['model'] = 'doubao-seedance-2.5'
+        for node in doc['nodes']:
+            if node.get('data', {}).get('kind') == 'video':
+                node['data']['model'] = 'doubao-seedance-2.5'
+
     previous_providers = s.get_setting('providers', [])
     with TestClient(app) as client:
         app.state.worker.stop()
