@@ -404,6 +404,7 @@ def test_visual_reference_queue_validates_server_capability_and_persists_ownersh
             'input':{
                 'provider':'phase3-image','model':'image-model','prompt':'雨中状态','allow_cloud':False,
                 'model_capabilities':{'image_reference':True},
+                'ratio':'9:16','size':'2K',
                 'asset_ids':[parent['id']],'asset_category':'character',
                 'visual_reference':{
                     'versionId':state_version,'targetSource':'project',
@@ -436,6 +437,8 @@ def test_visual_reference_queue_validates_server_capability_and_persists_ownersh
         )
         assert job['project_revision']==saved.json()['revision']
         assert job['production_revision']==saved.json()['production_revision']+1
+        assert job['input']['ratio']=='16:9'
+        assert job['input']['size']=='2048x1152'
         assert generation['submissionId']==payload['submission_id']
         assert generation['jobId']==job['id']
         assert job['project_document']['filmBible']['visual']['versions'][state_version]['status']=='pending_reference'

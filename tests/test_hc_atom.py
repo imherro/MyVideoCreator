@@ -282,6 +282,7 @@ def test_seedance_retries_transport_reset_with_same_idempotency_key(monkeypatch)
 
 def test_reference_image_uses_async_task_protocol(monkeypatch):
     item = stored_job('image', provider())
+    item['input']['size'] = '2048x1152'
     aid = 'hc-ref-' + uuid.uuid4().hex
     path = s.ASSETS / (aid + '.png')
     path.write_bytes(b'png-test')
@@ -297,6 +298,7 @@ def test_reference_image_uses_async_task_protocol(monkeypatch):
         if request.method == 'POST':
             body = json.loads(request.read())
             assert body['input']['images'][0].startswith('data:image/png;base64,')
+            assert body['parameters']['size'] == '2048x1152'
             return httpx.Response(200, json={'code': 200, 'data': {'taskId': 'ig-1'}})
         return httpx.Response(200, json={'code': 200, 'data': {'status': 'SUCCESS', 'resultUrls': ['https://result.example/image.png']}})
 

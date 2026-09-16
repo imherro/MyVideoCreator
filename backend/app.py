@@ -868,8 +868,29 @@ def save_prompt_template(tid:str,body:PromptTemplateSave):
         c.execute('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',('prompt_library',s.dumps(library)))
     return library
 
+def _project_image_spec(c, pid):
+    row = c.execute('SELECT document FROM projects WHERE id=?', (pid,)).fetchone()
+    document = json.loads(row['document']) if row else {}
+    ratio = str(document.get('ratio') or '16:9')
+    size = {
+        '21:9': '2048x864',
+        '16:9': '2048x1152',
+        '4:3': '2048x1536',
+        '1:1': '2048x2048',
+        '3:4': '1536x2048',
+        '9:16': '1152x2048',
+    }.get(ratio, '2048x2048')
+    return ratio, size
+
+
 def create_job_record(c,pid,body):
     from .job_contracts import freeze_prompt_contract
+    if body.kind == 'image':
+        # The project owns the output frame. Do not let a stale browser, a
+        # canvas-node default, or a provider-wide "2K" preset silently turn an
+        # episode image into a different aspect ratio.
+        ratio, size = _project_image_spec(c, pid)
+        body.input = {**body.input, 'ratio': ratio, 'size': size}
     body.input=freeze_prompt_contract(body.kind,body.input)
     if body.kind not in ('text','storyboard','image','video','audio','export'): raise ValueError('不支持的任务类型')
     old=c.execute('SELECT * FROM jobs WHERE submission_id=?',(body.submission_id,)).fetchone()

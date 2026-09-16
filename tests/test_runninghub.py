@@ -94,8 +94,10 @@ def test_text_reuses_runninghub_openai_stream(monkeypatch):
 
 
 def test_image_reference_upload_submit_poll_and_download(monkeypatch):
-    item = stored_job('image', provider())
+    configured = provider(); configured['parameters']['image']['size'] = '1024x1024'
+    item = stored_job('image', configured)
     item['input']['asset_ids'] = [add_image(item)]
+    item['input']['size'] = '2048x1152'
     paths = []
     original = httpx.Client
 
@@ -107,13 +109,14 @@ def test_image_reference_upload_submit_poll_and_download(monkeypatch):
         if request.url.path.endswith('/image-to-image'):
             body = json.loads(request.read())
             assert body['imageUrls'] == ['https://input.example/reference.png']
+            assert (body['width'], body['height']) == (2048, 1152)
             return httpx.Response(200, json={'taskId': 'image-task', 'status': 'RUNNING'})
         return httpx.Response(200, json={'taskId': 'image-task', 'status': 'SUCCESS', 'results': [{'fileUrl': 'https://result.example/result.png'}]})
 
     monkeypatch.setattr(runninghub.httpx, 'Client', lambda **kw: original(**kw, transport=httpx.MockTransport(handle)))
     monkeypatch.setattr(common, 'download_result', lambda job, url, ext, recoverable=False: {'id': 'image-asset', 'kind': 'image'})
     worker = Worker(); worker.halt = NoWait()
-    assert runninghub.generate_image(worker, item, provider())['assets'][0]['id'] == 'image-asset'
+    assert runninghub.generate_image(worker, item, configured)['assets'][0]['id'] == 'image-asset'
     assert paths == ['/openapi/v2/media/upload/binary', '/openapi/v2/seedream-v5-pro/image-to-image', '/openapi/v2/query']
 
 

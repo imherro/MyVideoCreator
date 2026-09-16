@@ -463,10 +463,12 @@ def generate_image(worker, job, provider):
             path = _root(provider) + str(params.get('task_path') or '/image/generation/tasks')
             remote = job.get('provider_job_id')
             if not remote:
+                task_parameters = {k: v for k, v in params.items() if k not in ('mode', 'task_path')}
+                task_parameters['size'] = job['input'].get('size') or task_parameters.get('size') or '1024x1024'
                 body = {
                     'model': model,
                     'input': {'prompt': job['input']['prompt']},
-                    'parameters': {k: v for k, v in params.items() if k not in ('mode', 'task_path')},
+                    'parameters': task_parameters,
                 }
                 if refs:
                     body['input']['images'] = [_data_uri(asset) for asset in refs]
@@ -480,7 +482,7 @@ def generate_image(worker, job, provider):
             'model': model,
             'prompt': job['input']['prompt'],
             'n': int(params.get('n', 1)),
-            'size': params.get('size') or job['input'].get('size') or '1024x1024',
+            'size': job['input'].get('size') or params.get('size') or '1024x1024',
             'response_format': params.get('response_format') or 'url',
         }
         worker.progress(job, '幻场 AI 生成图片')

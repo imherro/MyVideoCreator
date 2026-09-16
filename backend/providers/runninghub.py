@@ -202,7 +202,7 @@ def _wait_task(worker, job, client, root, task_id, kind):
 
 
 def _dimensions(job, params):
-    raw = str(params.get('size') or job['input'].get('size') or '1024x1024').lower()
+    raw = str(job['input'].get('size') or params.get('size') or '1024x1024').lower()
     try:
         width, height = (int(value) for value in raw.split('x', 1))
     except (TypeError, ValueError):

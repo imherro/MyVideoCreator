@@ -82,12 +82,15 @@ def test_ark_text_reuses_openai_compatible_worker(monkeypatch):
 
 
 def test_seedream_downloads_into_existing_asset_library(monkeypatch):
-    item=stored_job('image',provider())
+    configured=provider();configured['parameters']['image']={'size':'2K'}
+    item=stored_job('image',configured)
+    item['input']['size']='2048x1152'
     original=httpx.Client
     def handle(request):
         assert request.url.path=='/api/v3/images/generations'
         body=json.loads(request.read())
         assert body['model']=='seedream-image' and body['response_format']=='url'
+        assert body['size']=='2048x1152'
         assert 'image' not in body
         return httpx.Response(200,json={'data':[{'url':'https://result.example/frame.png'}]})
     monkeypatch.setattr(ark.httpx,'Client',lambda **kw:original(**kw,transport=httpx.MockTransport(handle)))
