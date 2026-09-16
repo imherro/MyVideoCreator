@@ -48,7 +48,6 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
-  ChevronDown,
   Play,
   Download,
   Upload,
@@ -2533,11 +2532,10 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         <button
           className={panel === "projectInfo" ? "project-menu active" : "project-menu"}
           onClick={() => { setProjectSettingsTab("production"); setPanel(panel === "projectInfo" ? null : "projectInfo"); }}
-          title="打开当前项目设置"
+          title="查看和修改当前项目"
+          aria-label={`查看和修改项目：${currentProduction?.name || project.name}`}
         >
-          <FolderOpen size={15} />
-          项目 · {currentProduction?.name || project.name}
-          <ChevronDown size={14} />
+          {currentProduction?.name || project.name}
         </button>
         <WorkflowStageNav
           active={workflowStage}
