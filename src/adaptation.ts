@@ -66,3 +66,17 @@ export function normalizeEpisodeSelection(values: Iterable<number>, episodeCount
 export function splitList(value: string) {
   return [...new Set(value.split(/[，,\n]/).map((item) => item.trim()).filter(Boolean))];
 }
+// Shared story approval and individual episode approval have separate lifecycles.
+export function adaptationReviewSummary(value: Record<string, any>) {
+  const shared = value.adaptationPlan?.status;
+  const protectedEpisodes = new Set<number>(value.protectedEpisodeNos || []);
+  const pending = (value.episodePlans || []).filter((plan: EpisodePlan) => !protectedEpisodes.has(plan.episodeNo) && plan.status !== "approved");
+  if (shared === "stale") return { status: "stale", headline: "全剧故事骨架需要更新", reason: "共享策划已过期，单集重新生成不会自动批准全剧故事骨架。" };
+  if (shared === "approved" && pending.length) {
+    const status = pending.some((plan: EpisodePlan) => plan.status === "stale") ? "stale" : pending.some((plan: EpisodePlan) => plan.status === "review") ? "review" : "draft";
+    const labels = pending.filter((plan: EpisodePlan) => plan.status === status).map((plan: EpisodePlan) => `EP${String(plan.episodeNo).padStart(2, "0")}`).join("、");
+    return { status, headline: `${labels} ${status === "review" ? "规划已生成，待审核" : status === "stale" ? "规划需要更新" : "规划待完善"}`,
+      reason: status === "review" ? "检查当前集规划后点击“批准当前集”，再进入剧本；无需重复生成。" : "全剧故事骨架沿用已批准版本，仅需处理对应分集。" };
+  }
+  return { status: shared, headline: shared === "approved" ? "改编策划已批准" : shared === "review" ? "改编策划等待审核" : "可以建立改编策划", reason: shared === "review" ? "批准后才可生成逐集剧本。" : "" };
+}

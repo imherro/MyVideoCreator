@@ -1530,7 +1530,7 @@ def generate_adaptation(production_id:str,body:TextGenerationCreate):
 
 @app.post('/api/productions/{production_id}/adaptation/episodes/{episode_no}/generate')
 def generate_episode_plan(production_id:str,episode_no:int,body:TextGenerationCreate):
-    from .adaptation import adaptation_fingerprint,protected_episode_nos,source_fingerprint,source_snapshot
+    from .adaptation import adaptation_fingerprint,episode_continuity_context,protected_episode_nos,source_fingerprint,source_snapshot
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
         state=read_project_state(c,body.project_id)
@@ -1545,17 +1545,21 @@ def generate_episode_plan(production_id:str,episode_no:int,body:TextGenerationCr
         all_sources=source_snapshot(c,production_id)
         sources=[item for item in all_sources if item['chapterId'] in set(plan['sourceChapterRefs'])]
         if not sources:raise ValueError('当前集引用的章节尚未提取事件，请先完成事件提取')
+        continuity=episode_continuity_context(c,production_id,episode_no,context)
         prompt=(f'请只生成 EP{episode_no:02d} 的分集规划，不得改动其他集。\n'
             f'作品级故事骨架与策略：{s.dumps({key:context["adaptationPlan"][key] for key in ("storyCore","storyArc","adaptationStrategy")})}\n'
             f'本集固定规格：{s.dumps({"episodeNo":episode_no,"targetDuration":plan["targetDuration"],"sourceChapterRefs":plan["sourceChapterRefs"]})}\n'
+            f'前集与 Film Bible 连续性资料（只读，不得改写；本集必须承接而非重演）：\n{s.dumps(continuity)}\n'
             '本集原著事件：\n'+s.dumps(sources))
         job_body=JobCreate(node_id=f'adaptation-episode:{production_id}:{episode_no}',kind='text',submission_id=body.submission_id,input={
             'provider':body.provider,'model':body.model,
             'stage':'adaptation_episode_generation','prompt':prompt,'max_tokens':4000,
+            'continuity_context':continuity,
             'episode_plan_generation':{
                 'productionId':production_id,'episodeNo':episode_no,
                 'adaptationFingerprint':adaptation_fingerprint(context),
                 'sourceFingerprint':source_fingerprint(all_sources),
+                'continuityFingerprint':source_fingerprint(continuity),
                 'sourceEventIds':[item['id'] for item in sources],
                 'sourceChapterIds':list(dict.fromkeys(item['chapterId'] for item in sources)),
                 'targetDuration':plan['targetDuration'],

@@ -1,4 +1,5 @@
 import type { WorkflowStage } from "./workflow";
+import { adaptationReviewSummary } from "../adaptation.ts";
 
 export type WorkflowStageState =
   | "unstarted"
@@ -65,6 +66,7 @@ export function deriveWorkflowGuide(input: {
   const shots: Value[] = document.shots || [];
   const sourceEventCount = Number(adaptation.sourceEventCount || 0);
   const adaptationStatus = adaptation.adaptationPlan?.status;
+  const adaptationReview = adaptationReviewSummary(adaptation);
   const currentScript = scripts.find((item) => item.projectId === project.id || item.episodeNo === project.episode_no)?.script;
   const quickCanvasScript = currentScript?.metadata?.origin === "canvas" && Boolean(String(currentScript?.body || "").trim());
   const scriptApproved = currentScript?.status === "approved";
@@ -92,14 +94,16 @@ export function deriveWorkflowGuide(input: {
       : { stage: "source", state: "ready", headline: "导入原著并提取事件", reasons: ["改编策划需要可追溯的原著事件。"] },
     adaptation: quickCanvasScript && adaptationStatus !== "approved"
       ? { stage: "adaptation", state: "skipped", headline: "画布快速创作已跳过改编策划", reasons: ["可以直接完善本集正式剧本，也可以稍后补充改编策划。"] }
-      : adaptationStatus === "approved"
+      : activeJob(jobs, (job) => ["adaptation_generation", "adaptation_episode_generation"].includes(job.input?.stage))
+      ? { stage: "adaptation", state: "running", headline: "改编规划正在生成", reasons: ["完成后自动刷新，再审核生成的规划。"] }
+      : adaptationReview.status === "approved"
       ? { stage: "adaptation", state: "complete", headline: "改编策划已批准", reasons: [], action: { label: "进入剧本", stage: "script" } }
-      : adaptationStatus === "review"
-        ? { stage: "adaptation", state: "review", headline: "改编策划等待审核", reasons: ["批准后才可生成逐集剧本。"] }
-        : adaptationStatus === "stale"
-          ? { stage: "adaptation", state: "stale", headline: "原著已改变，请更新改编策划", reasons: ["旧策划仍保留，可检查差异后重新生成或修改。"] }
+      : adaptationReview.status === "review"
+        ? { stage: "adaptation", state: "review", headline: adaptationReview.headline, reasons: [adaptationReview.reason] }
+        : adaptationReview.status === "stale"
+          ? { stage: "adaptation", state: "stale", headline: adaptationReview.headline, reasons: [adaptationReview.reason] }
           : sourceEventCount
-            ? { stage: "adaptation", state: "ready", headline: "可以建立改编策划", reasons: [] }
+            ? { stage: "adaptation", state: "ready", headline: adaptationReview.headline, reasons: adaptationReview.reason ? [adaptationReview.reason] : [] }
             : { stage: "adaptation", state: "blocked", headline: "先完成原著事件提取", reasons: ["当前没有可供改编引用的原著事件。"], action: { label: "前往原著", stage: "source" } },
     script: quickCanvasScript && currentScript?.status === "approved"
       ? { stage: "script", state: "complete", headline: "本集画布剧本已批准", reasons: [] }

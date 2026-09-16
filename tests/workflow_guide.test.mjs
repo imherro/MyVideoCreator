@@ -4,6 +4,33 @@ import {deriveWorkflowGuide} from '../src/app/workflowGuide.ts';
 
 const base={adaptation:{sourceEventCount:0,adaptationPlan:{status:'draft'}},scripts:[],currentProject:{id:'ep1',episode_no:1},document:{shots:[],nodes:[],timeline:[],filmBible:{visual:{cards:{},versions:{}}}},jobs:[]};
 
+test('regenerated EP02 asks for review while completed EP01 and shared story stay approved',()=>{
+  const adaptation={sourceEventCount:6,adaptationPlan:{status:'approved'},protectedEpisodeNos:[1],episodePlans:[{episodeNo:1,status:'approved'},{episodeNo:2,status:'review'}]};
+  const guide=deriveWorkflowGuide({...base,adaptation});
+  assert.equal(guide.stages.adaptation.state,'review');
+  assert.match(guide.stages.adaptation.headline,/EP02.*待审核/);
+  assert.match(guide.stages.adaptation.reasons[0],/无需重复生成/);
+  adaptation.episodePlans[1].status='approved';
+  assert.equal(deriveWorkflowGuide({...base,adaptation}).stages.adaptation.state,'complete');
+});
+
+test('episode-only invalidation names the affected episode and respects running regeneration',()=>{
+  const adaptation={sourceEventCount:6,adaptationPlan:{status:'approved'},protectedEpisodeNos:[1],episodePlans:[{episodeNo:1,status:'approved'},{episodeNo:2,status:'stale'}]};
+  let guide=deriveWorkflowGuide({...base,adaptation});
+  assert.equal(guide.stages.adaptation.state,'stale');
+  assert.match(guide.stages.adaptation.headline,/EP02/);
+  assert.doesNotMatch(guide.stages.adaptation.headline,/EP01/);
+  guide=deriveWorkflowGuide({...base,adaptation,jobs:[{status:'running',input:{stage:'adaptation_episode_generation'}}]});
+  assert.equal(guide.stages.adaptation.state,'running');
+});
+
+test('a genuinely stale shared story is not silently approved by episode regeneration',()=>{
+  const adaptation={sourceEventCount:6,adaptationPlan:{status:'stale'},episodePlans:[{episodeNo:2,status:'review'}]};
+  const guide=deriveWorkflowGuide({...base,adaptation});
+  assert.equal(guide.stages.adaptation.state,'stale');
+  assert.match(guide.stages.adaptation.headline,/全剧故事骨架/);
+});
+
 test('guide blocks downstream work and recommends source first',()=>{
   const guide=deriveWorkflowGuide(base);
   assert.equal(guide.recommendedStage,'source');

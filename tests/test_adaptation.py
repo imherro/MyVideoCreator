@@ -424,7 +424,13 @@ def test_appending_episode_preserves_completed_sibling_and_generates_only_new_pl
     job = queued.json()
     assert job['scope'] == 'production'
     assert job['input']['stage'] == 'adaptation_episode_generation'
-    assert job['input']['schema_version'] == 'episode-plan/v1'
+    assert job['input']['schema_version'] == 'episode-plan/v2'
+    continuity = job['input']['continuity_context']
+    assert continuity['immediatePreviousAvailable'] is True
+    assert continuity['previousEpisodes'][0]['evidence'] == 'completed_script'
+    assert continuity['previousEpisodes'][0]['script']['body'] == script['body']
+    assert script['body'].splitlines()[-1] in job['input']['prompt']
+    assert '承接前集结尾' in job['input']['system_prompt']
 
     generated = {
         'episodeNo': 2, 'sourceChapterRefs': [chapter_two['id']],
@@ -441,3 +447,77 @@ def test_appending_episode_preserves_completed_sibling_and_generates_only_new_pl
     assert after['episodePlans'][0] == approved['episodePlans'][0]
     assert after['episodePlans'][1]['status'] == 'review'
     assert client.get(f'/api/productions/{production["id"]}/episode-scripts/1').json()['status'] == 'approved'
+
+    # Updating EP02's source must not stale the frozen shared story or EP01.
+    s.job_update(job['id'], status='succeeded', result=result)
+    edited = client.put(f'/api/productions/{production["id"]}/chapters/{chapter_two["id"]}', json={
+        'title': chapter_two['title'], 'content': chapter_two['content'] + '\n证人藏在客栈。', 'revision': chapter_two['revision'],
+    })
+    assert edited.status_code == 200, edited.text
+    stale = client.get(f'/api/productions/{production["id"]}/adaptation').json()
+    assert stale['adaptationPlan']['status'] == 'approved'
+    assert [plan['status'] for plan in stale['episodePlans']] == ['approved', 'stale']
+    assert client.get(f'/api/productions/{production["id"]}/episode-scripts/1').json()['status'] == 'approved'
+    queued = client.post(f'/api/productions/{production["id"]}/adaptation/episodes/2/generate', json={
+        'project_id': episode['id'], 'provider': 'local', 'model': '', 'submission_id': 'regenerate-only-episode-two',
+    })
+    assert queued.status_code == 200, queued.text
+    job = queued.json()
+    s.job_update(job['id'], status='running')
+    # A changed prior script must reject results composed against older continuity.
+    with s.db() as connection:
+        connection.execute('UPDATE episode_scripts SET body=? WHERE project_id=?', ('changed ending', episode['id']))
+    with pytest.raises(ValueError, match='前集剧本'):
+        worker.text({**job, 'status': 'running'}, {'url': 'http://unused', 'local': True})
+    with s.db() as connection:
+        connection.execute('UPDATE episode_scripts SET body=? WHERE project_id=?', (script['body'], episode['id']))
+    worker.text({**job, 'status': 'running'}, {'url': 'http://unused', 'local': True})
+    current = client.get(f'/api/productions/{production["id"]}/adaptation').json()
+    assert [plan['status'] for plan in current['episodePlans']] == ['approved', 'review']
+    accepted = client.post(f'/api/productions/{production["id"]}/adaptation/episodes/2/approve', json={'revision': current['revision']})
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()['adaptationPlan']['status'] == 'approved'
+    scripts = client.post(f'/api/productions/{production["id"]}/script-generations', json={
+        'episode_nos': [2], 'provider': 'local', 'model': '', 'submission_id': 'script-after-episode-two-approved',
+    })
+    assert scripts.status_code == 200, scripts.text
+    assert len(scripts.json()['jobs']) == 1
+    assert scripts.json()['jobs'][0]['input']['episode_script_generation']['episodeNo'] == 2
+
+
+@pytest.mark.parametrize('change_shared_content', [False, True])
+def test_legacy_repair_requires_recorded_approval_and_unchanged_content(adaptation_client, change_shared_content):
+    from backend.adaptation import _persist_production_context, _stale_scripts, repair_legacy_protected_adaptation
+    client = adaptation_client
+    production, episode, chapter, adaptation = setup_production(client, count=2)
+    approved = save_and_approve(client, production, adaptation)
+    with s.db() as connection:
+        project = connection.execute('SELECT * FROM projects WHERE id=?', (episode['id'],)).fetchone()
+        document = json.loads(project['document'])
+        document['nodes'].append({'id': 'done', 'data': {'kind': 'video', 'assetId': 'video'}})
+        connection.execute('UPDATE projects SET document=? WHERE id=?', (s.dumps(document), episode['id']))
+        connection.execute("UPDATE episode_scripts SET status='approved',body='finished script' WHERE project_id=?", (episode['id'],))
+        row = connection.execute('SELECT * FROM productions WHERE id=?', (production['id'],)).fetchone()
+        context = json.loads(row['shared_context'])
+        context['adaptationPlan']['status'] = 'stale'
+        for plan in context['episodePlans']:
+            plan['status'] = 'stale'
+        if change_shared_content:
+            context['adaptationPlan']['storyCore']['goal'] = 'different goal'
+        _persist_production_context(connection, row, context)
+        _stale_scripts(connection, production['id'])
+        # EP02 has already regenerated; historical repair must not approve it.
+        row = connection.execute('SELECT * FROM productions WHERE id=?', (production['id'],)).fetchone()
+        context['episodePlans'][1]['status'] = 'review'
+        _persist_production_context(connection, row, context)
+        repaired = repair_legacy_protected_adaptation(connection)
+        assert (production['id'] in repaired) is (not change_shared_content)
+        assert production['id'] not in repair_legacy_protected_adaptation(connection)
+    result = client.get(f'/api/productions/{production["id"]}/adaptation').json()
+    assert result['adaptationPlan']['status'] == ('stale' if change_shared_content else 'approved')
+    assert result['episodePlans'][1]['status'] == 'review'
+    script = client.get(f'/api/productions/{production["id"]}/episode-scripts/1').json()
+    assert script['status'] == ('stale' if change_shared_content else 'approved')
+    assert script['body'] == 'finished script'
+    if not change_shared_content:
+        assert result['episodePlans'][0] == approved['episodePlans'][0]

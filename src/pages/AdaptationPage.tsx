@@ -8,6 +8,7 @@ import {
   RATIO_OPTIONS,
   STATUS_LABELS,
   appendEpisodeForChapter,
+  adaptationReviewSummary,
   createEpisodePlans,
   type EpisodePlan,
 } from "../adaptation";
@@ -30,7 +31,7 @@ export function AdaptationPage({
 }) {
   const [draft, setDraft] = useState<Value | null>(null);
   const [chapters, setChapters] = useState<Value[]>([]);
-  const [active, setActive] = useState(1);
+  const [active, setActive] = useState(0);
   const [busy, setBusy] = useState(false);
   const textProviders = useMemo(
     () => [{ id: "local", name: "本地 llama.cpp", local: true, model: "" }, ...providers.filter((p) => !p.kind || p.kind === "text")],
@@ -52,9 +53,11 @@ export function AdaptationPage({
     setDraft(value);
     onRevision(value.revision);
     setChapters(sourceChapters);
-    setActive((current) => Math.min(Math.max(1, current), Math.max(1, value.episodePlans.length)));
+    setActive((current) => value.episodePlans.some((plan: EpisodePlan) => plan.episodeNo === current) ? current
+      : value.episodePlans.find((plan: EpisodePlan) => plan.status !== "approved" && !value.protectedEpisodeNos?.includes(plan.episodeNo))?.episodeNo || 1);
   }
-  useEffect(() => { setDraft(null); setActive(1); void load().catch(report); }, [productionId, refreshKey]);
+  useEffect(() => { setDraft(null); setActive(0); }, [productionId]);
+  useEffect(() => { void load().catch(report); }, [productionId, refreshKey]);
   useEffect(() => {
     setProviderId(defaultProviderId);
     setModel(defaultModelId);
@@ -80,7 +83,6 @@ export function AdaptationPage({
       ...draft,
       adaptationPlan: {
         ...draft.adaptationPlan,
-        status: "draft",
         format: { ...draft.adaptationPlan.format, episodeCount: episodeNo },
       },
       episodePlans: plans,
@@ -106,7 +108,9 @@ export function AdaptationPage({
   }
   async function transitionEpisode(action: "review" | "approve") {
     if (!draft) return;
-    const value = await request(`/productions/${productionId}/adaptation/episodes/${active}/${action}`, { method: "POST", body: JSON.stringify({ revision: draft.revision }) });
+    const saved = await save(false);
+    if (!saved) return;
+    const value = await request(`/productions/${productionId}/adaptation/episodes/${active}/${action}`, { method: "POST", body: JSON.stringify({ revision: saved.revision }) });
     setDraft({ ...value, sourceEventCount: draft.sourceEventCount, protectedEpisodeNos: value.protectedEpisodeNos || draft.protectedEpisodeNos || [] });
     onRevision(value.revision);
     notify(action === "review" ? `EP${String(active).padStart(2, "0")} 规划已提交审核` : `EP${String(active).padStart(2, "0")} 规划已批准，可继续生成本集剧本`);
@@ -150,13 +154,14 @@ export function AdaptationPage({
   const protectedEpisodes = new Set<number>(draft.protectedEpisodeNos || []);
   const activeProtected = protectedEpisodes.has(active);
   const hasProtectedEpisodes = protectedEpisodes.size > 0;
+  const reviewSummary = adaptationReviewSummary(draft);
   const chapterAssignments = new Map<string, number[]>();
   draft.episodePlans.forEach((item: EpisodePlan) => item.sourceChapterRefs.forEach((chapterId) => chapterAssignments.set(chapterId, [...(chapterAssignments.get(chapterId) || []), item.episodeNo])));
   return <section className="adaptation-page workflow-domain-page">
     <header className="domain-header">
       <div><span className="eyebrow">ADAPTATION</span><h1>改编工作台</h1><p>原著事件 → 故事骨架 → 改编策略 → 分集规划。所有 AI 结果都需要人工批准。</p></div>
       <div className="settings-actions">
-        <span className={`workflow-status ${draft.adaptationPlan.status}`}>{STATUS_LABELS[draft.adaptationPlan.status] || draft.adaptationPlan.status}</span>
+        <span className={`workflow-status ${reviewSummary.status}`} title={reviewSummary.reason}>{reviewSummary.headline}</span>
         <button disabled={busy} onClick={() => run(load)}><RefreshCw size={15} />刷新</button>
         <button disabled={busy} onClick={() => run(() => save().then(() => undefined))}><Save size={15} />保存草稿</button>
         <button disabled={busy || hasProtectedEpisodes} title={hasProtectedEpisodes ? "已有成片分集，请使用当前集审核" : ""} onClick={() => run(() => transition("review"))}>提交全剧审核</button>
@@ -181,7 +186,7 @@ export function AdaptationPage({
         <label>平台<select disabled={hasProtectedEpisodes} value={format.platform} onChange={(e) => setFormat("platform", e.target.value)}>{!PLATFORM_OPTIONS.includes(format.platform) && <option value={format.platform}>{format.platform}</option>}{PLATFORM_OPTIONS.map((value)=><option value={value} key={value}>{value}</option>)}</select><small>用于 AI 决定节奏、钩子与商业卡点。</small></label>
       </div>{hasProtectedEpisodes ? <small className="protected-note"><Lock size={12}/>已有成片分集，作品级规格已锁定；请用左侧＋追加新集。</small> : <button onClick={() => setDraft((current) => current && ({ ...current, episodePlans: createEpisodePlans(current.adaptationPlan.format.episodeCount, current.adaptationPlan.format.targetDuration, current.episodePlans) }))}>按规格建立 / 调整分集规划</button>}</article>
       {storyGroups.map(([key, title, fields]) => <article className="domain-card" key={key}><h2>{title}</h2><div className="domain-fields">{fields.map(([field, label]) => <label key={field}>{label}<textarea disabled={hasProtectedEpisodes} rows={2} value={draft.adaptationPlan[key]?.[field] || ""} onChange={(e) => setStory(key, field, e.target.value)} /></label>)}</div></article>)}
-      <article className="domain-card"><div className="domain-card-heading"><div><h2>分集规划</h2><small>{draft.episodePlans.length} 集 · 当前 EP{String(active).padStart(2, "0")}{activeProtected ? " · 已有成片，规划锁定" : ""}</small></div><div className="episode-plan-actions">{!activeProtected && plan?.status === "draft" && <button disabled={busy} onClick={() => run(() => transitionEpisode("review"))}>提交当前集审核</button>}{!activeProtected && plan?.status === "review" && <button className="primary" disabled={busy} onClick={() => run(() => transitionEpisode("approve"))}><Check size={14}/>批准当前集</button>}</div></div>
+      <article className="domain-card"><div className="domain-card-heading"><div><h2>分集规划</h2><small>{draft.episodePlans.length} 集 · 当前 EP{String(active).padStart(2, "0")}{activeProtected ? " · 已有成片，规划锁定" : ""}</small></div><div className="episode-plan-actions">{!activeProtected && (plan?.status === "draft" || plan?.status === "stale") && <button disabled={busy} onClick={() => run(() => transitionEpisode("review"))}>提交当前集审核</button>}{!activeProtected && plan?.status === "review" && <button className="primary" disabled={busy} onClick={() => run(() => transitionEpisode("approve"))}><Check size={14}/>批准当前集</button>}</div></div>
         {plan ? <div className="episode-plan-editor"><div className="domain-fields">
           <label>一句话梗概<textarea disabled={activeProtected} rows={2} value={plan.logline} onChange={(e) => setPlan({ logline: e.target.value })} /></label>
           <label>核心冲突<textarea disabled={activeProtected} rows={2} value={plan.coreConflict} onChange={(e) => setPlan({ coreConflict: e.target.value })} /></label>
@@ -194,7 +199,7 @@ export function AdaptationPage({
       </article>
       <MonetizationEditor draft={draft} setDraft={setDraft} locked={hasProtectedEpisodes} />
     </main></div>
-    <footer className="domain-generation-bar"><div><b>{hasProtectedEpisodes ? `仅生成当前集 EP${String(active).padStart(2, "0")}` : "AI 基于原著生成整个改编工作台"}</b><small>{hasProtectedEpisodes ? `已保护 ${[...protectedEpisodes].map((number) => `EP${String(number).padStart(2, "0")}`).join("、")}；本次不会修改其他集` : draft.sourceEventCount ? `${draft.sourceEventCount} 条原著事件 · 将生成故事骨架、策略、分集规划和商业卡点` : "尚未提取原著事件，请先完成原著分析"}</small></div><label>服务<select value={providerId} onChange={(e) => { setProviderId(e.target.value); const p = textProviders.find((x) => x.id === e.target.value); setModel(p?.enabled_models?.text?.[0] || p?.models?.text || p?.model || ""); }}>{textProviders.map((item) => <option key={item.id} value={item.id}>{item.local ? "本地" : "云端"} · {item.name}</option>)}</select></label><label>模型{providerId === "local" ? <input value={model} placeholder="本地默认" onChange={(e) => setModel(e.target.value)} /> : <select value={model} onChange={(e) => setModel(e.target.value)}>{!allowedTextModels.includes(model) && model && <option value={model} disabled>{model}（已停用）</option>}{allowedTextModels.map((modelId) => <option value={modelId} key={modelId}>{modelId}</option>)}</select>}</label>{draft.sourceEventCount ? hasProtectedEpisodes ? <button className="primary" disabled={busy || activeProtected || !plan?.sourceChapterRefs.length} onClick={() => run(generateEpisode)}><Sparkles size={15} />生成当前集规划</button> : <button className="primary" disabled={busy} onClick={() => run(generate)}><Sparkles size={15} />生成整个工作台</button> : <button className="primary" disabled={busy} onClick={onOpenSource}>先提取原著事件</button>}</footer>
+    <footer className="domain-generation-bar">{hasProtectedEpisodes && !activeProtected && plan?.status === "review" && <button className="primary" disabled={busy} onClick={() => run(() => transitionEpisode("approve"))}><Check size={15}/>批准当前集</button>}<div><b>{hasProtectedEpisodes ? `EP${String(active).padStart(2, "0")} · ${activeProtected ? "成片锁定" : STATUS_LABELS[plan?.status || "draft"]}` : "AI 基于原著生成整个改编工作台"}</b><small>{hasProtectedEpisodes ? (plan?.status === "review" && !activeProtected ? "规划已生成，请检查并批准当前集；无需重复生成。" : `沿用已批准故事骨架及前集连续性资料；已完成分集不变。`) : draft.sourceEventCount ? `${draft.sourceEventCount} 条原著事件 · 将生成故事骨架、策略、分集规划和商业卡点` : "尚未提取原著事件，请先完成原著分析"}</small></div><label>服务<select value={providerId} onChange={(e) => { setProviderId(e.target.value); const p = textProviders.find((x) => x.id === e.target.value); setModel(p?.enabled_models?.text?.[0] || p?.models?.text || p?.model || ""); }}>{textProviders.map((item) => <option key={item.id} value={item.id}>{item.local ? "本地" : "云端"} · {item.name}</option>)}</select></label><label>模型{providerId === "local" ? <input value={model} placeholder="本地默认" onChange={(e) => setModel(e.target.value)} /> : <select value={model} onChange={(e) => setModel(e.target.value)}>{!allowedTextModels.includes(model) && model && <option value={model} disabled>{model}（已停用）</option>}{allowedTextModels.map((modelId) => <option value={modelId} key={modelId}>{modelId}</option>)}</select>}</label>{draft.sourceEventCount ? hasProtectedEpisodes ? <button className="primary" disabled={busy || activeProtected || !plan?.sourceChapterRefs.length} onClick={() => run(generateEpisode)}><Sparkles size={15} />{plan?.logline ? "重新生成当前集规划" : "生成当前集规划"}</button> : <button className="primary" disabled={busy} onClick={() => run(generate)}><Sparkles size={15} />生成整个工作台</button> : <button className="primary" disabled={busy} onClick={onOpenSource}>先提取原著事件</button>}</footer>
   </section>;
 }
 

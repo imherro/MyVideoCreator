@@ -356,14 +356,84 @@ def mark_adaptation_stale(connection, production_id, *, chapter_ids=(), event_id
     ))
     if not meaningful:
         return None
+    protected = set(protected_episode_nos(connection, production_id))
+    # Once production has started, the approved shared story is a frozen basis.
+    # Later source edits only invalidate dependent, unfinished episodes.
+    changed_chapters = set(chapter_ids)
+    if event_ids:
+        placeholders = ','.join('?' for _ in event_ids)
+        changed_chapters.update(row['chapter_id'] for row in connection.execute(
+            f'SELECT chapter_id FROM source_events WHERE production_id=? AND id IN ({placeholders})',
+            [production_id, *event_ids],
+        ))
+    affected = {plan['episodeNo'] for plan in context['episodePlans']
+        if plan['episodeNo'] not in protected and (
+            not (chapter_ids or event_ids) or set(plan['sourceChapterRefs']).intersection(changed_chapters))}
     changed = False
-    if adaptation['status'] in ('review', 'approved'):
+    if not protected and adaptation['status'] in ('review', 'approved'):
         adaptation['status'] = 'stale'; changed = True
     for plan in context['episodePlans']:
-        if plan.get('status') in ('review', 'approved'):
+        if plan['episodeNo'] in affected and plan.get('status') in ('review', 'approved'):
             plan['status'] = 'stale'; changed = True
-    _stale_scripts(connection, production_id)
+    _stale_scripts(connection, production_id, affected)
     return _persist_production_context(connection, production, context) if changed else None
+
+
+def repair_legacy_protected_adaptation(connection):
+    """Restore status-only invalidations using recorded approvals, never infer approval."""
+    from . import store as s
+    from .production_context import normalize_production_context
+    repaired = []
+    without_status = lambda item: {key: value for key, value in item.items() if key != 'status'}
+    for production in connection.execute('SELECT * FROM productions').fetchall():
+        context = normalize_production_context(json.loads(production['shared_context']))
+        if context['adaptationPlan']['status'] != 'stale':
+            continue
+        protected = set(protected_episode_nos(connection, production['id']))
+        if not protected:
+            continue
+        previous = None
+        for row in connection.execute('SELECT shared_context FROM production_revisions WHERE production_id=? ORDER BY revision DESC', (production['id'],)):
+            candidate = normalize_production_context(json.loads(row['shared_context']))
+            if candidate['adaptationPlan']['status'] != 'stale':
+                previous = candidate
+                break
+        if not previous or previous['adaptationPlan']['status'] != 'approved':
+            continue
+        if (without_status(context['adaptationPlan']) != without_status(previous['adaptationPlan'])
+                or context['monetizationPlan'] != previous['monetizationPlan']):
+            continue
+        old_plans = {plan['episodeNo']: plan for plan in previous['episodePlans']}
+        restorable = {plan['episodeNo'] for plan in context['episodePlans']
+            if plan['episodeNo'] in protected and plan['status'] == 'stale'
+            and old_plans.get(plan['episodeNo'], {}).get('status') == 'approved'
+            and without_status(plan) == without_status(old_plans[plan['episodeNo']])}
+        if not restorable:
+            continue
+        context['adaptationPlan']['status'] = 'approved'
+        for plan in context['episodePlans']:
+            if plan['episodeNo'] in restorable:
+                plan['status'] = 'approved'
+        for script in connection.execute('''SELECT sc.*,p.episode_no FROM episode_scripts sc
+                JOIN projects p ON p.id=sc.project_id WHERE p.production_id=? AND sc.status='stale' ''', (production['id'],)).fetchall():
+            if script['episode_no'] not in restorable:
+                continue
+            prior = connection.execute('SELECT snapshot FROM episode_script_revisions WHERE project_id=? ORDER BY revision DESC LIMIT 1', (script['project_id'],)).fetchone()
+            if not prior:
+                continue
+            snapshot = json.loads(prior['snapshot'])
+            current = _script_snapshot(script)
+            content = lambda value: {key: item for key, item in value.items() if key not in ('status', 'revision')}
+            if snapshot['status'] not in ('approved', 'review') or content(snapshot) != content(current):
+                continue
+            now = time.time()
+            connection.execute('INSERT INTO episode_script_revisions VALUES(?,?,?,?,?)',
+                (s.uid('script-revision-'), script['project_id'], script['revision'], s.dumps(current), now))
+            connection.execute('UPDATE episode_scripts SET status=?,revision=revision+1,updated=? WHERE project_id=?',
+                (snapshot['status'], now, script['project_id']))
+        _persist_production_context(connection, production, context)
+        repaired.append(production['id'])
+    return repaired
 
 
 def seed_episode_scripts(connection):
@@ -575,6 +645,9 @@ ADAPTATION_SYSTEM_PROMPT = (
 )
 EPISODE_PLAN_SYSTEM_PROMPT = (
     '你是中文短剧分集策划。只为指定的单集生成可人工审核的分集规划，严格依据作品级故事骨架、改编策略和指定原著事件。'
+    '先阅读只读连续性资料：已拍摄或已批准的前集剧本代表已经发生的剧情，优先于旧分集规划；未批准的规划只是参考，不得当成既成事实。'
+    '承接前集结尾的时间地点、人物关系、情绪、伤势、持有道具和未解决悬念，避免重复已经完成的剧情或无依据重置人物状态。'
+    '遵守 Film Bible 的固定设定；本集原著明确要求的状态变化可以发展，但必须交代过渡。资料缺失或矛盾时不得编造前集事实。'
     '不得修改其他集，不得编造 sourceChapterRefs；episodeNo 和 targetDuration 必须严格服从输入。'
 )
 SCRIPT_SYSTEM_PROMPT = (
@@ -586,6 +659,50 @@ SCRIPT_SYSTEM_PROMPT = (
 def adaptation_bundle(context):
     normalized = normalize_adaptation_context(context)
     return {key: normalized[key] for key in ('adaptationPlan', 'episodePlans', 'monetizationPlan')}
+
+
+def episode_continuity_context(connection, production_id, episode_no, context):
+    """Read-only narrative evidence, frozen with each single-episode request."""
+    completed = set(protected_episode_nos(connection, production_id))
+    rows = connection.execute('''SELECT sc.*,p.episode_no FROM episode_scripts sc
+        JOIN projects p ON p.id=sc.project_id WHERE p.production_id=? AND p.episode_no<?
+        AND NOT EXISTS(SELECT 1 FROM deleted_items d WHERE d.kind='project' AND d.item_id=p.id)
+        ORDER BY p.episode_no''', (production_id, episode_no)).fetchall()
+    scripts = {row['episode_no']: row for row in rows}
+    previous = []
+    for plan in context['episodePlans']:
+        number = plan['episodeNo']
+        if number >= episode_no:
+            continue
+        script = scripts.get(number)
+        item = {'episodeNo': number, 'plan': copy.deepcopy(plan), 'evidence': 'planning_only'}
+        if script and script['body'].strip() and (script['status'] == 'approved' or number in completed):
+            item['evidence'] = 'completed_script' if number in completed else 'approved_script'
+            item['script'] = {key: script[key] for key in ('revision', 'status', 'title', 'synopsis', 'story_goal')}
+            item['script'].update({key: json.loads(script[key]) for key in ('characters', 'scenes', 'props')})
+            if number == episode_no - 1:
+                item['script']['body'] = script['body']
+            else:
+                item['script']['endingExcerpt'] = script['body'][-1500:]
+                item['script']['excerptTruncated'] = len(script['body']) > 1500
+        previous.append(item)
+    bible = context.get('filmBible') or {}
+    visual = bible.get('visual') or {}
+    locked_assets = []
+    for card in (visual.get('cards') or {}).values():
+        if card.get('deletedAt'):
+            continue
+        version = (visual.get('versions') or {}).get(card.get('currentVersionId')) or {}
+        if version.get('status') == 'locked':
+            locked_assets.append({
+                'id': card['id'], 'name': card['name'], 'kind': card['kind'],
+                'parentCardId': card.get('parentCardId'), 'versionId': version.get('id'),
+                'spec': version.get('spec', {}), 'invariants': version.get('invariants', []),
+            })
+    return {'previousEpisodes': sorted(previous, key=lambda item: item['episodeNo']),
+        'immediatePreviousAvailable': any(item['episodeNo'] == episode_no - 1 and 'script' in item for item in previous),
+        'filmBible': {key: copy.deepcopy(bible.get(key) or {}) for key in ('story', 'continuity')},
+        'lockedAssets': locked_assets}
 
 
 def validate_source_references(connection, production_id, chapter_ids):
@@ -779,6 +896,9 @@ def apply_episode_plan_generation(job, generated):
         context = normalize_production_context(json.loads(production['shared_context']))
         if adaptation_fingerprint(context) != marker.get('adaptationFingerprint'):
             raise ValueError('改编策划已在生成期间更新，旧单集结果未写入')
+        if marker.get('continuityFingerprint') and source_fingerprint(
+                episode_continuity_context(connection, production_id, episode_no, context)) != marker['continuityFingerprint']:
+            raise ValueError('前集剧本或 Film Bible 已在生成期间更新，请重新生成当前集规划')
         sources = source_snapshot(connection, production_id)
         if source_fingerprint(sources) != marker.get('sourceFingerprint'):
             raise ValueError('原著事件已在生成期间更新，旧单集结果未写入')
