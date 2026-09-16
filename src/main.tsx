@@ -1,3 +1,4 @@
+import { voiceCardId } from "./filmBible/voiceResolution.ts";
 import { planShotTimeline } from "./shotTimeline";
 import { ensureShotNodes, importStoryboardShots } from "./shotNodes";
 import { mergeStoryboardResult } from "./filmBible/storyboardImport";
@@ -131,7 +132,7 @@ import {
 } from "./filmBible/VisualAssetNode";
 import { visualBibleOf } from "./filmBible/types";
 import type { VoiceProfile } from "./filmBible/types";
-import { acceptVoiceResult, saveVoiceProfile, setVoiceLocked, voiceProfilesOf } from "./filmBible/voices";
+import { chooseVoiceVersion, effectiveVoiceProfile, acceptVoiceResult, saveVoiceProfile, setVoiceLocked, voiceProfilesOf } from "./filmBible/voices";
 import { catalogVoice, CUSTOM_VOICE_ID, DOUBAO_TTS2_VOICES } from "./filmBible/voiceCatalog";
 import { StoryboardWorkspace } from "./pages/StoryboardWorkspace";
 import { MotionReferenceEditor } from "./components/MotionReferenceEditor";
@@ -2278,6 +2279,17 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     request: api,
     voiceProfiles: voiceProfilesOf(doc),
     onPreviewAsset: (asset) => setPreview(asset as Asset),
+    onChooseVoiceVersion: (cardId, version) => {
+      try { update(document => chooseVoiceVersion(document, cardId, version)); setNotice("声音版本已选择，关联的旧视频需要重新生成"); } catch (reason) { report(reason); }
+    },
+    onInheritVoice: (cardId) => {
+      update((document) => {
+        const profiles = { ...voiceProfilesOf(document) };
+        delete profiles[cardId];
+        return { ...document, filmBible: { ...document.filmBible, voices: { profiles } } };
+      });
+      setNotice("该状态已恢复继承基础角色音色");
+    },
     onSaveVoice: (cardId, profile) => {
       try {
         update((document)=>saveVoiceProfile(document,cardId,profile));
@@ -2329,22 +2341,22 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       } catch (reason) { report(reason); }
     },
     onGenerateCharacterDialogue: async (cardId) => {
-      const profile = voiceProfilesOf(doc)[cardId];
+      const profile = effectiveVoiceProfile(voiceProfilesOf(doc)[cardId]);
       const card = visualBibleOf(doc).cards[cardId];
       if (!profile || profile.status !== "locked") throw new Error("请先试听并锁定角色主音色");
       const dialogues = doc.shots.flatMap((shot) =>
         (Array.isArray(shot.dialogues) ? shot.dialogues : [])
-          .filter((dialogue: Any) => dialogue.characterCardId === cardId)
+          .filter((dialogue: Any) => voiceCardId(doc, shot, dialogue) === cardId)
           .map((dialogue: Any, index: number) => ({ shot, dialogue, index })),
       );
       if (!dialogues.length) throw new Error("本集分镜没有该角色的结构化对白；重新生成分镜规划后会自动提取对白");
       const existing = new Set(assets.flatMap((asset) => {
         const dialogue = asset.metadata?.input?.dialogue;
-        return dialogue?.id && dialogue.voiceVersion === profile.version ? [dialogue.id] : [];
+        return dialogue?.id && (dialogue.voiceCardId || dialogue.characterCardId) === cardId && dialogue.voiceVersion === profile.version ? [dialogue.id] : [];
       }));
       const pending = new Set(jobs.flatMap((job) => {
         const dialogue = job.input?.dialogue;
-        return dialogue?.id && dialogue.voiceVersion === profile.version && ["queued","running","succeeded"].includes(job.status) ? [dialogue.id] : [];
+        return dialogue?.id && (dialogue.voiceCardId || dialogue.characterCardId) === cardId && dialogue.voiceVersion === profile.version && ["queued","running","succeeded"].includes(job.status) ? [dialogue.id] : [];
       }));
       const needed = dialogues.filter(({dialogue})=>!existing.has(dialogue.id) && !pending.has(dialogue.id));
       if (!needed.length) throw new Error("该角色本集对白已经生成或正在生成");
@@ -2366,7 +2378,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           asset_category:"voice",
           emotion:performance.emotion,
           parameters:{speech_rate:profile.parameters.speechRate,emotion:performance.emotion,context_texts:performance.contextTexts},
-          dialogue:{id:dialogue.id,shotUid:String(shot.uid||shot.id),characterCardId:cardId,voiceVersion:profile.version,text:dialogue.text,emotion:performance.emotion,contextTexts:performance.contextTexts},
+          dialogue:{id:dialogue.id,shotUid:String(shot.uid||shot.id),characterCardId:dialogue.characterCardId,voiceCardId:cardId,voiceVersion:profile.version,text:dialogue.text,emotion:performance.emotion,contextTexts:performance.contextTexts},
         },
       }));
       }));
@@ -2375,12 +2387,12 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       return needed.length;
     },
     onRegenerateDialogue: async (cardId, dialogueId) => {
-      const profile = voiceProfilesOf(doc)[cardId];
+      const profile = effectiveVoiceProfile(voiceProfilesOf(doc)[cardId]);
       const card = visualBibleOf(doc).cards[cardId];
       if (!profile || profile.status !== "locked") throw new Error("请先试听并锁定角色主音色");
       const match = doc.shots.flatMap((shot) =>
         (Array.isArray(shot.dialogues) ? shot.dialogues : [])
-          .filter((dialogue: Any) => dialogue.characterCardId === cardId && dialogue.id === dialogueId)
+          .filter((dialogue: Any) => voiceCardId(doc, shot, dialogue) === cardId && dialogue.id === dialogueId)
           .map((dialogue: Any) => ({ shot, dialogue })),
       )[0];
       if (!match) throw new Error("该对白已不存在，请刷新后重试");
@@ -2404,7 +2416,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           asset_category:"voice",
           emotion:performance.emotion,
           parameters:{speech_rate:profile.parameters.speechRate,emotion:performance.emotion,context_texts:performance.contextTexts},
-          dialogue:{id:dialogueId,shotUid:String(match.shot.uid||match.shot.id),characterCardId:cardId,voiceVersion:profile.version,text:match.dialogue.text,emotion:performance.emotion,contextTexts:performance.contextTexts},
+          dialogue:{id:dialogueId,shotUid:String(match.shot.uid||match.shot.id),characterCardId:match.dialogue.characterCardId,voiceCardId:cardId,voiceVersion:profile.version,text:match.dialogue.text,emotion:performance.emotion,contextTexts:performance.contextTexts},
         },
       }));
       await refresh(project.id);

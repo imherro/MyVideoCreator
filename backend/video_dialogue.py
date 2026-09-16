@@ -1,6 +1,7 @@
 """Compile canonical storyboard dialogue into video-generation prompts."""
 from __future__ import annotations
 
+from .voice_resolution import resolved_voice
 import math
 
 
@@ -150,7 +151,7 @@ def bind_fixed_dialogue_audio(document, node_id, kind, input_value, assets, prod
     selected = []
     for dialogue in dialogues:
         card_id = str(dialogue.get('characterCardId') or '')
-        profile = profiles.get(card_id) or {}
+        voice_card, profile = resolved_voice(document, shot, dialogue)
         if profile.get('status') != 'locked' or not str(profile.get('voiceType') or '').strip():
             name = str(dialogue.get('characterName') or '角色')
             raise ValueError(f'{name}尚未锁定固定音色，请先在塑角造景中设置并锁定')
@@ -158,6 +159,7 @@ def bind_fixed_dialogue_audio(document, node_id, kind, input_value, assets, prod
         match = next((asset for asset in candidates if (
             asset.get('kind') == 'audio'
             and ((asset.get('metadata') or {}).get('input') or {}).get('dialogue', {}).get('id') == dialogue.get('id')
+            and (((asset.get('metadata') or {}).get('input') or {}).get('dialogue', {}).get('voiceCardId') or ((asset.get('metadata') or {}).get('input') or {}).get('dialogue', {}).get('characterCardId') or card_id) == voice_card
             and int((((asset.get('metadata') or {}).get('input') or {}).get('dialogue', {}).get('voiceVersion') or 0)) == version
         )), None)
         if not match:

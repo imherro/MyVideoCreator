@@ -1,3 +1,4 @@
+import { voiceCardId } from "./voiceResolution.ts";
 export type CharacterDialogueRow = {
   id: string;
   shotId: string;
@@ -11,11 +12,13 @@ export type CharacterDialogueRow = {
 
 export function projectCharacterDialogueRows({
   shots,
+  document,
   assets,
   jobs,
   cardId,
   voiceVersion,
 }: {
+  document?: Record<string, any>;
   shots: Array<Record<string, any>>;
   assets: Array<Record<string, any>>;
   jobs: Array<Record<string, any>>;
@@ -24,10 +27,10 @@ export function projectCharacterDialogueRows({
 }): CharacterDialogueRow[] {
   return shots.flatMap((shot, shotIndex) =>
     (Array.isArray(shot.dialogues) ? shot.dialogues : [])
-      .filter((dialogue: Record<string, any>) => dialogue.characterCardId === cardId)
+      .filter((dialogue: Record<string, any>) => (document ? voiceCardId(document, shot, dialogue) : dialogue.characterCardId) === cardId)
       .map((dialogue: Record<string, any>) => {
         const matchesVersion = (descriptor: Record<string, any> | undefined) =>
-          descriptor?.id === dialogue.id && descriptor?.voiceVersion === voiceVersion;
+          descriptor?.id === dialogue.id && (descriptor?.voiceCardId || descriptor?.characterCardId || dialogue.characterCardId) === cardId && descriptor?.voiceVersion === voiceVersion;
         const asset = assets.find((candidate) =>
           candidate.kind === "audio" && matchesVersion(candidate.metadata?.input?.dialogue),
         );

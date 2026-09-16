@@ -20,7 +20,7 @@ import type {
   VisualVersionStatus,
   VoiceProfile,
 } from "./types.ts";
-import { defaultVoiceProfile } from "./voices.ts";
+import { lockedVoiceVersions, effectiveVoiceProfile, defaultVoiceProfile } from "./voices.ts";
 import { catalogVoice, CUSTOM_VOICE_ID, DOUBAO_TTS2_VOICES } from "./voiceCatalog.ts";
 import { projectCharacterDialogueRows } from "./dialogueAssets.ts";
 import { visualKindLabels, visualStatusLabels } from "./types.ts";
@@ -69,6 +69,8 @@ export function FilmBiblePanel({
   request,
   voiceProfiles,
   onSaveVoice,
+  onInheritVoice,
+  onChooseVoiceVersion,
   onGenerateVoice,
   onLockVoice,
   onGenerateCharacterDialogue,
@@ -109,6 +111,8 @@ export function FilmBiblePanel({
   localModels: Array<Record<string, any>>;
   request: (path: string) => Promise<any>;
   voiceProfiles: Record<string, VoiceProfile>;
+  onChooseVoiceVersion: (cardId: string, version: number) => void;
+  onInheritVoice: (cardId: string) => void;
   onSaveVoice: (cardId: string, profile: VoiceProfile) => void;
   onGenerateVoice: (cardId: string, profile: VoiceProfile) => Promise<void>;
   onLockVoice: (cardId: string, locked: boolean) => void;
@@ -160,6 +164,9 @@ export function FilmBiblePanel({
   const allowedAudioProviders = new Set(effectiveProjectTargets(modelPool, providers, "audio", localModels).map((target) => target.providerId));
   const speechProviders = providers.filter((item) => item.type === "volcengine_speech" && allowedAudioProviders.has(item.id));
   const storedVoice = card ? voiceProfiles[card.id] : undefined;
+  const baseVoice = card?.kind === "character_state" ? voiceProfiles[card.parentCardId!] : storedVoice;
+  const voiceLibrary = lockedVoiceVersions(baseVoice);
+  const activeVoice = effectiveVoiceProfile(storedVoice);
   const [voiceDraft, setVoiceDraft] = useState<VoiceProfile>(() =>
     defaultVoiceProfile("", speechProviders[0]?.id || ""),
   );
@@ -171,12 +178,13 @@ export function FilmBiblePanel({
   const dialogueRows = useMemo(
     () => projectCharacterDialogueRows({
       shots,
+      document: {filmBible: {visual, voices: {profiles: voiceProfiles}}},
       assets,
       jobs,
       cardId: card?.id || "",
-      voiceVersion: storedVoice?.version,
+      voiceVersion: activeVoice?.version,
     }),
-    [shots, assets, jobs, card?.id, storedVoice?.version],
+    [shots, assets, jobs, card?.id, activeVoice?.version, visual, voiceProfiles],
   );
   useEffect(() => {
     if (focusVersionId && visual.versions[focusVersionId])
@@ -421,13 +429,26 @@ export function FilmBiblePanel({
             )}
           </>
         )}
-        {card.kind === "character" && <>
+        {(card.kind === "character" || card.kind === "character_state") && <>
           <button type="button" className="film-bible-section-toggle" aria-expanded={voiceOpen} onClick={() => setVoiceOpen((value) => !value)}>
-            <span><Volume2 size={15}/><b>角色固定声音</b><small>{storedVoice ? `V${storedVoice.version} · ${storedVoice.status === "locked" ? "已锁定" : "草稿"}` : "未设置"}</small></span>
+            <span><Volume2 size={15}/><b>{card.kind === "character_state" ? "状态音色覆盖" : "角色固定声音"}</b><small>{storedVoice ? `V${storedVoice.version} · ${storedVoice.status === "locked" ? "已锁定" : "草稿"}` : card.kind === "character_state" ? "继承基础角色" : "未设置"}</small></span>
             <span>{voiceOpen ? "收起" : "设置声音"}</span>
           </button>
           {voiceOpen && <div className="film-bible-collapsible-body">
+          <label>{card.kind === "character_state" ? "使用音色" : "默认音色"}<select value={card.kind === "character_state" ? storedVoice?.sourceVoiceVersion || "" : storedVoice?.defaultVersion || (storedVoice?.status === "locked" ? storedVoice.version : "")} onChange={event => event.target.value ? onChooseVoiceVersion(card.id, Number(event.target.value)) : onInheritVoice(card.id)}>
+            <option value="" disabled={card.kind !== "character_state"}>{card.kind === "character_state" ? "继承基础角色默认音色" : "请先生成并锁定声音"}</option>
+            {Object.values(voiceLibrary).map(voice => <option key={voice.version} value={voice.version}>{voice.name || catalogVoice(voice.voiceType)?.name || "角色声音"} · V{voice.version}</option>)}
+          </select></label>
+          {card.kind === "character_state" && <>
+            <p className="muted">从基础角色的音色库选择。选定版本保持固定，不随默认音色变化。</p>
+            {!Object.keys(voiceLibrary).length && <p className="warning-text">请先在基础角色中生成、试听并锁定声音版本。</p>}
+            {(activeVoice || effectiveVoiceProfile(baseVoice))?.referenceAssetId && <button onClick={() => { const asset = assets.find(item => item.id === (activeVoice || effectiveVoiceProfile(baseVoice))?.referenceAssetId); if (asset) onPreviewAsset(asset); }}>试听所选音色</button>}
+            {storedVoice && <button disabled={voiceBusy} onClick={() => {setVoiceBusy(true);setVoiceError("");void onGenerateCharacterDialogue(card.id).catch(error => setVoiceError(String(error.message || error))).finally(() => setVoiceBusy(false));}}>生成此状态的本集对白</button>}
+            {voiceError && <p className="error">{voiceError}</p>}
+          </>}
+          {card.kind === "character" && <>
           {!speechProviders.length ? <p className="warning-text">尚未配置豆包语音。请到“设置 → 模型服务”添加豆包语音并填写独立 Speech API Key。</p> : <>
+            <label>声音版本名称<input value={voiceDraft.name || ""} disabled={voiceDraft.status === "locked"} placeholder="例如：常态男声、变身女声" onChange={event => setVoiceDraft({...voiceDraft, name: event.target.value})}/></label>
             <label>语音服务<select value={voiceDraft.providerId} disabled={voiceDraft.status === "locked"} onChange={(event)=>setVoiceDraft({...voiceDraft,providerId:event.target.value})}>{speechProviders.map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
             <label>预置音色<select value={catalogVoice(voiceDraft.voiceType)?.id || CUSTOM_VOICE_ID} disabled={voiceDraft.status === "locked"} onChange={(event)=>setVoiceDraft({...voiceDraft,voiceType:event.target.value === CUSTOM_VOICE_ID ? "" : event.target.value})}>{[...new Set(DOUBAO_TTS2_VOICES.map((item)=>item.category))].map((category)=><optgroup key={category} label={category}>{DOUBAO_TTS2_VOICES.filter((item)=>item.category===category).map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</optgroup>)}<option value={CUSTOM_VOICE_ID}>自定义 / 声音复刻 ID…</option></select></label>
             {!catalogVoice(voiceDraft.voiceType) && <label>自定义 Speaker ID<input value={voiceDraft.voiceType} disabled={voiceDraft.status === "locked"} placeholder="粘贴声音复刻或音色设计返回的 ID" onChange={(event)=>setVoiceDraft({...voiceDraft,voiceType:event.target.value})}/><small>声音复刻训练完成后，把控制台返回的 Speaker ID 粘贴到这里。</small></label>}
@@ -468,6 +489,7 @@ export function FilmBiblePanel({
               </div>;
             })}</div>}
             {voiceError && <p className="error">{voiceError}</p>}
+          </>}
           </>}
           </div>}
         </>}

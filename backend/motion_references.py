@@ -338,14 +338,6 @@ def invalidate_motion_changes(previous, incoming):
     """Enforce revisions also for non-UI saves and in-flight reference edits."""
     old_shots = {x.get('uid') or x.get('id'): x for x in previous.get('shots', [])}
     affected = set()
-    old_profiles = ((previous.get('filmBible') or {}).get('voices') or {}).get('profiles') or {}
-    new_profiles = ((incoming.get('filmBible') or {}).get('voices') or {}).get('profiles') or {}
-    voice_changed = {cid for cid in set(old_profiles) | set(new_profiles) if any(
-        (old_profiles.get(cid) or {}).get(key) != (new_profiles.get(cid) or {}).get(key)
-        for key in ('referenceAssetId', 'referenceVersion', 'status', 'version'))}
-    identity_changed = {cid for cid in voice_changed if any(
-        (old_profiles.get(cid) or {}).get(key) != (new_profiles.get(cid) or {}).get(key)
-        for key in ('status', 'version'))}
     if previous.get('videoReferenceMode', 'legacy') != incoming.get('videoReferenceMode', 'legacy'):
         overridden = {(x.get('videoNode') or (x.get('pipeline') or {}).get('videoNodeId'))
                       for x in incoming.get('shots', []) if x.get('videoReferenceMode')}
@@ -355,10 +347,19 @@ def invalidate_motion_changes(previous, incoming):
         if (shot.get('uid') or shot.get('id')) not in old_shots and not shot.get('videoReferenceMode') and incoming.get('videoReferenceMode', 'legacy') == 'legacy':
             shot['videoReferenceMode'] = 'multimodal'
         old = old_shots.get(shot.get('uid') or shot.get('id'), {})
-        if (any(old.get(key) != shot.get(key) for key in ('motionReference', 'videoReferenceMode', 'dialogueMode'))
+        from .voice_resolution import resolved_voice
+        def signatures(doc, item):
+            keys = ('status', 'version', 'voiceType', 'providerId', 'referenceAssetId', 'referenceVersion')
+            result = []
+            for d in item.get('dialogues', []):
+                cid, profile = resolved_voice(doc, item, d)
+                result.append((cid, {k: profile.get(k) for k in keys}))
+            return result
+        resolved_voice_changed = signatures(previous, old) != signatures(incoming, shot)
+
+        if (resolved_voice_changed or any(old.get(key) != shot.get(key) for key in ('motionReference', 'videoReferenceMode', 'dialogueMode'))
                 or (not shot.get('videoReferenceMode') and previous.get('videoReferenceMode') != incoming.get('videoReferenceMode'))
-                or (not shot.get('dialogueMode') and previous.get('dialogueMode', 'full_dialogue') != incoming.get('dialogueMode', 'full_dialogue'))
-                or any(d.get('characterCardId') in (voice_changed if (shot.get('dialogueMode') or incoming.get('dialogueMode')) == 'voice_sample' else identity_changed) for d in shot.get('dialogues', []))):
+                or (not shot.get('dialogueMode') and previous.get('dialogueMode', 'full_dialogue') != incoming.get('dialogueMode', 'full_dialogue'))):
             affected.add(shot.get('videoNode') or (shot.get('pipeline') or {}).get('videoNodeId'))
     pending = list(affected)
     while pending:

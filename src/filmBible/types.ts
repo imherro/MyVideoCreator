@@ -70,6 +70,10 @@ export type VisualBible = {
 };
 
 export type VoiceProfile = {
+  name?: string;
+  lockedVersions?: Record<string, VoiceProfile>;
+  defaultVersion?: number;
+  sourceVoiceVersion?: number;
   cardId: string;
   providerId: string;
   voiceType: string;

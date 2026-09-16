@@ -1,4 +1,5 @@
 """Role timbre references: separate files, never timed or mixed as dialogue."""
+from .voice_resolution import resolved_voice
 import base64
 import math
 
@@ -26,7 +27,7 @@ def bind_voice_samples(document, shot, result, assets):
         if card_id in seen:
             continue
         name = str(dialogue.get('characterName') or '角色')
-        profile = profiles.get(card_id) or {}
+        voice_card, profile = resolved_voice(document, shot, dialogue)
         aid = profile.get('referenceAssetId')
         if (not card_id or profile.get('status') != 'locked' or not aid
                 or profile.get('referenceVersion') != profile.get('version')):
@@ -36,7 +37,7 @@ def bind_voice_samples(document, shot, result, assets):
             raise ValueError(f'{name}的声音参考已丢失或不可访问，请重新确认样本')
         # Keep a distinct mapping even when two roles intentionally share a file.
         samples.append({'characterCardId': card_id, 'characterName': name, 'assetId': aid,
-                        'voiceVersion': profile['version'], 'voiceType': profile.get('voiceType', ''),
+                        'voiceCardId': voice_card, 'voiceVersion': profile['version'], 'voiceType': profile.get('voiceType', ''),
                         'purpose': 'timbre_only'})
         seen.add(card_id)
     result['voice_samples'] = samples

@@ -1,0 +1,31 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { voiceCardId } from '../src/filmBible/voiceResolution.ts';
+import { projectCharacterDialogueRows } from '../src/filmBible/dialogueAssets.ts';
+test('state voice overrides only bound shots and does not reuse base V1 audio', () => {
+ const document = {filmBible:{visual:{cards:{female:{kind:'character_state',parentCardId:'hero'}},versions:{v:{cardId:'female'}}},voices:{profiles:{hero:{version:1},female:{version:1}}}}};
+ const line={id:'line',characterCardId:'hero',text:'你好'};
+ const shot={id:'s',assetBindings:{characters:[{versionId:'v'}]},dialogues:[line]};
+ assert.equal(voiceCardId(document,shot,line),'female');
+ assert.equal(voiceCardId(document,{...shot,assetBindings:{}},line),'hero');
+ const rows=projectCharacterDialogueRows({document,shots:[shot],assets:[{kind:'audio',metadata:{input:{dialogue:{id:'line',characterCardId:'hero',voiceVersion:1}}}}],jobs:[],cardId:'female',voiceVersion:1});
+ assert.equal(rows.length,1); assert.equal(rows[0].status,'missing');
+ delete document.filmBible.voices.profiles.female;
+ assert.equal(voiceCardId(document,shot,line),'hero');
+});
+import { defaultVoiceProfile, setVoiceLocked, lockedVoiceVersions, chooseVoiceVersion, effectiveVoiceProfile } from '../src/filmBible/voices.ts';
+test('voice library preserves default and pins a state to a named locked version', () => {
+ let doc={filmBible:{visual:{cards:{hero:{kind:'character'},female:{kind:'character_state',parentCardId:'hero'}}},voices:{profiles:{hero:{...defaultVoiceProfile('hero','speech'),name:'男声',previewAssetId:'male'}}}},shots:[],nodes:[],edges:[]};
+ doc=setVoiceLocked(doc,'hero',true);
+ doc=setVoiceLocked(doc,'hero',false);
+ assert.equal(effectiveVoiceProfile(doc.filmBible.voices.profiles.hero).referenceAssetId,'male');
+ assert.equal(lockedVoiceVersions(doc.filmBible.voices.profiles.hero)['1'].name,'男声');
+ doc.filmBible.voices.profiles.hero={...doc.filmBible.voices.profiles.hero,name:'女声',previewAssetId:'female'};
+ doc=setVoiceLocked(doc,'hero',true);
+ doc=chooseVoiceVersion(doc,'female',2);
+ assert.equal(doc.filmBible.voices.profiles.female.referenceAssetId,'female');
+ assert.equal(effectiveVoiceProfile(doc.filmBible.voices.profiles.hero).referenceAssetId,'male');
+ doc=setVoiceLocked(doc,'hero',false);
+ assert.equal(doc.filmBible.voices.profiles.female.referenceAssetId,'female');
+ assert.equal(Object.keys(lockedVoiceVersions(doc.filmBible.voices.profiles.hero)).length,2);
+});
