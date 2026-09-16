@@ -63,6 +63,27 @@ def init():
         CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT,project_id TEXT,payload TEXT NOT NULL,created REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS deleted_items(kind TEXT NOT NULL,item_id TEXT NOT NULL,project_id TEXT,deleted_at REAL NOT NULL,PRIMARY KEY(kind,item_id));
         CREATE INDEX IF NOT EXISTS deleted_items_project ON deleted_items(project_id,deleted_at);
+        CREATE TABLE IF NOT EXISTS provider_asset_groups(
+            provider_id TEXT NOT NULL,
+            account_hash TEXT NOT NULL,
+            remote_group_id TEXT NOT NULL,
+            created REAL NOT NULL,
+            updated REAL NOT NULL,
+            PRIMARY KEY(provider_id,account_hash)
+        );
+        CREATE TABLE IF NOT EXISTS provider_asset_mappings(
+            provider_id TEXT NOT NULL,
+            account_hash TEXT NOT NULL,
+            local_asset_id TEXT NOT NULL REFERENCES assets(id),
+            remote_asset_id TEXT NOT NULL,
+            remote_group_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            error TEXT,
+            created REAL NOT NULL,
+            updated REAL NOT NULL,
+            PRIMARY KEY(provider_id,account_hash,local_asset_id)
+        );
+        CREATE INDEX IF NOT EXISTS provider_asset_mappings_remote ON provider_asset_mappings(provider_id,account_hash,remote_asset_id);
         ''')
         columns={row['name'] for row in c.execute('PRAGMA table_info(jobs)')}
         for column,definition in (

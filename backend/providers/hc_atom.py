@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import threading
+import time
 from urllib.parse import quote
 
 import httpx
@@ -14,6 +17,7 @@ DEFAULT_BASE_URL = 'https://api-aigc.fzyinghe.com'
 LEGACY_BASE_URL = 'https://ai-aigc.fzyinghe.com'
 KINDS = ('text', 'image', 'video')
 SEEDANCE_PREFIXES = ('doubao-seedance-', 'dreamina-seedance-')
+_asset_library_lock = threading.RLock()
 
 
 def _root(provider):
@@ -261,9 +265,145 @@ def _wait_seedance_v3(worker, job, client, path, remote):
     raise InterruptedError()
 
 
-def _generate_seedance_v3(worker, job, provider, model, refs, params):
+def _asset_account_hash(provider):
+    """Scope cached remote ids to the API account without persisting its key."""
+    key = str(provider.get('api_key') or '').strip()
+    if not key:
+        raise ValueError('幻场 AI 尚未配置 API Key')
+    return hashlib.sha256(key.encode('utf-8')).hexdigest()[:24]
+
+
+def _configured_asset_group(provider):
+    video = (provider.get('parameters') or {}).get('video') or {}
+    return str(video.get('asset_group_id') or provider.get('asset_group_id') or '').strip()
+
+
+def _asset_group(client, provider):
+    configured = _configured_asset_group(provider)
+    if configured:
+        return configured
+    provider_id = str(provider.get('id') or '').strip()
+    account_hash = _asset_account_hash(provider)
+    with _asset_library_lock:
+        with s.db() as db:
+            row = db.execute(
+                'SELECT remote_group_id FROM provider_asset_groups WHERE provider_id=? AND account_hash=?',
+                (provider_id, account_hash),
+            ).fetchone()
+        if row:
+            return row['remote_group_id']
+        value = _unwrap(_checked(client.post(
+            _root(provider) + '/v3/asset-groups',
+            json={
+                'name': '安影 Seedance 虚拟人物素材',
+                'description': '安影自动登记的虚拟人物首帧素材',
+            },
+        )))
+        group_id = str(value.get('groupId') or value.get('group_id') or value.get('id') or '').strip()
+        if not group_id:
+            raise ValueError('幻场素材库创建素材组成功，但没有返回 groupId')
+        now = time.time()
+        with s.db() as db:
+            db.execute('''INSERT INTO provider_asset_groups(provider_id,account_hash,remote_group_id,created,updated)
+                VALUES(?,?,?,?,?) ON CONFLICT(provider_id,account_hash) DO UPDATE SET
+                remote_group_id=excluded.remote_group_id,updated=excluded.updated''',
+                (provider_id, account_hash, group_id, now, now))
+        return group_id
+
+
+def _asset_mapping(provider, local_asset_id):
+    with s.db() as db:
+        return db.execute('''SELECT * FROM provider_asset_mappings
+            WHERE provider_id=? AND account_hash=? AND local_asset_id=?''', (
+                str(provider.get('id') or '').strip(), _asset_account_hash(provider), local_asset_id,
+            )).fetchone()
+
+
+def _save_asset_mapping(provider, local_asset_id, remote_asset_id, group_id, status, error=None):
+    now = time.time()
+    with s.db() as db:
+        db.execute('''INSERT INTO provider_asset_mappings(
+                provider_id,account_hash,local_asset_id,remote_asset_id,remote_group_id,status,error,created,updated
+            ) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(provider_id,account_hash,local_asset_id) DO UPDATE SET
+                remote_asset_id=excluded.remote_asset_id,remote_group_id=excluded.remote_group_id,
+                status=excluded.status,error=excluded.error,updated=excluded.updated''', (
+                str(provider.get('id') or '').strip(), _asset_account_hash(provider), local_asset_id,
+                remote_asset_id, group_id, status, error, now, now,
+            ))
+
+
+def _register_seedance_asset(worker, job, client, provider, asset):
+    """Create/reuse one HC virtual-person asset and wait for its durable review."""
     from ..provider_assets import public_asset_url
 
+    local_id = str(asset.get('id') or '').strip()
+    if not local_id:
+        raise ValueError('幻场素材库无法识别本地首帧素材')
+    mapping = _asset_mapping(provider, local_id)
+    if mapping and str(mapping['status']).lower() == 'active':
+        return 'asset://' + mapping['remote_asset_id']
+    if mapping and str(mapping['status']).lower() == 'failed':
+        raise ValueError('幻场虚拟人像素材审核失败：' + str(mapping['error'] or '素材未通过审核'))
+
+    if mapping:
+        group_id = mapping['remote_group_id']
+        remote_id = mapping['remote_asset_id']
+    else:
+        with _asset_library_lock:
+            # Recheck after acquiring the process-wide registration lock so two
+            # concurrent cloud jobs never create duplicate remote assets.
+            mapping = _asset_mapping(provider, local_id)
+            if mapping:
+                group_id = mapping['remote_group_id']
+                remote_id = mapping['remote_asset_id']
+            else:
+                worker.progress(job, '正在创建或读取幻场虚拟人像素材组')
+                group_id = _asset_group(client, provider)
+                worker.progress(job, '正在把首帧登记到幻场虚拟人像素材库')
+                value = _unwrap(_checked(client.post(
+                    _root(provider) + '/v3/assets',
+                    headers={'group_id': group_id},
+                    json={
+                        'url': public_asset_url(provider, local_id),
+                        'name': str(asset.get('name') or '安影首帧'),
+                        'assetType': 'Image',
+                    },
+                )))
+                remote_id = str(value.get('id') or value.get('assetId') or '').strip()
+                if not remote_id:
+                    raise ValueError('幻场素材库登记首帧成功，但没有返回素材 ID')
+                status = str(value.get('status') or 'Processing')
+                _save_asset_mapping(provider, local_id, remote_id, group_id, status)
+
+    while True:
+        mapping = _asset_mapping(provider, local_id)
+        status = str(mapping['status'] if mapping else 'Processing').lower()
+        if status == 'active':
+            return 'asset://' + remote_id
+        if status == 'failed':
+            raise ValueError('幻场虚拟人像素材审核失败：' + str(mapping['error'] or '素材未通过审核'))
+        if worker.cancelled(job):
+            raise InterruptedError()
+        worker.progress(job, '等待幻场审核虚拟人像首帧')
+        value = _unwrap(_checked(client.post(
+            _root(provider) + '/v3/assets/detail',
+            headers={'group_id': group_id},
+            json={'assetId': remote_id},
+        ), recoverable=True))
+        remote_status = str(value.get('status') or 'Processing')
+        error = value.get('failReason') or value.get('error') or value.get('message')
+        if isinstance(error, dict):
+            error = error.get('message') or str(error)
+        _save_asset_mapping(provider, local_id, remote_id, group_id, remote_status, str(error) if error else None)
+        if remote_status.lower() == 'active':
+            return 'asset://' + remote_id
+        if remote_status.lower() == 'failed':
+            raise ValueError('幻场虚拟人像素材审核失败：' + str(error or '素材未通过审核'))
+        if worker.halt.wait(3):
+            raise InterruptedError()
+
+
+def _generate_seedance_v3(worker, job, provider, model, refs, params):
     if len(refs) > 1:
         raise ValueError('幻场 Seedance 当前最多提交一张首帧，请移除多余引用')
     if job['input'].get('end_asset_id'):
@@ -281,7 +421,7 @@ def _generate_seedance_v3(worker, job, provider, model, refs, params):
             if refs:
                 content.append({
                     'type': 'image_url',
-                    'image_url': {'url': public_asset_url(provider, refs[0]['id'])},
+                    'image_url': {'url': _register_seedance_asset(worker, job, client, provider, refs[0])},
                     'role': 'first_frame',
                 })
             resolution = str(params.get('resolution') or '720p').lower()

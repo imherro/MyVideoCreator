@@ -134,6 +134,7 @@ def test_video_submit_poll_and_download(monkeypatch):
 
 def test_seedance_uses_v3_signed_first_frame_and_minimum_duration(monkeypatch):
     configured = provider()
+    configured['id'] = 'hc-assets-' + uuid.uuid4().hex
     configured['models']['video'] = 'doubao-seedance-2.5'
     configured['public_base_url'] = 'https://studio.example'
     item = stored_job('video', configured)
@@ -155,7 +156,22 @@ def test_seedance_uses_v3_signed_first_frame_and_minimum_duration(monkeypatch):
 
     def handle(request):
         calls.append((request.method, request.url.path))
-        if request.method == 'POST':
+        if request.url.path == '/v3/asset-groups':
+            body = json.loads(request.read())
+            assert body['name'] == '安影 Seedance 虚拟人物素材'
+            return httpx.Response(200, json={'code': 200, 'data': {'groupId': 'group-1'}})
+        if request.url.path == '/v3/assets':
+            body = json.loads(request.read())
+            assert request.headers['group_id'] == 'group-1'
+            assert body['assetType'] == 'Image'
+            assert body['url'].startswith(f'https://studio.example/api/provider-assets/{aid}?expires=')
+            assert 'signature=' in body['url']
+            return httpx.Response(200, json={'code': 200, 'data': {'id': 'asset-1', 'status': 'Processing'}})
+        if request.url.path == '/v3/assets/detail':
+            assert request.headers['group_id'] == 'group-1'
+            assert json.loads(request.read()) == {'assetId': 'asset-1'}
+            return httpx.Response(200, json={'code': 200, 'data': {'id': 'asset-1', 'status': 'Active'}})
+        if request.url.path == '/v3/video/tasks' and request.method == 'POST':
             body = json.loads(request.read())
             assert body['model'] == 'doubao-seedance-2.5'
             assert body['duration'] == 4 and body['ratio'] == 'adaptive'
@@ -163,11 +179,9 @@ def test_seedance_uses_v3_signed_first_frame_and_minimum_duration(monkeypatch):
             assert body['content'][0] == {'type': 'text', 'text': '电影感镜头'}
             image = body['content'][1]
             assert image['type'] == 'image_url' and image['role'] == 'first_frame'
-            assert image['image_url']['url'].startswith(
-                f'https://studio.example/api/provider-assets/{aid}?expires='
-            )
-            assert 'signature=' in image['image_url']['url']
+            assert image['image_url']['url'] == 'asset://asset-1'
             return httpx.Response(200, json={'id': 'cgt-1', 'status': 'queued'})
+        assert request.url.path == '/v3/video/tasks/cgt-1'
         return httpx.Response(200, json={
             'id': 'cgt-1', 'status': 'succeeded',
             'content': {'video_url': 'https://result.example/video.mp4'},
@@ -178,7 +192,65 @@ def test_seedance_uses_v3_signed_first_frame_and_minimum_duration(monkeypatch):
     worker = Worker()
     worker.halt = NoWait()
     assert hc_atom.generate_video(worker, item, configured)['assets'][0]['id'] == 'v3-video'
-    assert calls == [('POST', '/v3/video/tasks'), ('GET', '/v3/video/tasks/cgt-1')]
+    assert calls == [
+        ('POST', '/v3/asset-groups'),
+        ('POST', '/v3/assets'),
+        ('POST', '/v3/assets/detail'),
+        ('POST', '/v3/video/tasks'),
+        ('GET', '/v3/video/tasks/cgt-1'),
+    ]
+
+    # A retry/re-generation with the same local image reuses the reviewed remote
+    # asset and does not create or review a duplicate asset.
+    def reject_network(request):
+        raise AssertionError('active provider asset should be served from the local mapping cache')
+
+    cached_client = original(transport=httpx.MockTransport(reject_network))
+    with s.db() as db:
+        local_asset = dict(db.execute('SELECT * FROM assets WHERE id=?', (aid,)).fetchone())
+    assert hc_atom._register_seedance_asset(worker, item, cached_client, configured, local_asset) == 'asset://asset-1'
+
+
+def test_seedance_stops_before_video_submit_when_provider_asset_review_fails(monkeypatch):
+    configured = provider()
+    configured['id'] = 'hc-assets-failed-' + uuid.uuid4().hex
+    configured['models']['video'] = 'doubao-seedance-2.5'
+    configured['public_base_url'] = 'https://studio.example'
+    item = stored_job('video', configured)
+    item['input'].update({'model': 'doubao-seedance-2.5', 'parameters': {'duration': 4}})
+    aid = 'hc-sensitive-frame-' + uuid.uuid4().hex
+    path = s.ASSETS / (aid + '.png')
+    path.write_bytes(b'png-test')
+    with s.db() as db:
+        db.execute(
+            'INSERT INTO assets(id,project_id,name,kind,path,mime,metadata,created) VALUES(?,?,?,?,?,?,?,?)',
+            (aid, item['project_id'], 'sensitive.png', 'image', path.name, 'image/png', '{}', time.time()),
+        )
+    item['input']['asset_ids'] = [aid]
+    original = httpx.Client
+    calls = []
+
+    def handle(request):
+        calls.append(request.url.path)
+        if request.url.path == '/v3/asset-groups':
+            return httpx.Response(200, json={'code': 200, 'data': {'groupId': 'group-sensitive'}})
+        if request.url.path == '/v3/assets':
+            return httpx.Response(200, json={'code': 200, 'data': {'id': 'asset-sensitive', 'status': 'Processing'}})
+        if request.url.path == '/v3/assets/detail':
+            return httpx.Response(200, json={'code': 200, 'data': {
+                'id': 'asset-sensitive', 'status': 'Failed', 'failReason': '检测到真人隐私信息',
+            }})
+        raise AssertionError('video task must not be submitted before the provider asset is active')
+
+    monkeypatch.setattr(hc_atom.httpx, 'Client', lambda **kw: original(**kw, transport=httpx.MockTransport(handle)))
+    worker = Worker()
+    worker.halt = NoWait()
+    try:
+        hc_atom.generate_video(worker, item, configured)
+        assert False, 'failed provider asset review must block video submission'
+    except ValueError as exc:
+        assert str(exc) == '幻场虚拟人像素材审核失败：检测到真人隐私信息'
+    assert calls == ['/v3/asset-groups', '/v3/assets', '/v3/assets/detail']
 
 
 def test_seedance_retries_transport_reset_with_same_idempotency_key(monkeypatch):

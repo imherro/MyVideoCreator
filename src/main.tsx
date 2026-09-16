@@ -4897,7 +4897,7 @@ function SettingsPanel({
                 onTest={(kind) => void testArkModel(p.id, kind)}
                 serviceName={p.type === "hc_atom" ? "幻场 AI" : p.type === "runninghub" ? "RunningHub" : "火山方舟"}
               />
-              <p className="muted">{p.type === "hc_atom" ? "一个幻场 AI Key 统一调用文本、图片和异步视频模型；模型 ID 可从目录选择或手工填写。" : p.type === "runninghub" ? "一个 RunningHub Enterprise-Shared Key 统一调用文本、Seedream 5 Pro 图片与 Seedance 2.5 视频；本地参考素材会先安全上传。" : "一个 ARK API Key 统一调用豆包文本、Seedream 图片与 Seedance 视频。"}</p>
+              <p className="muted">{p.type === "hc_atom" ? "一个幻场 AI Key 统一调用文本、图片和异步视频模型；Seedance 首帧会自动登记到同一账号的虚拟人像素材库，审核通过后再提交视频任务。" : p.type === "runninghub" ? "一个 RunningHub Enterprise-Shared Key 统一调用文本、Seedream 5 Pro 图片与 Seedance 2.5 视频；本地参考素材会先安全上传。" : "一个 ARK API Key 统一调用豆包文本、Seedream 图片与 Seedance 视频。"}</p>
             </>
           ) : p.type === "volcengine_speech" ? (
             <>
