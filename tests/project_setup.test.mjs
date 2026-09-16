@@ -30,6 +30,22 @@ test('project setup validates required fields and creates the reviewed API paylo
   assert.deepEqual(payload.film_bible.style.avoidItems,['高饱和','磨皮']);
 });
 
+test('new projects default to Ark text and image plus HC Seedance 2.5',()=>{
+  const providers=[
+    {id:'local-image',type:'maestro',kind:'image',local:true,model:'flux'},
+    {id:'rh',type:'runninghub',models:{text:'rh-text',image:'rh-image',video:'rh-video'}},
+    {id:'ark',type:'volcengine_ark',models:{text:'doubao-seed-2-1-pro-260628',image:'doubao-seedream-5-0-pro-260628',video:'doubao-seedance-2-5-260628'}},
+    {id:'hc',type:'hc_atom',models:{text:'hc-text',image:'hc-image',video:'doubao-seedance-2.5'}},
+  ];
+  const draft=defaultProjectSetupDraft(providers,[{id:'qwen-local'}]);
+  assert.deepEqual(draft.generationPolicy,{
+    text:{providerId:'ark',modelId:'doubao-seed-2-1-pro-260628'},
+    image:{providerId:'ark',modelId:'doubao-seedream-5-0-pro-260628'},
+    video:{providerId:'hc',modelId:'doubao-seedance-2.5'},
+  });
+  assert.equal(Object.values(draft.modelPool).flat().some(item=>['local','local-image','rh'].includes(item.providerId)),false);
+});
+
 test('Bible settings merge preserves visual versions, style version, and unknown keys',()=>{
   const document={filmBible:{visual:{cards:{hero:{id:'hero'}},versions:{v1:{id:'v1',status:'locked'}}},styleVersion:7,custom:{keep:true},story:{old:'keep'},style:{old:'keep'},continuity:{old:'keep'}}};
   const fields={...bibleFields(document),worldEra:'当代',visualTone:'克制'};

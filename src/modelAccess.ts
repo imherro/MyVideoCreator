@@ -59,6 +59,25 @@ export function defaultProjectModelPool(providers: Value[], localModels: Value[]
   ) as ProjectModelPool;
 }
 
+/**
+ * The reviewed defaults for a newly created project. The full system library is
+ * still exposed by `defaultProjectModelPool`, so users can opt Local or
+ * RunningHub models into an individual project later.
+ */
+export function defaultNewProjectModelPool(providers: Value[]): ProjectModelPool {
+  const allowedProviderTypes = new Set(["volcengine_ark", "hc_atom"]);
+  const systemPool = defaultProjectModelPool(providers);
+  const providerById = new Map(providers.map((provider) => [provider.id, provider]));
+  return Object.fromEntries(MODEL_POOL_KINDS.map((kind) => [
+    kind,
+    systemPool[kind].filter((target) => {
+      const provider = providerById.get(target.providerId);
+      return allowedProviderTypes.has(provider?.type)
+        || (kind === "audio" && provider?.type === "volcengine_speech");
+    }),
+  ])) as ProjectModelPool;
+}
+
 export function effectiveProjectTargets(
   pool: Partial<ProjectModelPool> | undefined,
   providers: Value[],

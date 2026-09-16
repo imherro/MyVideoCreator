@@ -300,8 +300,8 @@ def normalized_project_name(name:str)->str:
 
 def project_create_document(body:ProjectCreate):
     providers=s.get_setting('providers',[])
-    # API callers created before model pools existed keep inherited behavior.
-    # The current UI always submits an explicit reviewed model_pool.
+    # Legacy API callers can keep inheriting the system pool. The browser sends
+    # the reviewed cloud-only pool explicitly for every newly created project.
     document=new_document(default_ark_policy(providers),None)
     if body.style is not None:
         style=body.style.strip()

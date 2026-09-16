@@ -27,6 +27,19 @@ def default_model_pool(providers):
             result[kind].extend({'providerId':provider['id'],'modelId':model} for model in enabled_models(provider,kind))
     return result
 
+def default_new_project_model_pool(providers):
+    """Reviewed new-project defaults; other configured models remain opt-in."""
+    allowed_types = {'volcengine_ark', 'hc_atom'}
+    providers_by_id = {provider.get('id'): provider for provider in providers}
+    result = default_model_pool(providers)
+    for kind in MODEL_POOL_KINDS:
+        result[kind] = [
+            target for target in result[kind]
+            if providers_by_id.get(target['providerId'], {}).get('type') in allowed_types
+            or (kind == 'audio' and providers_by_id.get(target['providerId'], {}).get('type') == 'volcengine_speech')
+        ]
+    return result
+
 def validate_model_pool(pool,providers,allow_missing=False):
     if pool is None:return None
     if not isinstance(pool,dict):raise ValueError('项目模型池必须是对象')
@@ -61,10 +74,28 @@ def validate_policy_in_pool(policy,pool):
             raise ValueError(f'项目默认{kind}模型必须先加入项目可用模型')
 
 def default_ark_policy(providers):
-    ark = next((p for p in providers if p.get('type') == 'volcengine_ark'), None)
-    if not ark:
-        return {kind: None for kind in KINDS}
-    return {kind: ({'providerId': ark['id'], 'modelId': enabled_models(ark,kind)[0]} if enabled_models(ark,kind) else None) for kind in KINDS}
+    preferences = {
+        'text': ('volcengine_ark', 'doubao-seed-2-1-pro'),
+        'image': ('volcengine_ark', 'doubao-seedream-5-0-pro'),
+        'video': ('hc_atom', 'doubao-seedance-2.5'),
+    }
+    result = {}
+    for kind in KINDS:
+        provider_type, model_prefix = preferences[kind]
+        preferred = next((provider for provider in providers
+            if provider.get('type') == provider_type
+            and any(model.startswith(model_prefix) for model in enabled_models(provider, kind))), None)
+        fallback = next((provider for provider in providers
+            if provider.get('type') in ('volcengine_ark', 'hc_atom')
+            and enabled_models(provider, kind)), None)
+        provider = preferred or fallback
+        if not provider:
+            result[kind] = None
+            continue
+        models = enabled_models(provider, kind)
+        model = next((candidate for candidate in models if candidate.startswith(model_prefix)), models[0])
+        result[kind] = {'providerId': provider['id'], 'modelId': model}
+    return result
 
 def validate_generation_policy(policy, providers, allow_missing=False):
     if not isinstance(policy, dict):

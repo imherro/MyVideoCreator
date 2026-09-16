@@ -1,5 +1,5 @@
 import type { GenerationPolicy } from "./generationPolicy.ts";
-import { defaultProjectModelPool, enabledModelIds, type ProjectModelPool } from "./modelAccess.ts";
+import { defaultNewProjectModelPool, enabledModelIds, type ProjectModelPool } from "./modelAccess.ts";
 import { invalidate } from "./graph.ts";
 import { setProjectVisualStyle } from "./filmBible/versioning.ts";
 
@@ -33,19 +33,32 @@ export type ProjectSetupDraft = {
 };
 
 export function defaultGenerationPolicy(providers: Value[]): GenerationPolicy {
-  const ordered = [...providers].sort((left, right) => Number(right.type === "volcengine_ark") - Number(left.type === "volcengine_ark"));
+  const preferences: Record<"text" | "image" | "video", { providerType: string; modelPrefix: string }> = {
+    text: { providerType: "volcengine_ark", modelPrefix: "doubao-seed-2-1-pro" },
+    image: { providerType: "volcengine_ark", modelPrefix: "doubao-seedream-5-0-pro" },
+    video: { providerType: "hc_atom", modelPrefix: "doubao-seedance-2.5" },
+  };
   return Object.fromEntries(
     (["text", "image", "video"] as const).map((kind) => [
       kind,
       (() => {
-        const provider = ordered.find((item) => enabledModelIds(item, kind).length);
-        return provider ? { providerId: provider.id, modelId: enabledModelIds(provider, kind)[0] } : null;
+        const preferred = providers.find((provider) => provider.type === preferences[kind].providerType
+          && enabledModelIds(provider, kind).some((modelId) => modelId.startsWith(preferences[kind].modelPrefix)));
+        const fallback = providers.find((provider) => ["volcengine_ark", "hc_atom"].includes(provider.type)
+          && enabledModelIds(provider, kind).length);
+        const provider = preferred || fallback;
+        if (!provider) return null;
+        const models = enabledModelIds(provider, kind);
+        return {
+          providerId: provider.id,
+          modelId: models.find((modelId) => modelId.startsWith(preferences[kind].modelPrefix)) || models[0],
+        };
       })(),
     ]),
   ) as GenerationPolicy;
 }
 
-export function defaultProjectSetupDraft(providers: Value[], localModels: Value[] = []): ProjectSetupDraft {
+export function defaultProjectSetupDraft(providers: Value[], _localModels: Value[] = []): ProjectSetupDraft {
   return {
     name: "",
     episodeTitle: "第 01 集",
@@ -60,7 +73,7 @@ export function defaultProjectSetupDraft(providers: Value[], localModels: Value[
     platform: "通用短视频",
     brief: "",
     generationPolicy: defaultGenerationPolicy(providers),
-    modelPool: defaultProjectModelPool(providers, localModels),
+    modelPool: defaultNewProjectModelPool(providers),
     bible: {
       worldEra: "",
       visualTone: "",

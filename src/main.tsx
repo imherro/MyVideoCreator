@@ -5143,9 +5143,9 @@ function SettingsPanel({
                     video: "bytedance/seedance-2.5-token",
                   },
                   enabled_models: {
-                    text: ["bytedance/doubao-seed-2.1-pro"],
-                    image: ["seedream-v5-pro"],
-                    video: ["bytedance/seedance-2.5-token"],
+                    text: [],
+                    image: [],
+                    video: [],
                   },
                   parameters: {
                     image: { size: "1024x1024", resolution: "2k", outputFormat: "jpeg", max_references: 10 },

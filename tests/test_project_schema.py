@@ -1,7 +1,7 @@
 import json,time
 import pytest
 from backend import store as s
-from backend.generation_policy import default_ark_policy,default_model_pool,resolve_generation_target,validate_generation_policy,validate_model_pool,validate_policy_in_pool
+from backend.generation_policy import default_ark_policy,default_model_pool,default_new_project_model_pool,resolve_generation_target,validate_generation_policy,validate_model_pool,validate_policy_in_pool
 from backend.project_schema import CURRENT_SCHEMA_VERSION,migrate_document,new_document
 
 def test_legacy_migration_is_lossless_and_idempotent():
@@ -49,6 +49,23 @@ def test_new_document_can_receive_ark_defaults():
     document=new_document(default_ark_policy(providers))
     assert document['schemaVersion']==CURRENT_SCHEMA_VERSION
     assert document['generationPolicy']['video']=={'providerId':'ark','modelId':'v'}
+
+def test_new_project_defaults_use_ark_text_image_and_hc_video_only():
+    providers=[
+        {'id':'local-image','type':'maestro','kind':'image','model':'flux','local':True},
+        {'id':'rh','type':'runninghub','models':{'text':'rh-t','image':'rh-i','video':'rh-v'}},
+        {'id':'ark','type':'volcengine_ark','models':{'text':'doubao-seed-2-1-pro-260628','image':'doubao-seedream-5-0-pro-260628','video':'doubao-seedance-2-5-260628'}},
+        {'id':'hc','type':'hc_atom','models':{'text':'hc-t','image':'hc-i','video':'doubao-seedance-2.5'}},
+        {'id':'speech','type':'volcengine_speech','kind':'audio','resource_id':'seed-tts-2.0'},
+    ]
+    assert default_ark_policy(providers)=={
+        'text':{'providerId':'ark','modelId':'doubao-seed-2-1-pro-260628'},
+        'image':{'providerId':'ark','modelId':'doubao-seedream-5-0-pro-260628'},
+        'video':{'providerId':'hc','modelId':'doubao-seedance-2.5'},
+    }
+    pool=default_new_project_model_pool(providers)
+    assert not any(target['providerId'] in ('local-image','rh') for targets in pool.values() for target in targets)
+    assert pool['audio']==[{'providerId':'speech','modelId':'seed-tts-2.0'}]
 
 def test_model_pool_limits_projects_to_system_enabled_models():
     providers=[{'id':'ark','name':'Ark','type':'volcengine_ark','models':{'text':'t','image':'i','video':'v'},'enabled_models':{'text':['t','t-fast'],'image':['i'],'video':[]}},
