@@ -438,12 +438,12 @@ def _generate_seedance_v3(worker, job, provider, model, refs, params):
                     reference = silent_motion_asset(job)
                     content.append({'type': 'video_url', 'video_url': {'url': public_asset_url(provider, reference['id'])}, 'role': 'reference_video'})
                 if job['input'].get('voice_samples'):
-                    from ..voice_samples import submission_assets, sample_data_uri
+                    from ..voice_samples import submission_assets
                     for reference in submission_assets(job):
-                        content.append({'type': 'audio_url', 'audio_url': {'url': sample_data_uri(reference)}, 'role': 'reference_audio'})
+                        content.append({'type': 'audio_url', 'audio_url': {'url': public_asset_url(provider, reference['id'])}, 'role': 'reference_audio'})
                 elif job['input'].get('dialogue_audio'):
                     from .volcengine_ark import _dialogue_reference_audio
-                    content.append({'type': 'audio_url', 'audio_url': {'url': _dialogue_reference_audio(job, submitted)}, 'role': 'reference_audio'})
+                    content.append({'type': 'audio_url', 'audio_url': {'url': _dialogue_reference_audio(job, submitted, public_provider=provider)}, 'role': 'reference_audio'})
             elif refs:
                 content.append({
                     'type': 'image_url',

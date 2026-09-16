@@ -361,7 +361,34 @@ def test_multimodal_seedance_keeps_single_image_role_and_all_media(monkeypatch):
             assert body['ratio']=='16:9'
             assert [c['role'] for c in body['content'][1:]] == (['reference_image','reference_video','reference_audio'] if with_media else ['reference_image'])
             assert ('omni_reference_task_type' in body)==('2.5' in model)
-            if with_media: assert body['content'][2]['video_url']['url'].endswith('/silent')
+            assert 'data:' not in json.dumps(body)
+            if with_media:
+                assert body['content'][2]['video_url']['url'].endswith('/silent')
+                assert body['content'][3]['audio_url']['url'] == 'https://media.example/voice'
             item['provider_job_id']='remote'
             hc_atom.generate_video(Worker(),item,configured)
             assert len(bodies)==1
+
+
+def test_full_dialogue_reference_is_persisted_before_signed_url(monkeypatch, tmp_path):
+    from backend.providers import volcengine_ark as ark
+    from backend import provider_assets
+    source = s.ASSETS / ('test-audio-' + uuid.uuid4().hex + '.wav')
+    source.write_bytes(b'audio')
+    monkeypatch.setattr(common, 'assets_by_ids', lambda *args: [{'kind':'audio', 'path':source.name}])
+    def render(command, **kwargs):
+        from pathlib import Path
+        Path(command[-1]).write_bytes(b'mp3-rendered')
+        return type('Result', (), {'returncode':0})()
+    monkeypatch.setattr(ark.subprocess, 'run', render)
+    def register(job, path, **kwargs):
+        assert path.read_bytes() == b'mp3-rendered'
+        assert kwargs['asset_source'] == 'derived'
+        return {'id':'persisted-dialogue'}
+    monkeypatch.setattr(common, 'register', register)
+    monkeypatch.setattr(provider_assets, 'public_asset_url', lambda provider, aid: 'https://media.example/' + aid)
+    try:
+        result = ark._dialogue_reference_audio({'input':{'dialogue_audio':[{'assetId':'a','start':0}]}}, 4, public_provider=provider())
+        assert result == 'https://media.example/persisted-dialogue'
+    finally:
+        source.unlink(missing_ok=True)
