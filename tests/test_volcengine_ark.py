@@ -164,8 +164,8 @@ def test_seedance_persists_task_and_resume_only_queries(monkeypatch):
     ]
 
 
-def test_seedance_25_short_shot_uses_provider_minimum_without_changing_plan():
-    model = 'doubao-seedance-2-5-260628'
+@pytest.mark.parametrize('model', ['doubao-seedance-2-5-260628', 'doubao-seedance-2-0-260128'])
+def test_seedance_2_short_shot_uses_provider_minimum_without_changing_plan(model):
     assert ark.seedance_submission_duration(model, 1) == 4
     assert ark.seedance_submission_duration(model, 3) == 4
     assert ark.seedance_submission_duration(model, 4) == 4
@@ -176,14 +176,15 @@ def test_seedance_25_short_shot_uses_provider_minimum_without_changing_plan():
     assert '本镜头成片总时长必须为 3 秒' not in submitted
 
 
-def test_seedance_25_sends_locked_dialogue_as_audio_reference(monkeypatch):
+@pytest.mark.parametrize('model', ['doubao-seedance-2-5-260628', 'doubao-seedance-2-0-260128'])
+def test_seedance_2_sends_locked_dialogue_as_audio_reference(monkeypatch, model):
     item=stored_job('video',provider())
     frame_id,_=add_image_asset(item,'对白镜头首帧',(24,48,96))
     item['input']['asset_ids']=[frame_id]
     item['input']['dialogue_audio']=[{'assetId':'voice-1','start':.3,'duration':1.2}]
     item['input']['dialogue_audio_asset_ids']=['voice-1']
     item['input']['dialogue_audio_mode']='seedance_reference'
-    item['input']['model']='doubao-seedance-2-5-260628'
+    item['input']['model']=model
     original=httpx.Client;submitted=[]
     def handle(request):
         if request.method=='POST':
@@ -388,6 +389,7 @@ def test_model_catalog_is_grouped_and_custom_endpoints_keep_configured_kind(monk
             {'id':'doubao-seed-2-0-pro','name':'Doubao'},
             {'id':'doubao-seedream-4-5-251128','name':'Seedream 4.5'},
             {'id':'doubao-seedance-1-5-pro-251215','name':'Seedance 1.5'},
+            {'id':'doubao-seedance-2-0-260128','name':'Seedance 2.0'},
             {'id':'ep-custom-video','name':'私有接入点'},
             {'id':'doubao-embedding-large','name':'Embedding'},
         ]})
@@ -397,6 +399,7 @@ def test_model_catalog_is_grouped_and_custom_endpoints_keep_configured_kind(monk
         'doubao-seed-2-0-pro':'text',
         'doubao-seedream-4-5-251128':'image',
         'doubao-seedance-1-5-pro-251215':'video',
+        'doubao-seedance-2-0-260128':'video',
         'ep-custom-video':'video',
     }
     assert models[0]['id']=='ep-custom-video'

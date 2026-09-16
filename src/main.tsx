@@ -5185,7 +5185,7 @@ function SettingsPanel({
                   enabled_models: {
                     text: ["doubao-seed-2-1-pro-260628"],
                     image: ["doubao-seedream-5-0-pro-260628"],
-                    video: ["doubao-seedance-2-5-260628"],
+                    video: ["doubao-seedance-2-5-260628", "doubao-seedance-2-0-260128"],
                   },
                   parameters: {
                     image: { size: "2K", watermark: false, max_references: 10 },
@@ -5212,8 +5212,8 @@ function SettingsPanel({
                   type: "hc_atom",
                   url: "https://api-aigc.fzyinghe.com",
                   local: false,
-                  models: { text: "", image: "", video: "" },
-                  enabled_models: { text: [], image: [], video: [] },
+                  models: { text: "", image: "", video: "doubao-seedance-2.5" },
+                  enabled_models: { text: [], image: [], video: ["doubao-seedance-2.5", "doubao-seedance-2.0"] },
                   parameters: {
                     image: { size: "1024x1024", n: 1 },
                     video: { duration: 5, ratio: "16:9" },

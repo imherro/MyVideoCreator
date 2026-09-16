@@ -426,7 +426,7 @@ def _generate_seedance_v3(worker, job, provider, model, refs, params):
                 })
             resolution = str(params.get('resolution') or '720p').lower()
             if resolution not in ('480p', '720p'):
-                raise ValueError('幻场 Seedance 2.5 目前只支持 480p 或 720p，请修改项目视频分辨率')
+                raise ValueError('幻场 Seedance 2.x 目前只支持 480p 或 720p，请修改项目视频分辨率')
             body = {
                 'model': model,
                 'content': content,

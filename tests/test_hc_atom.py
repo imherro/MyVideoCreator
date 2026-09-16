@@ -132,6 +132,35 @@ def test_video_submit_poll_and_download(monkeypatch):
     assert calls == [('POST', '/video/generation/tasks'), ('GET', '/video/generation/tasks/vg-1')]
 
 
+def test_seedance_20_uses_v3_endpoint_and_selected_model(monkeypatch):
+    configured = provider()
+    configured['models']['video'] = 'doubao-seedance-2.0'
+    item = stored_job('video', configured)
+    item['input'].update({'model': 'doubao-seedance-2.0', 'parameters': {'duration': 3, 'resolution': '720p'}})
+    original = httpx.Client
+    calls = []
+
+    def handle(request):
+        calls.append((request.method, request.url.path))
+        if request.method == 'POST':
+            body = json.loads(request.read())
+            assert body['model'] == 'doubao-seedance-2.0'
+            assert body['duration'] == 4
+            assert body['ratio'] == '16:9'
+            return httpx.Response(200, json={'id': 'seedance-20-task', 'status': 'queued'})
+        return httpx.Response(200, json={
+            'id': 'seedance-20-task', 'status': 'succeeded',
+            'content': {'video_url': 'https://result.example/seedance-20.mp4'},
+        })
+
+    monkeypatch.setattr(hc_atom.httpx, 'Client', lambda **kw: original(**kw, transport=httpx.MockTransport(handle)))
+    monkeypatch.setattr(common, 'download_result', lambda *args, **kwargs: {'id': 'seedance-20-video'})
+    worker = Worker()
+    worker.halt = NoWait()
+    assert hc_atom.generate_video(worker, item, configured)['assets'][0]['id'] == 'seedance-20-video'
+    assert calls == [('POST', '/v3/video/tasks'), ('GET', '/v3/video/tasks/seedance-20-task')]
+
+
 def test_seedance_uses_v3_signed_first_frame_and_minimum_duration(monkeypatch):
     configured = provider()
     configured['id'] = 'hc-assets-' + uuid.uuid4().hex

@@ -188,7 +188,7 @@ def bind_fixed_dialogue_audio(document, node_id, kind, input_value, assets, prod
     result['prompt'] = base + '\n\n' + TIMING_MARKER + '\n' + '\n'.join(timing_lines)
     result['dialogue_audio_asset_ids'] = [item['assetId'] for item in frozen]
     result['dialogue_audio'] = frozen
-    # Seedance 2.5 can use the locked TTS take as a full-modal audio reference.
+    # Seedance 2.x can use the locked TTS take as a full-modal audio reference.
     # Keep the source asset ids in the durable job input; the provider builds a
     # short timing-aware reference track immediately before submission.
     result['dialogue_audio_mode'] = 'seedance_reference'

@@ -190,8 +190,9 @@ def init():
                 c.execute('UPDATE jobs SET input=? WHERE id=?',(dumps(frozen_input),job['id']))
         from .adaptation import seed_episode_scripts
         seed_episode_scripts(c)
-        from .model_migrations import migrate_seedance_25
+        from .model_migrations import enable_seedance_20, migrate_seedance_25
         migrate_seedance_25(c)
+        enable_seedance_20(c)
 
 def get_setting(key, default=None):
     with db() as c:

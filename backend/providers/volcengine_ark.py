@@ -13,13 +13,13 @@ from . import common
 
 DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
 DEFAULT_VIDEO_MODEL = 'doubao-seedance-2-5-260628'
-SEEDANCE_25_PREFIX = 'doubao-seedance-2-5'
+SEEDANCE_2_PREFIX = 'doubao-seedance-2-'
 
 
 def seedance_submission_duration(model, requested):
     """Return the provider duration without changing canonical shot timing."""
     duration = int(requested)
-    if str(model).lower().startswith(SEEDANCE_25_PREFIX):
+    if str(model).lower().startswith(SEEDANCE_2_PREFIX):
         return max(4, duration)
     return duration
 
@@ -34,7 +34,6 @@ def seedance_submission_prompt(prompt, requested, submitted):
     )
 
 
-DISABLED_VIDEO_PREFIXES = ('doubao-seedance-2-0',)
 SUPPORTED_REFERENCE_FORMATS = {'JPEG': 'image/jpeg', 'PNG': 'image/png'}
 MAX_REFERENCE_BYTES = 10 * 1024 * 1024
 MAX_REFERENCE_DIMENSION = 6000
@@ -119,8 +118,6 @@ def list_models(provider):
         seen.add(model_id)
         kind = _catalog_kind(model_id, provider, item)
         if not kind:
-            continue
-        if kind == 'video' and model_id.lower().startswith(DISABLED_VIDEO_PREFIXES):
             continue
         lifecycle = str(item.get('status') or 'Active')
         if lifecycle.lower() == 'shutdown':
@@ -412,8 +409,6 @@ def generate_video(worker, job, provider):
     if not model:
         raise ValueError('请填写火山方舟视频模型 ID')
     selected_model = str(job['input'].get('model') or model).strip()
-    if selected_model.lower().startswith(DISABLED_VIDEO_PREFIXES):
-        raise ValueError('安影已停用 Seedance 2.0，请在项目设置中选择 Doubao-Seedance-2.5')
     root = _root(provider)
     remote = job.get('provider_job_id')
     params = {**provider.get('parameters', {}).get('video', {}), **job['input'].get('parameters', {})}
@@ -421,8 +416,8 @@ def generate_video(worker, job, provider):
         bool(job['input'].get('dialogue_audio'))
         and job['input'].get('dialogue_audio_mode') == DIALOGUE_REFERENCE_MODE
     )
-    if dialogue_reference and not selected_model.lower().startswith(SEEDANCE_25_PREFIX):
-        raise ValueError('固定对白音频参考需要 Doubao-Seedance-2.5，请在项目设置中选择该模型')
+    if dialogue_reference and not selected_model.lower().startswith(SEEDANCE_2_PREFIX):
+        raise ValueError('固定对白音频参考需要 Doubao-Seedance 2.x，请在项目设置中选择该系列模型')
     with httpx.Client(timeout=120, headers=_headers(provider), trust_env=True) as client:
         if not remote:
             assets=common.assets_for(job)
@@ -450,7 +445,7 @@ def generate_video(worker, job, provider):
             requested_duration = int(params.get('duration', 5))
             # Project shots may be shorter than Ark's generation window. Keep
             # their canonical duration unchanged and generate the minimum valid
-            # Seedance 2.5 clip; timeline assembly trims it back to the plan.
+            # Seedance 2.x clip; timeline assembly trims it back to the plan.
             submission_duration = seedance_submission_duration(selected_model, requested_duration)
             prompt = seedance_submission_prompt(
                 job['input']['prompt'], requested_duration, submission_duration,
