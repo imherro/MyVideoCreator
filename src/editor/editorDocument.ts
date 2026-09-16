@@ -37,7 +37,16 @@ export function readEditorTimeline(editor?: EditorDocument): ProjectJSON {
   if (!editor || editor.version !== 1 || !Array.isArray(editor.timeline?.tracks)) {
     return structuredClone(EMPTY_EDITOR_TIMELINE);
   }
-  return structuredClone(editor.timeline);
+  const timeline = structuredClone(editor.timeline);
+  // Twick's dedicated video track renderer serializes its children and waits
+  // twice for later clip offsets. A general element track renders visual clips
+  // concurrently at their own absolute times, which is the expected NLE
+  // behavior for a row containing multiple videos/images.
+  timeline.tracks = timeline.tracks.map((track) => ({
+    ...track,
+    type: track.type === "video" ? "element" : track.type,
+  }));
+  return timeline;
 }
 
 function mediaAssetForElement(

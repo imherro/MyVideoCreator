@@ -300,9 +300,12 @@ export function setTextStyle(
 }
 
 export function addTrack(editor: TimelineEditor, type: "video" | "audio" | "text" | "caption") {
-  const index = editor.getTracksByType(type).length + 1;
+  const storedType = type === "video" ? "element" : type;
+  const index = type === "video"
+    ? editor.getTracksByType("element").length + editor.getTracksByType("video").length + 1
+    : editor.getTracksByType(storedType).length + 1;
   const prefix = type === "video" ? "V" : type === "audio" ? "A" : type === "caption" ? "字幕" : "T";
-  return editor.addTrack(`${prefix}${index}`, type);
+  return editor.addTrack(`${prefix}${index}`, storedType);
 }
 
 function preferredTrack(editor: TimelineEditor, type: string, name: string): Track {

@@ -15,6 +15,14 @@ test("missing editor state starts as a fresh Twick project", () => {
   assert.deepEqual(second.tracks, []);
 });
 
+test("legacy video rows migrate to generic visual tracks for continuous playback", () => {
+  const timeline = readEditorTimeline({
+    version: 1,
+    timeline: { version: 2, tracks: [{ id: "v1", name: "V1", type: "video", elements: [] }] },
+  });
+  assert.equal(timeline.tracks[0].type, "element");
+});
+
 test("persisted Twick media keeps the canonical MyVideoCreator asset id", () => {
   const timeline = {
     version: 3,

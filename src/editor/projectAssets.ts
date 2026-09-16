@@ -84,10 +84,16 @@ export function presentEditorAssets(
       ? String(shot.title || shot.action || shot.description || sourceLabel || "生成素材")
       : String(input.character_name || input.dialogue?.text || sourceLabel || categoryLabels[(asset as any).category] || "项目素材");
     const duration = Number(asset.metadata?.duration);
+    const plannedDuration = Number(
+      shot?.duration ?? input.shot_duration ?? input.parameters?.duration,
+    );
     const rank = nodeId ? versions.get(`${nodeId}:${asset.kind}`)?.get(asset.id) : undefined;
     const versionCount = nodeId ? grouped.get(`${nodeId}:${asset.kind}`)?.length || 0 : 0;
     const details = [
-      Number.isFinite(duration) && duration > 0 ? `${duration.toFixed(1)} 秒` : undefined,
+      Number.isFinite(duration) && duration > 0 ? `素材 ${duration.toFixed(1)} 秒` : undefined,
+      asset.kind === "video" && Number.isFinite(plannedDuration) && plannedDuration > 0 && Math.abs(plannedDuration - duration) > 0.05
+        ? `镜头 ${plannedDuration.toFixed(1)} 秒`
+        : undefined,
       versionCount > 1 && rank ? `V${rank}` : undefined,
       (asset as any).category ? categoryLabels[(asset as any).category] || (asset as any).category : undefined,
       input.model ? String(input.model) : undefined,

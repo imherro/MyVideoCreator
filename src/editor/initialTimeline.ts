@@ -132,7 +132,7 @@ export function planInitialTimeline(
   });
 
   const tracks: TrackJSON[] = [
-    { id: "t-v1", name: "V1 · AI 初剪", type: "video", elements },
+    { id: "t-v1", name: "V1 · AI 初剪", type: "element", elements },
   ];
   if (dialogueElements.length) tracks.push({ id: "t-dialogue", name: "A1 · 角色对白", type: "audio", elements: dialogueElements });
 

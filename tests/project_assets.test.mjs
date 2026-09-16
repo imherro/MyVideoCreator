@@ -7,12 +7,12 @@ test("editor asset labels recover shot identity and versions from generated meta
     { id: "old", name: "生成结果.mp4", kind: "video", url: "/old", created: 1, category: "shot", metadata: { node_id: "video-2", duration: 5, input: { label: "shot-002 · 视频", model: "seedance" } } },
     { id: "new", name: "生成结果.mp4", kind: "video", url: "/new", created: 2, category: "shot", metadata: { node_id: "video-2", duration: 4, input: { label: "shot-002 · 视频", model: "seedance" } } },
   ];
-  const shots = [{ id: "shot-002", title: "机器人整理柜台", pipeline: { videoNodeId: "video-2" } }];
+  const shots = [{ id: "shot-002", title: "机器人整理柜台", duration: 3, pipeline: { videoNodeId: "video-2" } }];
   const presented = presentEditorAssets(assets, shots);
   assert.equal(presented[0].title, "镜头 02 · 视频");
   assert.equal(presented[0].subtitle, "机器人整理柜台");
-  assert.match(presented[0].details, /5\.0 秒 · V1 · 镜头 · seedance/);
-  assert.match(presented[1].details, /4\.0 秒 · V2/);
+  assert.match(presented[0].details, /素材 5\.0 秒 · 镜头 3\.0 秒 · V1 · 镜头 · seedance/);
+  assert.match(presented[1].details, /素材 4\.0 秒 · 镜头 3\.0 秒 · V2/);
   assert.match(presented[1].searchText, /机器人整理柜台/);
 });
 

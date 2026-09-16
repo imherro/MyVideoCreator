@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Image, Music, Plus, Search, Video } from "lucide-react";
 import { TIMELINE_DROP_MEDIA_TYPE } from "@twick/video-editor";
-import { useTimelineContext } from "@twick/timeline";
+import { Track, useTimelineContext } from "@twick/timeline";
 import { addAssetToTimeline } from "./assetAdapter";
 import type { EditorAsset } from "./editorDocument";
 import { presentEditorAssets } from "./projectAssets";
@@ -11,7 +11,12 @@ const supportedKinds = new Set(["video", "image", "audio"]);
 export function ProjectAssetPanel({ assets, shots, onMessage }: { assets: EditorAsset[]; shots: Record<string, any>[]; onMessage: (message: string) => void }) {
   const [kind, setKind] = useState("video");
   const [query, setQuery] = useState("");
-  const { editor, setSelectedItem, videoResolution } = useTimelineContext();
+  const [panelWidth, setPanelWidth] = useState(() => {
+    const saved = Number(globalThis.localStorage?.getItem("mvc-editor-assets-width"));
+    return Number.isFinite(saved) && saved >= 280 ? saved : 360;
+  });
+  const resizeStart = useRef<{ x: number; width: number } | null>(null);
+  const { editor, selectedItem, setSelectedItem, videoResolution } = useTimelineContext();
   const presented = useMemo(() => presentEditorAssets(assets, shots), [assets, shots]);
   const counts = useMemo(() => Object.fromEntries(["video", "image", "audio"].map((item) => [item, assets.filter((asset) => asset.kind === item).length])), [assets]);
   const visible = useMemo(() => {
@@ -21,16 +26,45 @@ export function ProjectAssetPanel({ assets, shots, onMessage }: { assets: Editor
 
   async function add(asset: EditorAsset) {
     try {
-      const element = addAssetToTimeline(editor, asset, videoResolution, { append: true });
+      const targetTrack = selectedItem instanceof Track ? selectedItem : undefined;
+      const element = addAssetToTimeline(editor, asset, videoResolution, { append: true, targetTrack });
       setSelectedItem(element);
-      onMessage(`已将“${asset.name}”追加到 ${asset.kind === "audio" ? "音频" : "画面"}轨`);
+      onMessage(`已将“${asset.name}”追加到 ${targetTrack?.getName() || (asset.kind === "audio" ? "音频轨" : "画面轨")}`);
     } catch (cause: any) {
       onMessage(`加入失败：${cause?.message || String(cause)}`);
     }
   }
 
   return (
-    <aside className="mvc-editor-assets">
+    <aside className="mvc-editor-assets" style={{ width: panelWidth }}>
+      <div
+        className="mvc-editor-assets-resizer"
+        role="separator"
+        aria-label="调整项目素材面板宽度"
+        aria-orientation="vertical"
+        tabIndex={0}
+        onPointerDown={(event) => {
+          resizeStart.current = { x: event.clientX, width: panelWidth };
+          event.currentTarget.setPointerCapture(event.pointerId);
+        }}
+        onPointerMove={(event) => {
+          if (!resizeStart.current || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
+          const width = Math.max(280, Math.min(640, resizeStart.current.width + event.clientX - resizeStart.current.x));
+          setPanelWidth(width);
+        }}
+        onPointerUp={(event) => {
+          resizeStart.current = null;
+          event.currentTarget.releasePointerCapture(event.pointerId);
+          globalThis.localStorage?.setItem("mvc-editor-assets-width", String(panelWidth));
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+          event.preventDefault();
+          const width = Math.max(280, Math.min(640, panelWidth + (event.key === "ArrowRight" ? 24 : -24)));
+          setPanelWidth(width);
+          globalThis.localStorage?.setItem("mvc-editor-assets-width", String(width));
+        }}
+      />
       <div className="mvc-editor-assets-title">
         <strong>项目素材</strong>
         <small>{assets.filter((asset) => supportedKinds.has(asset.kind)).length} 项 · 可搜索镜头和内容</small>

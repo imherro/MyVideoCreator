@@ -3,7 +3,7 @@ import { Sparkles } from "lucide-react";
 import VideoEditor from "@twick/video-editor";
 import "@twick/video-editor/dist/video-editor.css";
 import { LivePlayerProvider } from "@twick/live-player";
-import { useLivePlayerContext } from "@twick/live-player";
+import { PLAYER_STATE, useLivePlayerContext } from "@twick/live-player";
 import {
   TimelineProvider,
   useTimelineContext,
@@ -59,6 +59,24 @@ function TimelinePersistence({
   return null;
 }
 
+function PlaybackEndReset() {
+  const { currentTime, seekTime, playerState, setSeekTime } = useLivePlayerContext();
+  const { totalDuration } = useTimelineContext();
+  const previousTime = useRef(0);
+
+  useEffect(() => {
+    const wrappedAtEnd =
+      totalDuration > 0 &&
+      previousTime.current >= Math.max(0.1, totalDuration - 0.75) &&
+      currentTime < 0.05 &&
+      playerState === PLAYER_STATE.PAUSED;
+    if (wrappedAtEnd && seekTime > 0.05) setSeekTime(0);
+    previousTime.current = currentTime;
+  }, [currentTime, playerState, seekTime, setSeekTime, totalDuration]);
+
+  return null;
+}
+
 function EditorSurface({
   productionName,
   episodeLabel,
@@ -109,9 +127,10 @@ function EditorSurface({
         const track = tracks[index];
         if (!track) return;
         const type = track.getType();
-        const number = (counters.get(type) || 0) + 1;
-        counters.set(type, number);
-        const label = type === "video" ? `V${number}` : type === "audio" ? `A${number}` : type === "caption" ? "字幕" : type === "text" ? `T${number}` : "空";
+        const group = type === "video" || type === "element" ? "visual" : type;
+        const number = (counters.get(group) || 0) + 1;
+        counters.set(group, number);
+        const label = group === "visual" ? `V${number}` : type === "audio" ? `A${number}` : type === "caption" ? "字幕" : type === "text" ? `T${number}` : "空";
         header.dataset.trackLabel = label;
         header.title = `${label} · ${track.getName() || "未命名轨道"}`;
       });
@@ -185,6 +204,7 @@ function EditorSurface({
   return (
     <>
       <TimelinePersistence initialTimeline={initialTimeline} assets={assets} onChange={onChange} />
+      <PlaybackEndReset />
       <EditorShortcuts onMessage={setMessage} />
       <div className="mvc-editor-actionbar">
         <button className="primary compact" onClick={generateInitialEdit}>

@@ -35,17 +35,23 @@ export function assetToTwickElement(
   resolution: Size,
 ): TrackElement {
   const mediaDuration = Number(asset.metadata?.duration);
-  const duration = Number.isFinite(mediaDuration) && mediaDuration > 0
+  const sourceDuration = Number.isFinite(mediaDuration) && mediaDuration > 0
     ? mediaDuration
     : asset.kind === "image" ? 5 : 0;
-  if (!duration) throw new Error(`素材“${asset.name}”缺少有效时长`);
+  if (!sourceDuration) throw new Error(`素材“${asset.name}”缺少有效时长`);
+  const requestedDuration = Number(
+    asset.metadata?.input?.shot_duration ?? asset.metadata?.input?.parameters?.duration,
+  );
+  const duration = asset.kind === "video" && Number.isFinite(requestedDuration) && requestedDuration > 0
+    ? Math.min(sourceDuration, requestedDuration)
+    : sourceDuration;
   let element: TrackElement;
   if (asset.kind === "video") {
     element = new VideoElement(asset.url, resolution)
-      .setMediaDuration(duration)
+      .setMediaDuration(sourceDuration)
       .setFrame({ x: 0, y: 0, size: [resolution.width, resolution.height] });
   } else if (asset.kind === "audio") {
-    element = new AudioElement(asset.url).setMediaDuration(duration);
+    element = new AudioElement(asset.url).setMediaDuration(sourceDuration);
   } else if (asset.kind === "image") {
     element = new ImageElement(asset.url, resolution)
       .setFrame({ x: 0, y: 0, size: [resolution.width, resolution.height] });
@@ -62,12 +68,26 @@ export function assetToTwickElement(
   return element;
 }
 
-function trackType(asset: EditorAsset) {
-  return asset.kind === "audio" ? "audio" : "video";
+function trackType(asset: EditorAsset): "audio" | "element" {
+  return asset.kind === "audio" ? "audio" : "element";
 }
 
-function nextTrackName(editor: TimelineEditor, type: "video" | "audio") {
-  return `${type === "video" ? "V" : "A"}${editor.getTracksByType(type).length + 1}`;
+function visualTracks(editor: TimelineEditor) {
+  return [
+    ...editor.getTracksByType("element"),
+    ...editor.getTracksByType("video"),
+  ];
+}
+
+function compatibleTrack(asset: EditorAsset, track?: Track) {
+  if (!track) return false;
+  return asset.kind === "audio"
+    ? track.getType() === "audio"
+    : track.getType() === "element" || track.getType() === "video";
+}
+
+function nextTrackName(editor: TimelineEditor, type: "element" | "audio") {
+  return `${type === "element" ? "V" : "A"}${type === "element" ? visualTracks(editor).length + 1 : editor.getTracksByType(type).length + 1}`;
 }
 
 /**
@@ -83,8 +103,8 @@ export function addAssetToTimeline(
   options: { start?: number; targetTrack?: Track; append?: boolean } = {},
 ) {
   const type = trackType(asset);
-  const candidates = editor.getTracksByType(type);
-  let target = options.targetTrack?.getType() === type ? options.targetTrack : candidates[0];
+  const candidates = type === "element" ? visualTracks(editor) : editor.getTracksByType(type);
+  let target = compatibleTrack(asset, options.targetTrack) ? options.targetTrack : candidates[0];
   if (!target) target = editor.addTrack(nextTrackName(editor, type), type);
 
   const element = assetToTwickElement(asset, resolution);

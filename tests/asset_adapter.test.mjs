@@ -60,8 +60,25 @@ test("project assets append to a typed track and remain movable clips", () => {
   const first = addAssetToTimeline(editor, asset, resolution, { append: true });
   const second = addAssetToTimeline(editor, { ...asset, id: "asset-video-2" }, resolution, { append: true });
   assert.equal(tracks.length, 1);
-  assert.equal(tracks[0].getType(), "video");
+  assert.equal(tracks[0].getType(), "element");
   assert.deepEqual([first.getStart(), first.getEnd()], [0, 5.2]);
   assert.deepEqual([second.getStart(), second.getEnd()], [5.2, 10.4]);
   assert.equal(refreshes, 2);
+});
+
+test("visual assets use the selected generic track and honor planned shot duration", () => {
+  const selected = new Track("V2", "element");
+  const tracks = [selected];
+  const editor = {
+    getTracksByType: (type) => tracks.filter((track) => track.getType() === type),
+    addTrack: (name, type) => { const track = new Track(name, type); tracks.push(track); return track; },
+    refresh: () => {},
+  };
+  const element = addAssetToTimeline(editor, {
+    id: "asset-planned", name: "镜头 02.mp4", kind: "video", url: "/shot-2",
+    metadata: { duration: 4.096, input: { shot_duration: 3 } },
+  }, resolution, { targetTrack: selected, append: true });
+  assert.equal(selected.getElements()[0].getId(), element.getId());
+  assert.equal(element.getMediaDuration(), 4.096);
+  assert.equal(element.getDuration(), 3);
 });
