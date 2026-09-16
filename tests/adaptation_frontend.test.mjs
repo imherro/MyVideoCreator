@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createEpisodePlans,normalizeEpisodeSelection,splitList} from '../src/adaptation.ts';
+import {appendEpisodeForChapter,createEpisodePlans,normalizeEpisodeSelection,splitList} from '../src/adaptation.ts';
 
 test('episode planner creates sixty stable plans and preserves existing edits',()=>{
   const plans=createEpisodePlans(60,60);
@@ -13,6 +13,15 @@ test('episode planner creates sixty stable plans and preserves existing edits',(
 
 test('batch script generation includes only valid unique selected episodes',()=>{
   assert.deepEqual(normalizeEpisodeSelection([12,5,8,5,0,61],60),[5,8,12]);
+});
+
+test('an unassigned source chapter can create the next episode plan',()=>{
+  const original=createEpisodePlans(1,15);
+  original[0].sourceChapterRefs=['chapter-1'];
+  const plans=appendEpisodeForChapter(original,15,'chapter-2');
+  assert.equal(plans.length,2);
+  assert.deepEqual(plans[0].sourceChapterRefs,['chapter-1']);
+  assert.deepEqual(plans[1].sourceChapterRefs,['chapter-2']);
 });
 
 test('production lists are trimmed and deduplicated',()=>{

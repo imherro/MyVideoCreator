@@ -2712,6 +2712,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             request={api}
             notify={setNotice}
             report={report}
+            onChanged={() => setWorkflowDataRevision((value) => ({ ...value, adaptation: value.adaptation + 1 }))}
           />
         ) : workflowStage === "adaptation" ? (
           <AdaptationPage

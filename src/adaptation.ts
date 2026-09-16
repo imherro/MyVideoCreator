@@ -51,6 +51,12 @@ export function createEpisodePlans(count: number, targetDuration: number, previo
   });
 }
 
+export function appendEpisodeForChapter(previous: EpisodePlan[], targetDuration: number, chapterId = "") {
+  const plans = createEpisodePlans(previous.length + 1, targetDuration, previous);
+  if (chapterId) plans[plans.length - 1] = { ...plans[plans.length - 1], sourceChapterRefs: [chapterId] };
+  return plans;
+}
+
 export function normalizeEpisodeSelection(values: Iterable<number>, episodeCount: number) {
   return [...new Set(values)]
     .filter((value) => Number.isInteger(value) && value >= 1 && value <= episodeCount)

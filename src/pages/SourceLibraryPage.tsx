@@ -5,12 +5,13 @@ type AnyValue = any;
 type CreateDialog = { mode: "source" | "chapter"; sourceId?: string; sourceName?: string };
 
 export function SourceLibraryPage({
-  productionId, projectId, providers, defaultTarget, refreshKey = 0, request, notify, report,
+  productionId, projectId, providers, defaultTarget, refreshKey = 0, request, notify, report, onChanged,
 }: {
   productionId: string; projectId: string;
   providers: AnyValue[]; defaultTarget?: AnyValue; refreshKey?: number;
   request: (path: string, options?: RequestInit) => Promise<AnyValue>;
   notify: (message: string) => void; report: (error: unknown) => void;
+  onChanged?: () => void;
 }) {
   const [sources, setSources] = useState<AnyValue[]>([]);
   const [chapters, setChapters] = useState<AnyValue[]>([]);
@@ -23,6 +24,7 @@ export function SourceLibraryPage({
   const [sourceName, setSourceName] = useState("");
   const [chapterTitle, setChapterTitle] = useState("第一章");
   const [chapterContent, setChapterContent] = useState("");
+  const [dirtyChapters, setDirtyChapters] = useState<Set<string>>(new Set());
   const fileRef = useRef<HTMLInputElement>(null);
   const textProviders = useMemo(
     () => [{ id: "local", name: "本地 llama.cpp", local: true, model: "" }, ...providers.filter((provider) => !provider.kind || provider.kind === "text")],
@@ -50,7 +52,7 @@ export function SourceLibraryPage({
     setActive((value) => value && nextChapters.some((item: AnyValue) => item.id === value) ? value : nextChapters[0]?.id || "");
   }
 
-  useEffect(() => { setSelected(new Set()); void load().catch(report); }, [productionId, refreshKey]);
+  useEffect(() => { setSelected(new Set()); setDirtyChapters(new Set()); void load().catch(report); }, [productionId, refreshKey]);
   useEffect(() => {
     setProviderId(defaultProviderId);
     setModel(defaultModelId);
@@ -88,6 +90,7 @@ export function SourceLibraryPage({
       setDialog(null);
       await load();
       setActive(created.id);
+      onChanged?.();
       notify(mode === "source" ? "原著和第一章已建立" : "章节已新增");
     } finally { setBusy(false); }
   }
@@ -100,17 +103,24 @@ export function SourceLibraryPage({
         content: await file.text(), metadata: { filename: file.name },
       }) });
       await load();
+      onChanged?.();
       notify(`已导入 ${file.name}`);
     } finally { setBusy(false); }
+  }
+  async function persistChapter(target: AnyValue) {
+    const saved = await request(`/productions/${productionId}/chapters/${target.id}`, {
+      method: "PUT", body: JSON.stringify({ title: target.title, content: target.content, revision: target.revision }),
+    });
+    setChapters((items) => items.map((item) => item.id === saved.id ? saved : item));
+    setDirtyChapters((items) => { const next = new Set(items); next.delete(saved.id); return next; });
+    onChanged?.();
+    return saved;
   }
   async function saveChapter() {
     if (!chapter) return;
     setBusy(true);
     try {
-      const saved = await request(`/productions/${productionId}/chapters/${chapter.id}`, {
-        method: "PUT", body: JSON.stringify({ title: chapter.title, content: chapter.content, revision: chapter.revision }),
-      });
-      setChapters((items) => items.map((item) => item.id === saved.id ? saved : item));
+      await persistChapter(chapter);
       notify("章节已保存");
     } finally { setBusy(false); }
   }
@@ -122,6 +132,7 @@ export function SourceLibraryPage({
       await request(`/productions/${productionId}/sources/${activeSource.id}`, { method: "DELETE" });
       setSelected(new Set());
       await load();
+      onChanged?.();
       notify(`原著“${activeSource.title}”已移入回收站`);
     } finally { setBusy(false); }
   }
@@ -136,6 +147,7 @@ export function SourceLibraryPage({
       const count = selected.size;
       setSelected(new Set());
       await load();
+      onChanged?.();
       notify(`已将 ${count} 个章节移入回收站`);
     } finally { setBusy(false); }
   }
@@ -147,11 +159,16 @@ export function SourceLibraryPage({
     if (!window.confirm(`将分析 ${selected.size} 个章节\n模型：${provider?.name || providerId} / ${modelId || "本地默认"}\n确认创建文本任务？`)) return;
     setBusy(true);
     try {
+      let savedBeforeExtraction = false;
+      if (chapter && dirtyChapters.has(chapter.id)) {
+        await persistChapter(chapter);
+        savedBeforeExtraction = true;
+      }
       await request(`/productions/${productionId}/source-extractions`, { method: "POST", body: JSON.stringify({
         project_id: projectId, chapter_ids: [...selected], provider: providerId, model: modelId,
         submission_id: `source-${Date.now()}`,
       }) });
-      notify(`已创建 ${selected.size} 个事件提取任务，可在任务中心查看`);
+      notify(`${savedBeforeExtraction ? "当前章节已自动保存；" : ""}已创建 ${selected.size} 个事件提取任务，可在任务中心查看`);
     } finally { setBusy(false); }
   }
 
@@ -176,8 +193,8 @@ export function SourceLibraryPage({
         {visible.map((item) => <button className={active === item.id ? "active" : ""} key={item.id} onClick={() => setActive(item.id)}><input type="checkbox" checked={selected.has(item.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => setSelected((value) => { const next = new Set(value); event.target.checked ? next.add(item.id) : next.delete(item.id); return next; })}/><span><b>{item.display_no ?? item.chapter_no}. {item.title}</b><small>{item.source_title}</small></span></button>)}
       </aside>
       <main>{chapter ? <>
-        <div className="chapter-editor-head"><input value={chapter.title} onChange={(event) => setChapters((items) => items.map((item) => item.id === chapter.id ? { ...item, title: event.target.value } : item))}/><button disabled={busy} onClick={() => run(saveChapter)}><Save size={14}/>保存章节</button></div>
-        <textarea className="chapter-editor" value={chapter.content} onChange={(event) => setChapters((items) => items.map((item) => item.id === chapter.id ? { ...item, content: event.target.value } : item))}/>
+        <div className="chapter-editor-head"><input value={chapter.title} onChange={(event) => { setDirtyChapters((items) => new Set(items).add(chapter.id)); setChapters((items) => items.map((item) => item.id === chapter.id ? { ...item, title: event.target.value } : item)); }}/><button disabled={busy || !dirtyChapters.has(chapter.id)} onClick={() => run(saveChapter)}><Save size={14}/>{dirtyChapters.has(chapter.id) ? "保存章节" : "已保存"}</button></div>
+        <textarea className="chapter-editor" value={chapter.content} onChange={(event) => { setDirtyChapters((items) => new Set(items).add(chapter.id)); setChapters((items) => items.map((item) => item.id === chapter.id ? { ...item, content: event.target.value } : item)); }}/>
         <h3>已提取事件</h3>{events.filter((item) => item.chapter_id === chapter.id).map((item) => <article className="source-event" key={item.id}><b>{item.event_order}. {item.summary}</b><small>{item.importance} · {item.emotion || "无情绪标注"} · {item.characters.join("、") || "无明确人物"}</small></article>)}
       </> : <div className="empty-state"><BookOpen/><h3>导入或新建原著</h3></div>}</main>
       <aside className="source-analysis">

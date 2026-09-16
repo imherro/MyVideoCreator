@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, RefreshCw, Save, Sparkles } from "lucide-react";
+import { Check, Plus, RefreshCw, Save, Sparkles } from "lucide-react";
 import {
   DURATION_OPTIONS,
   PAYWALL_LABELS,
@@ -7,6 +7,7 @@ import {
   PLATFORM_OPTIONS,
   RATIO_OPTIONS,
   STATUS_LABELS,
+  appendEpisodeForChapter,
   createEpisodePlans,
   type EpisodePlan,
 } from "../adaptation";
@@ -69,7 +70,23 @@ export function AdaptationPage({
     setDraft((current) => current && ({ ...current, adaptationPlan: { ...current.adaptationPlan, [group]: { ...current.adaptationPlan[group], [key]: value } } }));
   }
   function setPlan(patch: Partial<EpisodePlan>) {
-    setDraft((current) => current && ({ ...current, episodePlans: current.episodePlans.map((item: EpisodePlan) => item.episodeNo === active ? { ...item, ...patch } : item) }));
+    setDraft((current) => current && ({ ...current, episodePlans: current.episodePlans.map((item: EpisodePlan) => item.episodeNo === active ? { ...item, ...patch, status: "draft" } : item) }));
+  }
+  function createEpisode(chapterId = "") {
+    if (!draft || draft.episodePlans.length >= 500) return;
+    const plans = appendEpisodeForChapter(draft.episodePlans, draft.adaptationPlan.format.targetDuration, chapterId);
+    const episodeNo = plans.length;
+    setDraft({
+      ...draft,
+      adaptationPlan: {
+        ...draft.adaptationPlan,
+        status: "draft",
+        format: { ...draft.adaptationPlan.format, episodeCount: episodeNo },
+      },
+      episodePlans: plans,
+    });
+    setActive(episodeNo);
+    notify(chapterId ? `已用该章节建立 EP${String(episodeNo).padStart(2, "0")}，保存草稿后生效` : `已新增 EP${String(episodeNo).padStart(2, "0")}，请设置原著章节引用`);
   }
   async function save() {
     if (!draft) return;
@@ -107,6 +124,8 @@ export function AdaptationPage({
   if (!draft) return <div className="loading"><RefreshCw className="spin" />加载改编策划…</div>;
   const plan: EpisodePlan | undefined = draft.episodePlans.find((item: EpisodePlan) => item.episodeNo === active);
   const format = draft.adaptationPlan.format;
+  const chapterAssignments = new Map<string, number[]>();
+  draft.episodePlans.forEach((item: EpisodePlan) => item.sourceChapterRefs.forEach((chapterId) => chapterAssignments.set(chapterId, [...(chapterAssignments.get(chapterId) || []), item.episodeNo])));
   return <section className="adaptation-page workflow-domain-page">
     <header className="domain-header">
       <div><span className="eyebrow">ADAPTATION</span><h1>改编工作台</h1><p>原著事件 → 故事骨架 → 改编策略 → 分集规划。所有 AI 结果都需要人工批准。</p></div>
@@ -118,7 +137,17 @@ export function AdaptationPage({
         <button className="primary" disabled={busy || draft.adaptationPlan.status !== "review"} onClick={() => run(() => transition("approve"))}><Check size={15} />批准</button>
       </div>
     </header>
-    <div className="adaptation-layout"><main className="adaptation-main">
+    <div className="adaptation-layout"><aside className="episode-plan-list">
+      <div className="episode-plan-list-heading"><h3>分集导航</h3><button className="icon-button" title="新增分集" aria-label="新增分集" disabled={busy || draft.episodePlans.length >= 500} onClick={() => createEpisode()}><Plus size={14}/></button></div>
+      <div className="episode-plan-buttons">{draft.episodePlans.map((item: EpisodePlan) => <button key={item.episodeNo} className={active === item.episodeNo ? "active" : ""} onClick={() => setActive(item.episodeNo)}><span>EP{String(item.episodeNo).padStart(2, "0")}</span><small className={item.status}>{STATUS_LABELS[item.status] || item.status}</small></button>)}</div>
+      <div className="adaptation-chapter-index"><h4>原著章节 <span>{chapters.length}</span></h4>{chapters.map((chapter) => {
+        const assigned = chapterAssignments.get(chapter.id) || [];
+        return <div className={assigned.length ? "assigned" : "unassigned"} key={chapter.id}>
+          <span title={chapter.title}>{chapter.display_no ?? chapter.chapter_no}. {chapter.title}</span>
+          {assigned.length ? <small>{assigned.map((episodeNo) => `EP${String(episodeNo).padStart(2, "0")}`).join("、")}</small> : <><small>未分配</small><div><button onClick={() => setPlan({ sourceChapterRefs: [...new Set([...(plan?.sourceChapterRefs || []), chapter.id])] })}>加入当前</button><button onClick={() => createEpisode(chapter.id)}>建 EP{String(draft.episodePlans.length + 1).padStart(2, "0")}</button></div></>}
+        </div>;
+      })}</div>
+    </aside><main className="adaptation-main">
       <article className="domain-card"><h2>成片规格</h2><div className="domain-fields four">
         <label>总集数<input type="number" min="1" max="500" value={format.episodeCount} onChange={(e) => setFormat("episodeCount", Number(e.target.value))} /></label>
         <label>单集秒数<input list="adaptation-duration-options" type="number" min="1" max="3000" value={format.targetDuration} onChange={(e) => setFormat("targetDuration", Number(e.target.value))} /><datalist id="adaptation-duration-options">{DURATION_OPTIONS.map((value)=><option value={value} key={value}/>)}</datalist></label>
@@ -138,7 +167,7 @@ export function AdaptationPage({
         </div><fieldset className="chapter-reference-field"><legend>原著章节引用</legend>{chapters.map((chapter) => <label className="check-label" key={chapter.id}><input type="checkbox" checked={plan.sourceChapterRefs.includes(chapter.id)} onChange={(e) => setPlan({ sourceChapterRefs: e.target.checked ? [...plan.sourceChapterRefs, chapter.id] : plan.sourceChapterRefs.filter((id) => id !== chapter.id) })} />{chapter.display_no ?? chapter.chapter_no}. {chapter.title}</label>)}</fieldset></div> : <div className="empty-state">请先建立分集规划</div>}
       </article>
       <MonetizationEditor draft={draft} setDraft={setDraft} />
-    </main><aside className="episode-plan-list"><h3>分集导航</h3>{draft.episodePlans.map((item: EpisodePlan) => <button key={item.episodeNo} className={active === item.episodeNo ? "active" : ""} onClick={() => setActive(item.episodeNo)}><span>EP{String(item.episodeNo).padStart(2, "0")}</span><small className={item.status}>{STATUS_LABELS[item.status] || item.status}</small></button>)}</aside></div>
+    </main></div>
     <footer className="domain-generation-bar"><div><b>AI 基于原著生成整个改编工作台</b><small>{draft.sourceEventCount ? `${draft.sourceEventCount} 条原著事件 · 将生成故事骨架、策略、分集规划和商业卡点` : "尚未提取原著事件，请先完成原著分析"}</small></div><label>服务<select value={providerId} onChange={(e) => { setProviderId(e.target.value); const p = textProviders.find((x) => x.id === e.target.value); setModel(p?.enabled_models?.text?.[0] || p?.models?.text || p?.model || ""); }}>{textProviders.map((item) => <option key={item.id} value={item.id}>{item.local ? "本地" : "云端"} · {item.name}</option>)}</select></label><label>模型{providerId === "local" ? <input value={model} placeholder="本地默认" onChange={(e) => setModel(e.target.value)} /> : <select value={model} onChange={(e) => setModel(e.target.value)}>{!allowedTextModels.includes(model) && model && <option value={model} disabled>{model}（已停用）</option>}{allowedTextModels.map((modelId) => <option value={modelId} key={modelId}>{modelId}</option>)}</select>}</label>{draft.sourceEventCount ? <button className="primary" disabled={busy} onClick={() => run(generate)}><Sparkles size={15} />生成整个工作台</button> : <button className="primary" disabled={busy} onClick={onOpenSource}>先提取原著事件</button>}</footer>
   </section>;
 }
