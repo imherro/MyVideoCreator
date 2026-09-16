@@ -1159,6 +1159,40 @@ def video_submission_preview(pid:str,node_id:str):
     data=compile_motion_input(document,node_id,'video',data,pid,provider)
     return {key:data.get(key) for key in ('prompt','reference_manifest','motion_reference','motion_warnings','planned_shot_duration','shot_duration','motion_compiler','generation_mode','dialogue_mode','voice_samples')}
 
+@app.get('/api/projects/{pid}/nodes/{node_id}/video-result-status')
+def video_result_status(pid:str,node_id:str):
+    saved=project(pid);document=saved['document']
+    node=next((n for n in document.get('nodes',[]) if n['id']==node_id),None)
+    if not node or node.get('data',{}).get('kind')!='video':raise HTTPException(404,'视频节点不存在')
+    with s.db() as c:
+        row=c.execute('SELECT * FROM jobs WHERE id=? AND project_id=? AND node_id=?',(node['data'].get('resultJob'),pid,node_id)).fetchone()
+        private=c.execute('SELECT provider FROM job_private WHERE job_id=?',(node['data'].get('resultJob'),)).fetchone()
+    response={'matches':False,'revision':saved['revision'],'production_revision':saved['production_revision'],'resultJob':node['data'].get('resultJob')}
+    if not row:return response
+    job=s.unpack(row)
+    from .video_dialogue import compile_shot_video_input,bind_fixed_dialogue_audio
+    from .motion_references import compile_motion_input
+    from .video_result_status import matches_video_result
+    data={**node['data'],'ratio':document.get('videoRatio') or document.get('ratio','16:9'),
+          'parameters':{'resolution':document.get('videoResolution','720p'),'outputFormat':document.get('videoFormat','mp4'),**(node['data'].get('parameters') or {})}}
+    provider=next((p for p in s.get_setting('providers',[]) if p.get('id')==data.get('provider')),None)
+    if not provider or provider.get('type') not in ('volcengine_ark','runninghub','hc_atom'):return response
+    try:
+        data=compile_shot_video_input(document,node_id,'video',data)
+        data=bind_fixed_dialogue_audio(document,node_id,'video',data,production_assets(saved['production_id'],kind='audio'))
+        data=compile_motion_input(document,node_id,'video',data,pid,provider)
+        if not private:return response
+        original_provider=json.loads(private['provider'])
+        if any(original_provider.get(key)!=provider.get(key) for key in ('type','base_url','url','video_path')):return response
+        # Compare effective provider defaults too; key rotation is not a creative change.
+        old_input={**job['input'],'parameters':{**((original_provider.get('parameters') or {}).get('video') or {}),**(job['input'].get('parameters') or {})}}
+        data['parameters']={**((provider.get('parameters') or {}).get('video') or {}),**(data.get('parameters') or {})}
+        response['matches']=matches_video_result(document,node,{**job,'input':old_input},data)
+    except ValueError:
+        pass  # Unready inputs must never clear a stale result.
+    return response
+
+
 @app.post('/api/projects/{pid}/jobs')
 def submit(pid:str,body:JobCreate):
     saved_project=project(pid)

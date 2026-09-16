@@ -1122,6 +1122,33 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       setNotice(`分镜规划已完成并自动导入 ${importedStoryboard.result.shots.length} 个分镜，画布节点和连线已同步建立`);
     }
   }, [jobs, doc?.applied, config.providers, system.models]);
+  const checkedVideoResults = useRef(new Set<string>());
+  useEffect(() => {
+    if (!doc || !project || dirty.current || saveFlight.current) return;
+    const snapshot=doc, pid=project.id, rev=revision.current, productionRev=productionRevision.current;
+    const stale=doc.nodes.filter(node=>node.data.kind==='video' && node.data.stale && node.data.resultJob);
+    if (!stale.length) return;
+    let cancelled=false;
+    const timer=window.setTimeout(()=>{void (async()=>{
+      const matched=new Set<string>();
+      for (const node of stale) {
+        if(cancelled) return;
+        const key=JSON.stringify([pid,rev,productionRev,node.id,node.data.resultJob]);
+        if(checkedVideoResults.current.has(key)) continue;
+        try {
+          const result=await api(`/projects/${pid}/nodes/${encodeURIComponent(node.id)}/video-result-status`);
+          if(cancelled) return;
+          if(checkedVideoResults.current.size>500) checkedVideoResults.current.clear();
+          checkedVideoResults.current.add(key);
+          if(result.matches && result.revision===rev && result.production_revision===productionRev && result.resultJob===node.data.resultJob) matched.add(node.id);
+        } catch { /* Preserve the existing warning when verification is unavailable. */ }
+      }
+      if(!cancelled && matched.size && current.current.project?.id===pid && current.current.doc===snapshot && !dirty.current && revision.current===rev && productionRevision.current===productionRev) {
+        update(document=>({...document,nodes:document.nodes.map(node=>matched.has(node.id)?{...node,data:{...node.data,stale:false}}:node)}));
+      }
+    })();},350);
+    return ()=>{cancelled=true;window.clearTimeout(timer);};
+  },[doc,project?.revision,saved]);
   useEffect(() => {
     const completed = productionJobs.filter((job) => job.status === "succeeded");
     const newlyCompleted = completed.filter((job) => !observedCompletedJobs.current.has(job.id));
