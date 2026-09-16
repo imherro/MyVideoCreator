@@ -30,6 +30,7 @@ def freeze_prompt_contract(kind: str, value: dict, *, origin: str = 'submission'
         from .adaptation import SCRIPT_SCHEMA, SCRIPT_SYSTEM_PROMPT
         system_prompt, response_schema, schema_version = SCRIPT_SYSTEM_PROMPT, SCRIPT_SCHEMA, 'episode-script/v1'
     elif kind == 'storyboard' and result.get('film_bible'):
+        from .film_bible.reuse import visual_user_prompt
         from .film_bible.models import (
             BOUND_STORYBOARD_SCHEMA, STORYBOARD_DIRECTOR_PROMPT,
             VISUAL_BIBLE_SCHEMA, VISUAL_EXTRACTOR_PROMPT,
@@ -38,9 +39,9 @@ def freeze_prompt_contract(kind: str, value: dict, *, origin: str = 'submission'
             {
                 'id': 'visual_bible', 'label': '阶段 1 · 提取视觉资产卡',
                 'system_prompt': VISUAL_EXTRACTOR_PROMPT,
-                'user_prompt': result.get('prompt', ''),
+                'user_prompt': visual_user_prompt(result.get('prompt', ''),(result.get('storyboard_visual_context') or {}).get('visual')),
                 'response_schema': VISUAL_BIBLE_SCHEMA,
-                'schema_version': 'visual-bible/v1',
+                'schema_version': 'visual-bible/v2' if result.get('storyboard_visual_context') else 'visual-bible/v1',
             },
             {
                 'id': 'bound_storyboard', 'label': '阶段 2 · 生成绑定分镜',
@@ -50,7 +51,7 @@ def freeze_prompt_contract(kind: str, value: dict, *, origin: str = 'submission'
                 'schema_version': 'bound-storyboard/v2',
             },
         ])
-        schema_version = 'film-bible-storyboard/v1'
+        schema_version = 'film-bible-storyboard/v2' if result.get('storyboard_visual_context') else 'film-bible-storyboard/v1'
     elif kind in ('text', 'storyboard'):
         from .prompts import SHOT_SCHEMA, TEMPLATES
         system_prompt = TEMPLATES[kind]

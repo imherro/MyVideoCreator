@@ -1,5 +1,6 @@
 import { planShotTimeline } from "./shotTimeline";
 import { ensureShotNodes, importStoryboardShots } from "./shotNodes";
+import { mergeStoryboardResult } from "./filmBible/storyboardImport";
 import { autoLayoutCanvas } from "./canvasLayout";
 import { canvasEdgeColor } from "./canvasEdges";
 import { imageSizeForRatio, VIDEO_FORMATS, VIDEO_RATIOS, VIDEO_RESOLUTIONS } from "./mediaSpecs";
@@ -1097,12 +1098,10 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           const storyboardNode = next.nodes.find(
             (item) => item.id === job.node_id && item.data.kind === "storyboard",
           );
-          const withFilmBible = job.result.filmBible
-            ? { ...next, filmBible: { ...next.filmBible, ...job.result.filmBible } }
-            : next;
+          const imported = mergeStoryboardResult(next, job.result);
           next = importStoryboardShots(
-            withFilmBible,
-            job.result.shots,
+            imported.document,
+            imported.shots,
             config.providers,
             system.models,
             id,
@@ -1647,18 +1646,10 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       const storyboardNode = d.nodes.find(
         (item) => item.id === job.node_id && item.data.kind === "storyboard",
       );
-      const withFilmBible = job.result.filmBible
-        ? {
-            ...d,
-            filmBible: {
-              ...d.filmBible,
-              ...job.result.filmBible,
-            },
-          }
-        : d;
+      const imported = mergeStoryboardResult(d, job.result);
       return importStoryboardShots(
-        withFilmBible,
-        job.result.shots,
+        imported.document,
+        imported.shots,
         config.providers,
         system.models,
         id,
@@ -1666,8 +1657,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       );
     });
     activateWorkflowStage("storyboard");
-    const cardCount = Object.keys(job.result.filmBible?.visual?.cards || {}).length;
-    setNotice(`已导入 ${job.result.shots.length} 个分镜${cardCount ? `和 ${cardCount} 张视觉卡` : ""}，画布节点和连线已同步建立；检查后可运行画布`);
+    setNotice(`已导入 ${job.result.shots.length} 个分镜，复用已有资产并合并新增资产，画布节点和连线已同步建立`);
   }
   function shotNodes(shot: Any, _index: number) {
     update((d) =>

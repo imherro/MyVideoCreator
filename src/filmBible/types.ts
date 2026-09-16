@@ -39,6 +39,7 @@ export type VisualCard = {
   id: string;
   kind: VisualKind;
   name: string;
+  aliases?: string[];
   parentCardId: string | null;
   currentVersionId: string;
   status: "active" | "deprecated";

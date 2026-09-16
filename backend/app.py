@@ -930,6 +930,19 @@ def _project_image_spec(c, pid):
 
 def create_job_record(c,pid,body):
     from .job_contracts import freeze_prompt_contract
+    if body.kind=='storyboard' and body.input.get('film_bible'):
+        previous=c.execute('SELECT project_id,input FROM jobs WHERE submission_id=?',(body.submission_id,)).fetchone()
+        if previous and previous['project_id']==pid:
+            frozen=json.loads(previous['input']).get('storyboard_visual_context')
+            body.input={key:value for key,value in body.input.items() if key!='storyboard_visual_context'}
+            if frozen is not None:body.input['storyboard_visual_context']=frozen
+        else:
+            state=read_project_state(c,pid)
+            body.input={**body.input,'storyboard_visual_context':{
+                'version':'production-visual-reuse/v1','production_id':state['project']['production_id'],
+                'production_revision':state['production']['revision'],
+                'visual':(state['document'].get('filmBible') or {}).get('visual') or {'cards':{},'versions':{}},
+            }}
     if body.kind == 'image':
         # The project owns the output frame. Do not let a stale browser, a
         # canvas-node default, or a provider-wide "2K" preset silently turn an

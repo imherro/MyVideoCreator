@@ -310,6 +310,7 @@ class Worker:
                 inp['prompt'],inp.get('target_duration'),inp.get('provider','local'),
                 inp.get('model') or p.get('model','local'),
                 request_stage,inp.get('prompt_stages'),report_stage,
+                existing_visual=(inp.get('storyboard_visual_context') or {}).get('visual'),
             )
         prompt=inp['prompt']
         if kind=='text' and inp.get('target_duration'):

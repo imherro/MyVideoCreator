@@ -880,12 +880,50 @@ def test_graph_storyboard_defaults_to_two_pass_film_bible(authenticated):
     jobs=c.get('/api/projects/'+p['id']+'/jobs').json()
     assert jobs[0]['input']['film_bible'] is True
     assert jobs[0]['input']['target_duration']==15
-    assert jobs[0]['input']['schema_version']=='film-bible-storyboard/v1'
+    assert jobs[0]['input']['schema_version']=='film-bible-storyboard/v2'
     assert [stage['id'] for stage in jobs[0]['input']['prompt_stages']]==['visual_bible','bound_storyboard']
     assert all(stage['system_prompt'] for stage in jobs[0]['input']['prompt_stages'])
     assert all(stage['response_schema'] for stage in jobs[0]['input']['prompt_stages'])
     with s.db() as db:
         db.execute("UPDATE jobs SET status='cancelled' WHERE project_id=?",(p['id'],))
+
+
+def test_episode_storyboard_freezes_shared_assets_for_single_and_batch(authenticated):
+    from backend.film_bible.validate import normalize_visual_bible
+    from test_film_bible import visual_input
+    c=authenticated
+    c.put('/api/settings',json={'providers':[{'id':'reuse-text','name':'test','type':'openai','url':'http://127.0.0.1:1/v1','local':True}]})
+    first=project(c);visual,_=normalize_visual_bible(visual_input())
+    first['document']['filmBible']['visual']=visual
+    saved=c.put('/api/projects/'+first['id'],json={'name':first['name'],'revision':first['revision'],
+        'production_revision':first['production_revision'],'document':first['document']})
+    assert saved.status_code==200,saved.text
+    second=c.post(f'/api/productions/{first["production_id"]}/episodes',json={}).json()
+    data={'kind':'storyboard','film_bible':True,'provider':'reuse-text','prompt':'EP02','target_duration':15}
+    second['document']['nodes']=[{'id':'plan','data':data}]
+    saved=c.put('/api/projects/'+second['id'],json={'name':second['name'],'revision':second['revision'],
+        'production_revision':second['production_revision'],'document':second['document']})
+    assert saved.status_code==200,saved.text
+    body={'node_id':'plan','kind':'storyboard','submission_id':s.uid(),'input':{**data,'storyboard_visual_context':{'visual':{'cards':{},'versions':{}}}}}
+    single=c.post('/api/projects/'+second['id']+'/jobs',json=body)
+    assert single.status_code==200,single.text
+    frozen=single.json()['input']['storyboard_visual_context']
+    assert frozen['visual']==visual and frozen['production_id']==first['production_id']
+    assert next(iter(visual['cards'])) in single.json()['input']['prompt_stages'][0]['user_prompt']
+    batch=c.post('/api/projects/'+second['id']+'/run',json={'node_ids':['plan'],'exact':True,'submission_id':s.uid()})
+    assert batch.status_code==200,batch.text
+    batch_job=c.get('/api/jobs/'+batch.json()['job_ids'][0]).json()
+    assert batch_job['input']['storyboard_visual_context']==frozen
+    # A later shared change cannot rewrite the same submission's snapshot.
+    fresh=c.get('/api/projects/'+first['id']).json()
+    fresh['document']['filmBible']['visual']['cards'][next(iter(visual['cards']))]['name']='已改名角色'
+    assert c.put('/api/projects/'+first['id'],json={'name':fresh['name'],'revision':fresh['revision'],
+        'production_revision':fresh['production_revision'],'document':fresh['document']}).status_code==200
+    retry=c.post('/api/projects/'+second['id']+'/jobs',json=body)
+    assert retry.status_code==200,retry.text
+    assert retry.json()['id']==single.json()['id']
+    assert retry.json()['input']['storyboard_visual_context']==frozen
+    with s.db() as db:db.execute("UPDATE jobs SET status='cancelled' WHERE project_id=?",(second['id'],))
 
 def test_graph_scheduler_consumes_upstream_text(authenticated,monkeypatch):
     c=authenticated;p=project(c);doc=p['document']
