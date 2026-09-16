@@ -98,7 +98,7 @@ export function MotionReferenceEditor(props: Props) {
           {preview.generation_mode?.requested !== preview.generation_mode?.actual && <span>选择模式 <b>{preview.generation_mode?.requested}</b></span>}
           {preview.dialogue_mode && <span>对白 <b>{dialogueModeLabels[preview.dialogue_mode.actual]}</b></span>}
         </div>
-        {(preview.voice_samples || []).map((sample:Value)=><p key={sample.characterCardId}>{sample.characterName} → @音频{sample.index} · 声音 V{sample.voiceVersion} · 仅参考音色</p>)}
+        {(preview.voice_samples || []).map((sample:Value)=><p key={sample.characterCardId}>{sample.characterName} → @音频{sample.index} · 声音 V{sample.voiceVersion} · {sample.source === "uploaded" ? "上传声音" : "豆包音色"} · {sample.media?.duration} 秒</p>)}
         {(preview.motion_warnings || []).map((warning: string) => <p key={warning} className="warning">{warning}</p>)}
         <div className="motion-inline-prompt">{String(preview.prompt || '').split(/\r?\n/).map((line, lineIndex) => {
           if (!line.trim()) return <div className="motion-prompt-gap" key={lineIndex}/>;

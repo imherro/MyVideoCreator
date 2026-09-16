@@ -421,6 +421,8 @@ def save_project(pid:str,body:ProjectSave):
         state=read_project_state(c,pid)
         if not state: raise HTTPException(404,'项目不存在')
         old=state['project'];production_row=state['production']
+        from .voice_reference_uploads import validate_transition as validate_voice_transition
+        validate_voice_transition(c,pid,state['document'],document)
         incoming_context={
             **state['production_context'],
             **{key:projected_context[key] for key in SHARED_DOCUMENT_KEYS},
@@ -611,11 +613,13 @@ def production_assets(production_id:str,category:str|None=None,kind:str|None=Non
         return [asset_public(s.unpack(row)) for row in rows]
 
 @app.post('/api/projects/{pid}/assets')
-async def upload(pid:str,file:UploadFile=File(...),category:str='other'):
+async def upload(pid:str,file:UploadFile=File(...),category:str='other',voice_reference:bool=False):
     owner=project(pid)
     category=asset_category(category)
     name=Path(file.filename or 'asset').name
     ext=Path(name).suffix.lower()
+    if voice_reference and ext not in ('.mp3','.wav'):
+        raise ValueError('声音样本仅支持 MP3 / WAV')
     allowed={'.png':'image','.jpg':'image','.jpeg':'image','.webp':'image','.mp4':'video','.webm':'video','.mov':'video','.wav':'audio','.mp3':'audio','.m4a':'audio','.srt':'subtitle'}
     if ext not in allowed: raise HTTPException(400,'支持 PNG/JPG/WebP、MP4/WebM/MOV、WAV/MP3/M4A、SRT')
     aid=s.uid('asset-'); path=s.ASSETS/(aid+ext); total=0
@@ -623,6 +627,7 @@ async def upload(pid:str,file:UploadFile=File(...),category:str='other'):
         with path.open('wb') as out:
             while chunk:=await file.read(1024*1024):
                 total+=len(chunk)
+                if voice_reference and total>30*1024**2: raise HTTPException(413,'声音样本不能超过 30 MB')
                 if total>2*1024**3: raise HTTPException(413,'单个素材不能超过 2GB')
                 out.write(chunk)
         metadata={'bytes':total}
@@ -635,6 +640,9 @@ async def upload(pid:str,file:UploadFile=File(...),category:str='other'):
         elif allowed[ext] in ('video','audio'):
             from .media import probe
             metadata.update(await asyncio.to_thread(probe,path))
+        if voice_reference:
+            from .voice_reference_uploads import validate_file
+            metadata.update(await asyncio.to_thread(validate_file,path))
         with s.db() as c:
             c.execute('INSERT INTO assets(id,project_id,name,kind,path,mime,metadata,created,category,source,production_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)',(aid,pid,name,allowed[ext],path.name,mimetypes.guess_type(name)[0] or 'application/octet-stream',s.dumps(metadata),time.time(),category,'uploaded',owner['production_id']))
         return asset_public(asset_row(aid))
@@ -644,6 +652,25 @@ async def upload(pid:str,file:UploadFile=File(...),category:str='other'):
 
 class AssetUpdate(BaseModel):
     category:str
+
+class VoiceReferenceAdmission(BaseModel):
+    authorized:bool=False
+
+@app.post('/api/projects/{pid}/assets/{aid}/voice-reference')
+def admit_voice_reference(pid:str,aid:str,body:VoiceReferenceAdmission):
+    if not body.authorized: raise ValueError('请确认拥有该声音的使用权或已获授权')
+    row=reference_asset(pid,aid)
+    from .voice_reference_uploads import validate_file
+    from datetime import datetime,timezone
+    path=(s.ASSETS/row['path']).resolve()
+    if row['kind']!='audio' or not path.is_relative_to(s.ASSETS.resolve()) or not path.is_file():
+        raise ValueError('请选择当前作品可访问的音频素材')
+    metadata={**row.get('metadata',{}),**validate_file(path)}
+    from .motion_references import file_hash
+    metadata['voice_reference_sha256']=file_hash(path)
+    metadata['voice_reference']=metadata.get('voice_reference') or {'authorized_at':datetime.now(timezone.utc).isoformat(),'declaration':'user_declared','originalAssetId':aid}
+    with s.db() as c: c.execute('UPDATE assets SET metadata=? WHERE id=?',(s.dumps(metadata),aid))
+    return asset_public(asset_row(aid))
 
 @app.patch('/api/projects/{pid}/assets/{aid}')
 def update_asset(pid:str,aid:str,body:AssetUpdate):
@@ -998,6 +1025,15 @@ def create_job_record(c,pid,body):
         if active:
             raise HTTPException(409,'本集剧本已在排队或生成中，请等待完成后再生成')
     if body.kind!='export' and not body.input.get('prompt','').strip(): raise ValueError('请输入生成描述')
+    if body.kind == 'audio' and (body.input.get('voice_profile') or body.input.get('dialogue')):
+        state=read_project_state(c,pid)
+        descriptor=body.input.get('voice_profile') or body.input.get('dialogue') or {}
+        cid=descriptor.get('voiceCardId') or descriptor.get('cardId') or descriptor.get('characterCardId')
+        profile=(((state['document'].get('filmBible') or {}).get('voices') or {}).get('profiles') or {}).get(cid) or {}
+        if body.input.get('dialogue') and profile.get('defaultVersion'):
+            profile=(profile.get('lockedVersions') or {}).get(str(profile['defaultVersion'])) or profile
+        if (profile.get('source') or {}).get('type')=='uploaded':
+            raise ValueError('上传声音不能自动逐句合成，请选择音色样本参考')
     if body.kind=='video':
         from .state_review import require_video_source_reviews
         state=read_project_state(c,pid)

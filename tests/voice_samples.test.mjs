@@ -19,7 +19,7 @@ test('confirm pins a sample and subsequent preview cannot replace it',()=>{
   assert.equal(locked.filmBible.voices.profiles.robot.referenceAssetId,'sample');
   assert.equal(locked.nodes[1].data.stale,true);
   const preview=acceptVoiceResult(locked,{id:'new',input:{voice_profile:{cardId:'robot',version:1}},result:{assets:[{id:'new-sample',kind:'audio'}]}});
-  assert.equal(preview.filmBible.voices.profiles.robot.previewAssetId,'new-sample');
+  assert.equal(preview.filmBible.voices.profiles.robot.previewAssetId,'sample'); // A locked version has one immutable sample identity.
   assert.equal(preview.filmBible.voices.profiles.robot.referenceAssetId,'sample');
   const unlocked=setVoiceLocked(preview,'robot',false);
   assert.equal(unlocked.filmBible.voices.profiles.robot.referenceAssetId,undefined);

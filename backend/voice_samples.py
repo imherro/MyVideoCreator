@@ -38,7 +38,7 @@ def bind_voice_samples(document, shot, result, assets):
         # Keep a distinct mapping even when two roles intentionally share a file.
         samples.append({'characterCardId': card_id, 'characterName': name, 'assetId': aid,
                         'voiceCardId': voice_card, 'voiceVersion': profile['version'], 'voiceType': profile.get('voiceType', ''),
-                        'purpose': 'timbre_only'})
+                        'source': (profile.get('source') or {}).get('type', 'doubao_tts'), 'purpose': 'timbre_only'})
         seen.add(card_id)
     result['voice_samples'] = samples
     result['dialogue_audio_mode'] = 'voice_sample'

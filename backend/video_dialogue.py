@@ -152,6 +152,8 @@ def bind_fixed_dialogue_audio(document, node_id, kind, input_value, assets, prod
     for dialogue in dialogues:
         card_id = str(dialogue.get('characterCardId') or '')
         voice_card, profile = resolved_voice(document, shot, dialogue)
+        if (profile.get("source") or {}).get("type") == "uploaded":
+            raise ValueError("上传声音不能自动逐句合成，请将镜头对白方式切换为音色样本参考")
         if profile.get('status') != 'locked' or not str(profile.get('voiceType') or '').strip():
             name = str(dialogue.get('characterName') or '角色')
             raise ValueError(f'{name}尚未锁定固定音色，请先在塑角造景中设置并锁定')

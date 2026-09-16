@@ -1,3 +1,5 @@
+import { effectiveVoiceProfile } from './filmBible/voices.ts';
+import { voiceCardId } from './filmBible/voiceResolution.ts';
 import { requiresInitialStateReview } from "./graph.ts";
 import { shotIdentity } from "./storyboard.ts";
 import { supportsMotionReference, videoGenerationMode } from "./motionReference.ts";
@@ -82,15 +84,20 @@ export function deriveVideoProductionRows(
         const missing = samples.find((row:Value)=>!row.ready);
         if (missing) dialogueReadinessReason = `${missing.name}尚未确认当前版本的声音参考`;
       }
-    } else if (["volcengine_ark", "runninghub"].includes(provider?.type)) {
+    } else if (["volcengine_ark", "runninghub", "hc_atom"].includes(provider?.type)) {
       for (const dialogue of dialogues) {
-        const profile = profiles[dialogue.characterCardId] || {};
+        const resolvedId = voiceCardId(document,shot,dialogue);
+          const profile: Value = effectiveVoiceProfile(profiles[resolvedId]) || {};
+          if ((profile as Value).source?.type === 'uploaded') {
+            dialogueReadinessReason = '上传声音不能自动逐句合成，请将本镜对白方式改为音色样本参考';
+            break;
+          }
         if (profile.status !== "locked" || !String(profile.voiceType || "").trim()) {
           dialogueReadinessReason = `${dialogue.characterName || "角色"}尚未锁定固定音色`;
           break;
         }
         const match = assets
-          .filter((asset) => asset.kind === "audio" && asset.metadata?.input?.dialogue?.id === dialogue.id && Number(asset.metadata?.input?.dialogue?.voiceVersion) === Number(profile.version || 1))
+          .filter((asset) => asset.kind === "audio" && (asset.metadata?.input?.dialogue?.voiceCardId || asset.metadata?.input?.dialogue?.characterCardId || dialogue.characterCardId) === resolvedId && asset.metadata?.input?.dialogue?.id === dialogue.id && Number(asset.metadata?.input?.dialogue?.voiceVersion) === Number(profile.version || 1))
           .sort((left, right) => Number(right.created || 0) - Number(left.created || 0))[0];
         if (!match) {
           dialogueReadinessReason = `${dialogue.characterName || "角色"}的本镜对白尚未使用当前固定音色生成`;
