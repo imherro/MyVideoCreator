@@ -44,15 +44,21 @@ export function ProjectAssetPanel({ assets, shots, onMessage }: { assets: Editor
         aria-orientation="vertical"
         tabIndex={0}
         onPointerDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
           resizeStart.current = { x: event.clientX, width: panelWidth };
           event.currentTarget.setPointerCapture(event.pointerId);
         }}
         onPointerMove={(event) => {
           if (!resizeStart.current || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
+          event.preventDefault();
+          event.stopPropagation();
           const width = Math.max(280, Math.min(640, resizeStart.current.width + event.clientX - resizeStart.current.x));
           setPanelWidth(width);
         }}
         onPointerUp={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
           resizeStart.current = null;
           event.currentTarget.releasePointerCapture(event.pointerId);
           globalThis.localStorage?.setItem("mvc-editor-assets-width", String(panelWidth));

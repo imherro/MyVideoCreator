@@ -2924,6 +2924,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               editor={doc.editor}
               assets={assets}
               ratio={doc.ratio}
+              duration={doc.duration}
               shots={doc.shots}
               nodes={doc.nodes}
               audioId={(doc as any).audio_id}

@@ -17,6 +17,11 @@ import { EditorToolbar } from "./EditorToolbar";
 import { EditorShortcuts } from "./EditorShortcuts";
 import { planInitialTimeline } from "./initialTimeline";
 import { addAssetToTimeline } from "./assetAdapter";
+import {
+  timelineContentDuration,
+  timelineWorkspaceDuration,
+  withTimelineWorkspaceDuration,
+} from "./timelineDuration";
 import { TIMELINE_DROP_MEDIA_TYPE } from "@twick/video-editor";
 import "./editorWorkspace.css";
 
@@ -27,6 +32,7 @@ type EditorWorkspaceProps = {
   editor?: EditorDocument;
   assets: EditorAsset[];
   ratio: string;
+  duration: number;
   shots: Record<string, any>[];
   nodes: Record<string, any>[];
   audioId?: string;
@@ -77,6 +83,48 @@ function PlaybackEndReset() {
   return null;
 }
 
+function TimelineDurationFloor({ projectDuration }: { projectDuration: number }) {
+  const { editor, totalDuration, changeLog } = useTimelineContext();
+  const [value, setValue] = useState(() =>
+    timelineWorkspaceDuration(editor.getProject(), projectDuration),
+  );
+  const contentDuration = timelineContentDuration(editor.getProject());
+  const minimum = Math.max(Number(projectDuration) || 0, contentDuration, 5);
+
+  useEffect(() => {
+    const floor = timelineWorkspaceDuration(editor.getProject(), projectDuration);
+    setValue((current) => Math.max(current, floor));
+    if (totalDuration + 0.001 < floor) editor.getContext().setTotalDuration(floor);
+  }, [changeLog, editor, projectDuration, totalDuration]);
+
+  const commit = (requested: number) => {
+    const next = Math.max(minimum, Number(requested) || minimum);
+    setValue(next);
+    const project = withTimelineWorkspaceDuration(editor.getProject(), next, projectDuration);
+    editor.setMetadata(project.metadata || {});
+    editor.getContext().setTotalDuration(next);
+  };
+
+  return (
+    <label className="mvc-editor-duration" title="时间轴工作区至少采用影片目标时长；可继续延长，以便把素材拖到更靠后的位置">
+      时间线
+      <input
+        aria-label="时间线工作区时长"
+        type="number"
+        min={minimum}
+        step="1"
+        value={value}
+        onChange={(event) => setValue(Number(event.target.value))}
+        onBlur={(event) => commit(Number(event.target.value))}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
+        }}
+      />
+      秒
+    </label>
+  );
+}
+
 function EditorSurface({
   productionName,
   episodeLabel,
@@ -86,6 +134,7 @@ function EditorSurface({
   nodes,
   audioId,
   musicVolume,
+  duration,
   onChange,
   onExport,
 }: {
@@ -97,11 +146,12 @@ function EditorSurface({
   nodes: Record<string, any>[];
   audioId?: string;
   musicVolume?: number;
+  duration: number;
   onChange: EditorWorkspaceProps["onChange"];
   onExport: EditorWorkspaceProps["onExport"];
 }) {
   const { editor, videoResolution, changeLog, setSelectedItem } = useTimelineContext();
-  const { getCurrentTime } = useLivePlayerContext();
+  const { getCurrentTime, setCurrentTime, setSeekTime, setPlayerState } = useLivePlayerContext();
   const [message, setMessage] = useState("编辑会随当前项目自动保存");
   const surfaceRef = useRef<HTMLDivElement>(null);
 
@@ -134,6 +184,16 @@ function EditorSurface({
         header.dataset.trackLabel = label;
         header.title = `${label} · ${track.getName() || "未命名轨道"}`;
       });
+      const split = surfaceRef.current?.querySelector<HTMLButtonElement>(".split-btn");
+      const remove = surfaceRef.current?.querySelector<HTMLButtonElement>(".delete-btn");
+      if (split) {
+        split.title = "切分所选片段（播放头必须位于片段内部）";
+        split.setAttribute("aria-label", "切分所选片段");
+      }
+      if (remove) {
+        remove.title = "删除所选片段";
+        remove.setAttribute("aria-label", "删除所选片段");
+      }
     });
     return () => cancelAnimationFrame(frame);
   }, [changeLog, editor]);
@@ -177,7 +237,7 @@ function EditorSurface({
 
   function generateInitialEdit() {
     const plan = planInitialTimeline(
-      { shots, nodes, assets, resolution: videoResolution, audioId, musicVolume },
+      { shots, nodes, assets, resolution: videoResolution, audioId, musicVolume, targetDuration: duration },
       () => crypto.randomUUID(),
     );
     if (plan.issues.length) {
@@ -198,7 +258,10 @@ function EditorSurface({
       return;
     }
     editor.loadProject(plan.timeline);
-    setMessage(`已按分镜顺序建立 ${plan.clipCount} 个镜头的初剪`);
+    setCurrentTime(0);
+    setSeekTime(0);
+    requestAnimationFrame(() => setPlayerState(PLAYER_STATE.PLAYING));
+    setMessage(`已按分镜顺序建立 ${plan.clipCount} 个镜头，并开始预览`);
   }
 
   return (
@@ -208,8 +271,9 @@ function EditorSurface({
       <EditorShortcuts onMessage={setMessage} />
       <div className="mvc-editor-actionbar">
         <button className="primary compact" onClick={generateInitialEdit}>
-          <Sparkles size={15} /> 生成初剪
+          <Sparkles size={15} /> 生成初剪并预览
         </button>
+        <TimelineDurationFloor projectDuration={duration} />
         <span><b>{productionName} · {episodeLabel}</b>　{message}</span>
         <EditorToolbar assets={assets} onMessage={setMessage} onExport={onExport} />
       </div>
@@ -236,6 +300,7 @@ export function EditorWorkspace({
   editor,
   assets,
   ratio,
+  duration,
   shots,
   nodes,
   audioId,
@@ -269,6 +334,7 @@ export function EditorWorkspace({
             nodes={nodes}
             audioId={audioId}
             musicVolume={musicVolume}
+            duration={duration}
             onChange={onChange}
             onExport={onExport}
           />

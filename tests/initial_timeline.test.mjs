@@ -17,13 +17,14 @@ test("AI storyboard produces an ordered Twick V1 with stable source links", () =
   ];
   let next = 0;
   const plan = planInitialTimeline(
-    { shots, nodes, assets, resolution: { width: 1280, height: 720 } },
+    { shots, nodes, assets, resolution: { width: 1280, height: 720 }, targetDuration: 15 },
     () => String(++next),
   );
 
   assert.deepEqual(plan.issues, []);
   assert.equal(plan.clipCount, 2);
   assert.equal(plan.timeline.tracks[0].name, "V1 · AI 初剪");
+  assert.equal(plan.timeline.metadata.custom.timelineDuration, 15);
   assert.deepEqual(
     plan.timeline.tracks[0].elements.map((element) => [element.s, element.e]),
     [[0, 3], [3, 8]],

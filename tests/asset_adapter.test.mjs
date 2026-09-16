@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { AudioElement, ImageElement, Track, VideoElement } from "@twick/timeline";
+import { AudioElement, ImageElement, TimelineEditor, Track, VideoElement } from "@twick/timeline";
 import { addAssetToTimeline, assetToTwickElement } from "../src/editor/assetAdapter.ts";
 
 const resolution = { width: 1280, height: 720 };
@@ -81,4 +81,38 @@ test("visual assets use the selected generic track and honor planned shot durati
   assert.equal(selected.getElements()[0].getId(), element.getId());
   assert.equal(element.getMediaDuration(), 4.096);
   assert.equal(element.getDuration(), 3);
+});
+
+test("scissors split protected video without deleting it or refetching metadata", async () => {
+  const editor = new TimelineEditor({
+    contextId: "protected-split-test",
+    setTotalDuration: () => {},
+    setPresent: () => {},
+    handleUndo: () => null,
+    handleRedo: () => null,
+    handleResetHistory: () => {},
+    updateChangeLog: () => {},
+    setTimelineAction: () => {},
+  });
+  editor.loadProject({
+    version: 1,
+    tracks: [{
+      id: "v1", name: "V1", type: "element", elements: [{
+        id: "protected", trackId: "v1", type: "video", name: "受保护素材",
+        s: 0, e: 5,
+        props: { src: "/api/assets/protected/file", time: 0, playbackRate: 1, volume: 1 },
+        frame: { x: 0, y: 0, size: [1280, 720] },
+        mediaDuration: 5,
+      }],
+    }],
+  });
+  const clip = editor.getTrackById("v1").getElements()[0];
+  const result = await editor.splitElement(clip, 2);
+  const parts = editor.getTrackById("v1").getElements();
+  assert.equal(result.success, true);
+  assert.equal(parts.length, 2);
+  assert.deepEqual(parts.map((part) => [part.getStart(), part.getEnd(), part.getProps().time]), [
+    [0, 2, 0],
+    [2, 5, 2],
+  ]);
 });

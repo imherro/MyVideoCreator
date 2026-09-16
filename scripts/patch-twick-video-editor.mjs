@@ -23,3 +23,23 @@ for (const relativePath of files) {
   writeFileSync(path, source);
   console.log(`Patched ${relativePath} to use the full timeline duration.`);
 }
+
+const timelineFiles = [
+  "node_modules/@twick/timeline/dist/index.mjs",
+  "node_modules/@twick/timeline/dist/index.js",
+];
+
+for (const relativePath of timelineFiles) {
+  const path = resolve(relativePath);
+  let source = readFileSync(path, "utf8");
+  const metadataPattern = "await element.updateVideoMeta();";
+  const patchedMetadata = "if (!(Number(element.getMediaDuration()) > 0)) await element.updateVideoMeta();";
+
+  if (source.includes(patchedMetadata)) continue;
+  if (!source.includes(metadataPattern)) {
+    throw new Error(`Unsupported @twick/timeline build: ${relativePath}`);
+  }
+  source = source.replace(metadataPattern, patchedMetadata);
+  writeFileSync(path, source);
+  console.log(`Patched ${relativePath} to split known media without reloading metadata.`);
+}

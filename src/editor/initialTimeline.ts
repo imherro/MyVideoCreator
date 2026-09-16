@@ -17,6 +17,7 @@ export function planInitialTimeline(
     resolution,
     audioId,
     musicVolume = 0.3,
+    targetDuration = 0,
   }: {
     shots: Value[];
     nodes: Value[];
@@ -24,6 +25,7 @@ export function planInitialTimeline(
     resolution: Size;
     audioId?: string;
     musicVolume?: number;
+    targetDuration?: number;
   },
   newId: () => string,
 ): InitialTimelinePlan {
@@ -182,6 +184,7 @@ export function planInitialTimeline(
           host: "my-video-creator",
           schema: "mvc-editor-v1",
           source: "storyboard",
+          timelineDuration: Math.max(Number(targetDuration) || 0, cursor),
         },
       },
     },
