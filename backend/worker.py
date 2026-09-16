@@ -583,7 +583,7 @@ class Worker:
             else:args+=['-c:v','copy']
             args+=['-c:a','aac','-movflags','+faststart',str(output)]
             self.run_process(job,args,work/'export.log','输出 MP4')
-            return {'assets':[register(job,output,'成片.mp4')]}
+            return {'assets':[register(self.export_named_job(job),output,'成片.mp4')]}
         finally:
             # All paths are rooted in this job's private work directory.
             if work.parent==s.DATA and work.name==job['id']: shutil.rmtree(work,ignore_errors=True)
@@ -613,12 +613,22 @@ class Worker:
                 job,plan.args,work/'editor-export.log',
                 f'合成高级时间线：{plan.visual_count} 个画面，{plan.audio_count} 路声音，{plan.text_count} 条文字'
             )
-            return {'assets':[register(job,output,'成片.mp4')], 'render':{
+            return {'assets':[register(self.export_named_job(job),output,'成片.mp4')], 'render':{
                 'mode':'editor','duration':plan.duration,'visual_count':plan.visual_count,
                 'audio_count':plan.audio_count,'text_count':plan.text_count,
             }}
         finally:
             if work.parent==s.DATA and work.name==job['id']:shutil.rmtree(work,ignore_errors=True)
+    def export_named_job(self,job):
+        """Give exported files a stable, searchable production-and-time name."""
+        inp=dict(job.get('input') or {})
+        if not inp.get('output_name'):
+            with s.db() as c:
+                row=c.execute('''SELECT COALESCE(NULLIF(trim(prod.name),''),NULLIF(trim(p.name),''),'安影片') name
+                    FROM projects p LEFT JOIN productions prod ON prod.id=p.production_id WHERE p.id=?''',(job['project_id'],)).fetchone()
+            title=row['name'] if row else '安影片'
+            inp['output_name']=f"{title}-{time.strftime('%Y%m%d-%H%M%S',time.localtime())}"
+        return {**job,'input':inp}
     def run_process(self,job,args,log_path,phase):
         self.progress(job,phase)
         with log_path.open('w',encoding='utf-8') as log:

@@ -154,6 +154,7 @@ const DirectorStage = lazy(() =>
 );
 import { framesForDuration, migrateLinkedNodePrompts, updateLinkedNodePrompt, updateShot } from "./shotSync";
 import { TimelinePreview } from "./TimelinePreview";
+import { defaultExportResolution, exportResolutionOptions } from "./exportSettings";
 import type { Clip } from "./timeline";
 import type { EditorDocument } from "./editor/editorDocument";
 import { AnYingMark } from "./app/AnYingMark";
@@ -249,6 +250,7 @@ type Doc = {
   videoFormat?: string;
   applied?: string[];
   editor?: EditorDocument;
+  export_resolution?: string;
 };
 type Project = EpisodeSummary & { document: Doc; production_revision: number };
 type SyncFailureKind = "api" | "sse" | "media";
@@ -698,6 +700,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       );
     }
     setPanel(null);
+    if (next === "editor") setSelected(null);
     if (next === "storyboard" && ["shots", "director"].includes(view)) return;
     if (next === "images" && ["shots", "grid"].includes(view)) return;
     setView(defaultViewForStage(next));
@@ -2145,7 +2148,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       ],
     }));
     setTimelineOpen(true);
-    setNotice("已加入时间线");
+    setNotice("已加入连续预览");
   }
   async function exportFilm(
     source: "legacy" | "editor",
@@ -2174,7 +2177,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             timeline: doc.timeline,
             editor_timeline: source === "editor" ? editorTimeline : undefined,
             render_mode: source,
-            resolution: (doc as any).export_resolution || "1280x720",
+            resolution: defaultExportResolution(doc),
             audio_id: (doc as any).audio_id,
             subtitle_id: (doc as any).subtitle_id,
             music_volume: (doc as any).music_volume ?? 0.3,
@@ -3715,7 +3718,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   }
                 >
                   <Scissors size={15} />
-                  加入时间线
+                  加入连续预览
                 </button>
               </div>
             )}
@@ -4116,7 +4119,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 <label>
                   导出分辨率
                   <select
-                    value={(doc as any).export_resolution || "1280x720"}
+                    value={defaultExportResolution(doc)}
                     onChange={(e) =>
                       update((d) => ({
                         ...d,
@@ -4124,11 +4127,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                       }))
                     }
                   >
-                    <option value="1280x720">720P · 横屏</option>
-                    <option value="1920x1080">1080P · 横屏</option>
-                    <option value="720x1280">720P · 竖屏</option>
-                    <option value="1080x1920">1080P · 竖屏</option>
-                    <option value="1080x1080">1080 · 方形</option>
+                    {exportResolutionOptions(doc).map((option) => (
+                      <option value={option.value} key={option.value}>{option.label}</option>
+                    ))}
                   </select>
                 </label>
                 <label>
@@ -4210,7 +4211,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 <p className="muted">
                   {exportSource === "editor"
                     ? "当前导出 Twick 多轨工程。配乐、字幕、转场和音量请在剪辑工作区中调整。输出为 24fps H.264/AAC MP4。"
-                    : "MP4 / H.264 / 24fps。保留镜头原声，配乐循环填充时间线。字幕烧录进视频画面。"}
+                    : "MP4 / H.264 / 24fps。保留镜头原声，配乐循环填充时间线。高于源素材分辨率时会由 FFmpeg 缩放插值并适配画布，输出像素会增加，但不会恢复真实细节。"}
                 </p>
                 <button
                   className="primary full"
