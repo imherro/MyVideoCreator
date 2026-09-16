@@ -1,6 +1,7 @@
 import { planShotTimeline } from "./shotTimeline";
 import { ensureShotNodes, importStoryboardShots } from "./shotNodes";
 import { autoLayoutCanvas } from "./canvasLayout";
+import { canvasEdgeColor } from "./canvasEdges";
 import { imageSizeForRatio, VIDEO_FORMATS, VIDEO_RATIOS, VIDEO_RESOLUTIONS } from "./mediaSpecs";
 import {
   planBatchGeneration,
@@ -2225,7 +2226,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     doc?.edges.map((edge, edgeIndex) => {
       const managed = edge.data?.managed === true;
       const lineage = edge.data?.origin === "visual_lineage";
-      const stroke = lineage ? "#77a5bb" : managed ? "#ddb66f" : "#78939d";
+      const stroke = canvasEdgeColor(edge, doc.nodes, doc.filmBible?.visual);
       const focusedNode = hoveredNode || selected;
       const related =
         !focusedNode || edge.source === focusedNode || edge.target === focusedNode;
@@ -2243,14 +2244,17 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         animated: edge.animated !== false && related,
         className: `${edge.className || ""} mvc-flow-edge${managed ? " mvc-flow-edge-managed" : ""}${lineage ? " mvc-flow-edge-lineage" : ""}`.trim(),
         zIndex: 0,
-        markerEnd:
-          edge.markerEnd || {
-            type: MarkerType.ArrowClosed,
-            color: stroke,
-            width: 14,
-            height: 14,
-          },
+        markerEnd: {
+          ...(typeof edge.markerEnd === "object" ? edge.markerEnd : {}),
+          type: MarkerType.ArrowClosed,
+          color: stroke,
+          width:
+            typeof edge.markerEnd === "object" ? (edge.markerEnd.width ?? 14) : 14,
+          height:
+            typeof edge.markerEnd === "object" ? (edge.markerEnd.height ?? 14) : 14,
+        },
         style: {
+          ...edge.style,
           stroke,
           strokeWidth: focusedNode && related ? 2.65 : lineage ? 1.75 : managed ? 1.85 : 1.7,
           strokeDasharray: lineage ? "7 7" : undefined,
@@ -2259,9 +2263,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               ? 0.96
               : 0.19
             : managed
-              ? 0.54
-              : 0.5,
-          ...edge.style,
+              ? 0.76
+              : 0.68,
         },
       };
     }) || [];
@@ -3155,17 +3158,11 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               >
                 <Play size={14} />
                 连续预览
-              </button>
-              <span>
-                <Scissors size={16} />
-                时间线预览{" "}
                 <small>
-                  {doc.timeline
-                    .reduce((sum, t) => sum + Number(t.duration), 0)
-                    .toFixed(1)}{" "}
-                  秒
+                  {doc.timeline.reduce((sum, t) => sum + Number(t.duration), 0).toFixed(1)} 秒
                 </small>
-              </span>
+              </button>
+              <span />
               <label>
                 配乐
                 <select

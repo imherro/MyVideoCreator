@@ -11,3 +11,9 @@ export function timelinePosition(clips:Clip[],time:number){
   return null;
 }
 export function timelineDuration(clips:Clip[]){return clips.reduce((sum,c)=>sum+Math.max(.1,Number(c.duration)||.1),0)}
+
+export function timelinePreviewWindow(clips:Clip[],currentIndex:number){
+  return [currentIndex-1,currentIndex,currentIndex+1]
+    .filter(index=>index>=0&&index<clips.length)
+    .map(index=>({index,slot:((index%3)+3)%3,clip:clips[index]}));
+}
