@@ -182,6 +182,7 @@ import { ScriptRoomPage } from "./pages/ScriptRoomPage";
 import { ArtDepartmentPage } from "./pages/ArtDepartmentPage";
 import { ProductionAssetCenter } from "./pages/ProductionAssetCenter";
 import { EpisodeSelector } from "./app/EpisodeSelector";
+import { EpisodeTransition, useEpisodeTransition } from "./app/EpisodeTransition";
 import {
   episodeLabel,
   episodesForProduction,
@@ -629,6 +630,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   const [workflowStage, setWorkflowStage] = useState<WorkflowStage>(initialWorkflowStage);
   // Adaptation and scripts share a production-scoped focus, including uncreated episodes.
   const [planningEpisodeFocus, setPlanningEpisodeFocus] = useState<Record<string, number>>({});
+  const { transition: episodeTransition, switchEpisode } = useEpisodeTransition();
   const [selected, setSelected] = useState<string | null>(null),
     [view, setView] = useState(defaultViewForStage(initialWorkflowStage)),
     [panel, setPanel] = useState<string | null>(null),
@@ -2579,7 +2581,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setTimelineOpen(!timelineOpen);
   };
   return (
-    <div className="studio-shell">
+    <div className="studio-shell" inert={episodeTransition ? true : undefined} aria-busy={Boolean(episodeTransition)}>
+      <EpisodeTransition transition={episodeTransition} />
       {projectSetupOpen && <ProjectSetupDialog
         key={projectSetupKey}
         providers={config.providers}
@@ -2624,7 +2627,12 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           active={workflowStage}
           onChange={activateWorkflowStage}
           states={Object.fromEntries(Object.entries(workflowGuide.stages).map(([stage, guide]: any) => [stage, guide.state]))}
-          episodeControl={<EpisodeSelector episode={project} episodes={currentEpisodes} onSelect={(projectId) => openProject(projectId).catch(report)} />}
+          episodeControl={<EpisodeSelector episode={project} episodes={currentEpisodes} onSelect={(projectId) => {
+            if (projectId === project.id) return;
+            const target = currentEpisodes.find((item) => item.id === projectId);
+            if (!target) return;
+            void switchEpisode(`EP${String(target.episode_no).padStart(2, "0")}`, () => openProject(projectId)).catch(report);
+          }} />}
         />
         <div className="workflow-header-meta" title="当前项目规格">
           <span>{doc.ratio}</span><i>·</i><span>{doc.style}</span><i>·</i><span>{doc.duration} 秒</span>
