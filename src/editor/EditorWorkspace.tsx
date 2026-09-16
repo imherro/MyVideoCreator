@@ -150,10 +150,11 @@ function EditorSurface({
   onChange: EditorWorkspaceProps["onChange"];
   onExport: EditorWorkspaceProps["onExport"];
 }) {
-  const { editor, videoResolution, changeLog, setSelectedItem } = useTimelineContext();
-  const { getCurrentTime, setCurrentTime, setSeekTime, setPlayerState } = useLivePlayerContext();
+  const { editor, videoResolution, changeLog, setSelectedItem, totalDuration } = useTimelineContext();
+  const { getCurrentTime, setCurrentTime, setSeekTime, playerState } = useLivePlayerContext();
   const [message, setMessage] = useState("编辑会随当前项目自动保存");
   const [messageTone, setMessageTone] = useState<"normal" | "error" | "success">("normal");
+  const [initialEditMode, setInitialEditMode] = useState<"preserve" | "target">("preserve");
   const surfaceRef = useRef<HTMLDivElement>(null);
   const showMessage = (value: string) => {
     setMessageTone("normal");
@@ -242,7 +243,7 @@ function EditorSurface({
 
   function generateInitialEdit() {
     const plan = planInitialTimeline(
-      { shots, nodes, assets, resolution: videoResolution, audioId, musicVolume, targetDuration: duration },
+      { shots, nodes, assets, resolution: videoResolution, audioId, musicVolume, targetDuration: duration, fitMode: initialEditMode },
       () => crypto.randomUUID(),
     );
     if (plan.issues.length) {
@@ -267,9 +268,8 @@ function EditorSurface({
     editor.loadProject(plan.timeline);
     setCurrentTime(0);
     setSeekTime(0);
-    requestAnimationFrame(() => setPlayerState(PLAYER_STATE.PLAYING));
     setMessageTone("success");
-    setMessage(`已按分镜顺序建立 ${plan.clipCount} 个镜头，并开始预览`);
+    setMessage(`已建立 ${plan.clipCount} 个镜头${plan.fitApplied ? `，由 ${plan.naturalDuration.toFixed(1)} 秒匹配至 ${plan.outputDuration.toFixed(1)} 秒` : `，总长 ${plan.outputDuration.toFixed(1)} 秒`}；准备好后请手动播放`);
   }
 
   return (
@@ -279,10 +279,20 @@ function EditorSurface({
       <EditorShortcuts onMessage={showMessage} />
       <div className="mvc-editor-actionbar">
         <button className="primary compact" onClick={generateInitialEdit}>
-          <Sparkles size={15} /> 生成初剪并预览
+          <Sparkles size={15} /> 生成初剪
         </button>
+        <label className="mvc-initial-edit-mode" title="完整镜头保留原节奏；匹配影片时长会等比例加速全部镜头，保留完整内容">
+          初剪方式
+          <select value={initialEditMode} onChange={(event) => setInitialEditMode(event.target.value as "preserve" | "target")}>
+            <option value="preserve">完整镜头</option>
+            <option value="target">匹配 {Number(duration).toLocaleString("zh-CN", { maximumFractionDigits: 1 })} 秒</option>
+          </select>
+        </label>
         <TimelineDurationFloor projectDuration={duration} />
         <span className={`mvc-editor-message ${messageTone}`} role={messageTone === "error" ? "alert" : "status"}><b>{productionName} · {episodeLabel}</b>　{message}</span>
+        <span className={`mvc-preview-readiness ${playerState === PLAYER_STATE.REFRESH ? "loading" : "ready"}`} role="status">
+          {!totalDuration ? "等待时间线内容" : playerState === PLAYER_STATE.REFRESH ? "视频加载中…" : playerState === PLAYER_STATE.PLAYING ? "正在预览" : "点击预览以加载"}
+        </span>
         <EditorToolbar assets={assets} onMessage={showMessage} onExport={onExport} />
       </div>
       <div className="mvc-editor-surface" ref={surfaceRef} onDragOverCapture={handleDragOver} onDropCapture={handleDrop}>

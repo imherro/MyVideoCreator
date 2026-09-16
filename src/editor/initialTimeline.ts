@@ -7,6 +7,9 @@ export type InitialTimelinePlan = {
   timeline: ProjectJSON;
   issues: string[];
   clipCount: number;
+  naturalDuration: number;
+  outputDuration: number;
+  fitApplied: boolean;
 };
 
 export function planInitialTimeline(
@@ -18,6 +21,7 @@ export function planInitialTimeline(
     audioId,
     musicVolume = 0.3,
     targetDuration = 0,
+    fitMode = "preserve",
   }: {
     shots: Value[];
     nodes: Value[];
@@ -26,12 +30,12 @@ export function planInitialTimeline(
     audioId?: string;
     musicVolume?: number;
     targetDuration?: number;
+    fitMode?: "preserve" | "target";
   },
   newId: () => string,
 ): InitialTimelinePlan {
   const issues: string[] = [];
-  const elements: ElementJSON[] = [];
-  const dialogueElements: ElementJSON[] = [];
+  const videoTracks: TrackJSON[] = [];
   let cursor = 0;
 
   shots.forEach((shot, index) => {
@@ -67,26 +71,10 @@ export function planInitialTimeline(
 
     const duration = Math.min(plannedDuration, mediaDuration);
     const elementId = `e-${newId()}`;
-    const shotStart = cursor;
-    const dialogueCandidates = assets.filter((candidate) =>
-      candidate.kind === "audio" &&
-      String(candidate.metadata?.input?.dialogue?.shotUid || "") === String(shot.uid || shot.id || ""),
-    ).sort((left, right) => Number(right.created || 0) - Number(left.created || 0));
-    const latestDialogueAssets = new Map<string, EditorAsset>();
-    dialogueCandidates.forEach((candidate) => {
-      const dialogueId = String(candidate.metadata?.input?.dialogue?.id || candidate.id);
-      if (!latestDialogueAssets.has(dialogueId)) latestDialogueAssets.set(dialogueId, candidate);
-    });
-    const dialogueOrder = new Map(
-      (Array.isArray(shot.dialogues) ? shot.dialogues : []).map((dialogue: Value, dialogueIndex: number) => [String(dialogue.id), dialogueIndex]),
-    );
-    const dialogueAssets = [...latestDialogueAssets.values()].sort((left, right) =>
-      (dialogueOrder.get(String(left.metadata?.input?.dialogue?.id)) ?? 999) -
-      (dialogueOrder.get(String(right.metadata?.input?.dialogue?.id)) ?? 999),
-    );
-    elements.push({
+    const trackId = `t-v${videoTracks.length + 1}`;
+    const element: ElementJSON = {
       id: elementId,
-      trackId: "t-v1",
+      trackId,
       type: "video",
       name: shot.title || `${label} · ${asset.name}`,
       s: cursor,
@@ -96,7 +84,7 @@ export function planInitialTimeline(
         srcAssetId: asset.id,
         time: 0,
         playbackRate: 1,
-        volume: dialogueAssets.length ? 0 : 1,
+        volume: 1,
         mediaFilter: "none",
       },
       metadata: {
@@ -109,41 +97,37 @@ export function planInitialTimeline(
       frame: { x: 0, y: 0, size: [resolution.width, resolution.height] },
       objectFit: "cover",
       mediaDuration,
-    });
-    let dialogueCursor = shotStart;
-    dialogueAssets.forEach((dialogueAsset) => {
-      const dialogueDuration = Number(dialogueAsset.metadata?.duration);
-      if (!Number.isFinite(dialogueDuration) || dialogueDuration <= 0) {
-        issues.push(`${label}对白“${dialogueAsset.name}”时长无效`);
-        return;
-      }
-      if (dialogueCursor + dialogueDuration > shotStart + duration + 0.08) {
-        issues.push(`${label}对白总时长超过镜头时长`);
-        return;
-      }
-      dialogueElements.push({
-        id: `e-${newId()}`, trackId: "t-dialogue", type: "audio", name: dialogueAsset.name,
-        s: dialogueCursor, e: dialogueCursor + dialogueDuration,
-        props: { src: dialogueAsset.url, srcAssetId: dialogueAsset.id, time: 0, playbackRate: 1, volume: 1 },
-        metadata: { assetId: dialogueAsset.id, assetSource: "my-video-creator", role: "dialogue", shotId: shot.id, generatedInitialEdit: true },
-        mediaDuration: dialogueDuration,
-      });
-      dialogueCursor += dialogueDuration;
+    };
+    videoTracks.push({
+      id: trackId,
+      name: `V${videoTracks.length + 1} · ${label}`,
+      type: "element",
+      elements: [element],
     });
     cursor += duration;
   });
 
-  const tracks: TrackJSON[] = [
-    { id: "t-v1", name: "V1 · AI 初剪", type: "element", elements },
-  ];
-  if (dialogueElements.length) tracks.push({ id: "t-dialogue", name: "A1 · 角色对白", type: "audio", elements: dialogueElements });
+  const naturalDuration = cursor;
+  const fitApplied = fitMode === "target" && targetDuration > 0 && naturalDuration > targetDuration;
+  if (fitApplied) {
+    const scale = targetDuration / naturalDuration;
+    videoTracks.forEach((track) => track.elements.forEach((element) => {
+      element.s *= scale;
+      element.e *= scale;
+      element.props = { ...element.props, playbackRate: 1 / scale };
+      element.metadata = { ...element.metadata, initialEditFit: "target", originalDuration: (element.e - element.s) / scale };
+    }));
+    cursor = targetDuration;
+  }
+
+  const tracks: TrackJSON[] = [...videoTracks];
 
   const music = assets.find((asset) => asset.id === audioId && asset.kind === "audio");
   if (music && cursor > 0) {
     const mediaDuration = Number(music.metadata?.duration);
     tracks.push({
       id: "t-music",
-      name: "A2 · 背景音乐",
+      name: "A1 · 背景音乐",
       type: "audio",
       elements: [
         {
@@ -191,5 +175,5 @@ export function planInitialTimeline(
     assets,
   );
 
-  return { timeline, issues, clipCount: elements.length };
+  return { timeline, issues, clipCount: videoTracks.length, naturalDuration, outputDuration: cursor, fitApplied };
 }

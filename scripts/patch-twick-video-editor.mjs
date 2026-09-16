@@ -12,16 +12,28 @@ for (const relativePath of files) {
   const contextPattern = /const \{ changeLog \} = (useTimelineContext|timeline\.useTimelineContext)\(\);/;
   const durationPattern = "if (durationRef.current && time2 >= durationRef.current) {";
   const patchedDuration = "const playbackDuration = totalDuration || durationRef.current;\n    if (playbackDuration && time2 >= playbackDuration) {";
+  const rulerPattern = 'transform: "translateX(-50%)",\n                      color: "rgba(255,255,255,0.7)",';
+  const patchedRuler = 'transform: t2 >= duration - epsilon ? "translateX(-100%)" : "translateX(-50%)",\n                      color: "rgba(255,255,255,0.7)",';
+  let changed = false;
 
-  if (source.includes(patchedDuration)) continue;
-  if (!contextPattern.test(source) || !source.includes(durationPattern)) {
-    throw new Error(`Unsupported @twick/video-editor build: ${relativePath}`);
+  if (!source.includes(patchedDuration)) {
+    if (!contextPattern.test(source) || !source.includes(durationPattern)) {
+      throw new Error(`Unsupported playback build: ${relativePath}`);
+    }
+    source = source
+      .replace(contextPattern, "const { changeLog, totalDuration } = $1();")
+      .replace(durationPattern, patchedDuration);
+    changed = true;
   }
-  source = source
-    .replace(contextPattern, "const { changeLog, totalDuration } = $1();")
-    .replace(durationPattern, patchedDuration);
-  writeFileSync(path, source);
-  console.log(`Patched ${relativePath} to use the full timeline duration.`);
+  if (!source.includes(patchedRuler)) {
+    if (!source.includes(rulerPattern)) throw new Error(`Unsupported ruler build: ${relativePath}`);
+    source = source.replace(rulerPattern, patchedRuler);
+    changed = true;
+  }
+  if (changed) {
+    writeFileSync(path, source);
+    console.log(`Patched ${relativePath} playback and end-of-timeline label.`);
+  }
 }
 
 const timelineFiles = [

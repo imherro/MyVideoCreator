@@ -23,16 +23,49 @@ test("AI storyboard produces an ordered Twick V1 with stable source links", () =
 
   assert.deepEqual(plan.issues, []);
   assert.equal(plan.clipCount, 2);
-  assert.equal(plan.timeline.tracks[0].name, "V1 · AI 初剪");
+  assert.equal(plan.timeline.tracks[0].name, "V1 · 第 1 镜");
+  assert.equal(plan.timeline.tracks[1].name, "V2 · 第 2 镜");
   assert.equal(plan.timeline.metadata.custom.timelineDuration, 15);
+  assert.equal(plan.naturalDuration, 8);
+  assert.equal(plan.outputDuration, 8);
+  assert.equal(plan.fitApplied, false);
   assert.deepEqual(
-    plan.timeline.tracks[0].elements.map((element) => [element.s, element.e]),
+    plan.timeline.tracks.flatMap((track) => track.elements).map((element) => [element.s, element.e]),
     [[0, 3], [3, 8]],
   );
   assert.deepEqual(
-    plan.timeline.tracks[0].elements.map((element) => [element.metadata.shotId, element.metadata.nodeId, element.metadata.assetId]),
+    plan.timeline.tracks.flatMap((track) => track.elements).map((element) => [element.metadata.shotId, element.metadata.nodeId, element.metadata.assetId]),
     [["shot-1", "video-1", "asset-1"], ["shot-2", "video-2", "asset-2"]],
   );
+});
+
+test("target-fit initial edit keeps every shot and compresses the sequence to the film duration", () => {
+  const plan = planInitialTimeline(
+    {
+      shots: [
+        { id: "shot-1", videoNode: "video-1", duration: 8 },
+        { id: "shot-2", videoNode: "video-2", duration: 12 },
+      ],
+      nodes: [
+        { id: "video-1", data: { assetId: "asset-1" } },
+        { id: "video-2", data: { assetId: "asset-2" } },
+      ],
+      assets: [
+        { id: "asset-1", name: "一", kind: "video", url: "/1", metadata: { duration: 8 } },
+        { id: "asset-2", name: "二", kind: "video", url: "/2", metadata: { duration: 12 } },
+      ],
+      resolution: { width: 1280, height: 720 },
+      targetDuration: 15,
+      fitMode: "target",
+    },
+    (() => { let id = 0; return () => String(++id); })(),
+  );
+  const elements = plan.timeline.tracks.flatMap((track) => track.elements);
+  assert.equal(plan.fitApplied, true);
+  assert.equal(plan.naturalDuration, 20);
+  assert.equal(plan.outputDuration, 15);
+  assert.deepEqual(elements.map((element) => [element.s, element.e]), [[0, 6], [6, 15]]);
+  assert.ok(elements.every((element) => Math.abs(element.props.playbackRate - 4 / 3) < 0.0001));
 });
 
 test("initial edit preserves video original audio and adds configured looping music", () => {
@@ -99,7 +132,7 @@ test("initial edit rejects missing, stale, and overlong shot media", () => {
   assert.equal(plan.issues.length, 3);
 });
 
-test("fixed character dialogue becomes an audio track and replaces generated video audio", () => {
+test("initial edit keeps generated video audio and does not import dialogue tracks", () => {
   const plan = planInitialTimeline(
     {
       shots: [{ id: "shot-1", uid: "shot-uid-1", videoNode: "video-node", duration: 5 }],
@@ -116,14 +149,11 @@ test("fixed character dialogue becomes an audio track and replaces generated vid
     (() => { let id = 0; return () => String(++id); })(),
   );
   assert.deepEqual(plan.issues, []);
-  assert.equal(plan.timeline.tracks[0].elements[0].props.volume, 0);
-  assert.equal(plan.timeline.tracks[1].name, "A1 · 角色对白");
-  assert.equal(plan.timeline.tracks[1].elements[0].metadata.assetId, "voice");
-  assert.equal(plan.timeline.tracks[1].elements[0].s, 0);
-  assert.equal(plan.timeline.tracks[1].elements[0].e, 2.4);
+  assert.equal(plan.timeline.tracks[0].elements[0].props.volume, 1);
+  assert.equal(plan.timeline.tracks.length, 1);
 });
 
-test("initial edit uses only the latest take when dialogue is regenerated", () => {
+test("initial edit ignores dialogue takes even when several versions exist", () => {
   const plan = planInitialTimeline(
     {
       shots: [{ id: "shot-1", uid: "shot-uid", videoNode: "video-node", duration: 5, dialogues: [{ id: "dialogue-1" }] }],
@@ -137,6 +167,6 @@ test("initial edit uses only the latest take when dialogue is regenerated", () =
     },
     () => "id",
   );
-  assert.equal(plan.timeline.tracks[1].elements.length, 1);
-  assert.equal(plan.timeline.tracks[1].elements[0].metadata.assetId, "new-take");
+  assert.equal(plan.timeline.tracks.length, 1);
+  assert.equal(plan.timeline.tracks[0].elements[0].props.volume, 1);
 });
