@@ -34,9 +34,14 @@ def capability(provider, model):
         return {'supported': True, 'max_images': 30 if newer else 9,
                 'max_duration': 30 if newer else 15, 'max_reference_duration': 30 if newer else 15,
                 'audio_only': newer, 'max_audio': 10 if newer else 3}
+    if kind == 'hc_atom' and re.match(r'^(doubao|dreamina)-seedance-2\.(0|5)(?:-|$)', model):
+        newer = '2.5' in model
+        return {'supported': True, 'max_images': 30 if newer else 9,
+                'max_duration': 30 if newer else 15, 'max_reference_duration': 30 if newer else 15,
+                'audio_only': newer, 'max_audio': 10 if newer else 3}
     if kind == 'runninghub' and model in ('bytedance/seedance-2.5-token', 'bytedance/seedance-2.5-global-token'):
         return {'supported': True, 'max_images': 30, 'max_duration': 30, 'max_reference_duration': 30, 'audio_only': True, 'max_audio': 10}
-    return {'supported': False, 'reason': '当前供应商/模型尚未核实多模态参考协议；请选择火山方舟 Seedance 2.0/2.5 或 RunningHub Seedance 2.5。绑定会保留。'}
+    return {'supported': False, 'reason': '当前供应商/模型尚未核实多模态参考协议；请选择火山方舟或幻场 AI Seedance 2.0/2.5，或 RunningHub Seedance 2.5。绑定会保留。'}
 
 
 def strip_motion_prompt(prompt):
@@ -112,7 +117,7 @@ def compile_motion_input(document, node_id, kind, input_value, project_id, provi
         if mode['requested'] != 'multimodal':
             raise ValueError('音色样本参考需要明确选择多模态参考生成；不会自动改变首帧约束')
         if not capability(provider, result.get('model') or (provider or {}).get('models', {}).get('video'))['supported']:
-            raise ValueError('当前适配器尚未实现音色样本参考，请选择已支持的方舟或 RunningHub Seedance 模型')
+            raise ValueError('当前适配器尚未实现音色样本参考，请选择已支持的方舟、幻场 AI 或 RunningHub Seedance 模型')
         if not result.get('voice_samples'):
             raise ValueError('未编译角色声音参考，请先确认角色样本后重新提交')
     else:

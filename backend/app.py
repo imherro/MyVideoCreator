@@ -1068,7 +1068,7 @@ def create_job_record(c,pid,body):
         if body.kind=='image' and len(references)>max_image_references(selected):
             raise ValueError(f'当前火山方舟图片模型最多支持 {max_image_references(selected)} 张参考图，请移除多余引用')
     if selected and selected.get('type')=='hc_atom':
-        if body.kind=='video' and len(body.input.get('asset_ids',[]))>1:
+        if body.kind=='video' and len(body.input.get('asset_ids',[]))>1 and (body.input.get('generation_mode') or {}).get('requested')!='multimodal':
             raise ValueError('幻场 AI 通用视频接口最多提交一张参考图')
         if body.kind=='video' and body.input.get('end_asset_id'):
             raise ValueError('幻场 AI 通用视频接口暂未声明尾帧协议，请清除尾帧')

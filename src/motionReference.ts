@@ -14,6 +14,7 @@ export type MotionReference = {
 export function supportsMotionReference(provider: Value | undefined, model: string) {
   return provider?.type === 'volcengine_ark'
     ? /^doubao-seedance-2-(0|5)(-|$)/i.test(model)
+    : provider?.type === 'hc_atom' ? /^(doubao|dreamina)-seedance-2\.(0|5)(-|$)/i.test(model)
     : provider?.type === 'runninghub' && ['bytedance/seedance-2.5-token', 'bytedance/seedance-2.5-global-token'].includes(model);
 }
 

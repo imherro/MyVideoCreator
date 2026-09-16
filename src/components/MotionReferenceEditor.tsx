@@ -70,7 +70,7 @@ export function MotionReferenceEditor(props: Props) {
     </div>
 
 
-    {mode === 'multimodal' && !supported && <p className="error">当前适配器尚未核实此模型的多模态协议。请选择已支持的火山方舟或 RunningHub 模型；不会自动切换供应商或降级。</p>}
+    {mode === 'multimodal' && !supported && <p className="error">当前适配器尚未核实此模型的多模态协议。请选择已支持的火山方舟、幻场 AI 或 RunningHub 模型；不会自动切换供应商或降级。</p>}
 
     {dialogueMode(props.document,props.shot) === 'voice_sample' && <div><p>只参考已确认样本的声线，台词和情绪取自本镜。样本不会作为成片对白，也不决定镜头时长。</p>
       {mode !== 'multimodal' && (props.shot.dialogues || []).some((line:Value)=>String(line.text || '').trim()) && <div><p className="error">音色样本需要多模态参考。切换后，起止画面由严格约束变为构图参考。</p><button disabled={props.busy} onClick={()=>props.onPatch({videoReferenceMode:'multimodal'})}>确认改用多模态参考</button></div>}
@@ -80,7 +80,7 @@ export function MotionReferenceEditor(props: Props) {
     {reference && <>
       {mode !== 'multimodal' && <div><p className="error">当前模式与动作视频不兼容。切换后起止画面约束将变为参考语义。</p><button onClick={()=>props.onPatch({videoReferenceMode:'multimodal'})}>确认改用多模态参考</button></div>}
       {asset && <div className="motion-reference-media"><video src={asset.url} controls preload="metadata"/><div><b>{asset.name}</b><small>参考 {Number(asset.metadata?.duration || 0).toFixed(2)} 秒 · {asset.metadata?.width} × {asset.metadata?.height}</small><small>镜头计划 {props.shot.duration} 秒；实际提交时长见下方编译预览。不同步时建议先在外部裁剪。</small></div></div>}
-      {!supported && <p className="error">当前供应商/模型尚未核实动作视频协议，不能提交此绑定。请选择火山方舟 Seedance 2.0/2.5 或 RunningHub Seedance 2.5。</p>}
+      {!supported && <p className="error">当前供应商/模型尚未核实动作视频协议，不能提交此绑定。请选择火山方舟或幻场 AI Seedance 2.0/2.5，或 RunningHub Seedance 2.5。</p>}
       {mode === 'multimodal' && props.node?.data?.end_asset_id && <p>原尾帧保留为结束构图参考，不再使用严格尾帧协议。</p>}
       <div className="domain-fields two">
         <label>动作执行角色<select value={reference.characterCardId || ''} onChange={e => patch({characterCardId:e.target.value || undefined})}><option value="">未指定（镜头主体）</option>{motionCharacters(props.document, props.shot).map(card => <option key={card.id} value={card.id}>{card.name}</option>)}</select></label>

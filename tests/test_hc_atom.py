@@ -336,3 +336,32 @@ def test_reference_image_uses_async_task_protocol(monkeypatch):
     worker = Worker()
     worker.halt = NoWait()
     assert hc_atom.generate_image(worker, item, provider())['assets'][0]['id'] == 'image-asset'
+
+
+def test_multimodal_seedance_keeps_single_image_role_and_all_media(monkeypatch):
+    from backend import motion_references, voice_samples, provider_assets
+    for model in ['doubao-seedance-2.0', 'doubao-seedance-2.5']:
+        configured = provider()
+        configured['models']['video'] = model
+        for with_media in [False, True]:
+            item = stored_job('video', configured)
+            item['input'].update(model=model, generation_mode={'requested':'multimodal'}, parameters={'duration':4}, ratio='16:9')
+            if with_media: item['input'].update(motion_reference={'assetId':'motion'},voice_samples=[{'assetId':'voice'}])
+            monkeypatch.setattr(common,'assets_for',lambda job:[{'id':'image','kind':'image'}])
+            monkeypatch.setattr(hc_atom,'_register_seedance_asset',lambda *args:'asset://image')
+            monkeypatch.setattr(motion_references,'silent_motion_asset',lambda job:{'id':'silent'})
+            monkeypatch.setattr(provider_assets,'public_asset_url',lambda provider,aid:'https://media.example/'+aid)
+            monkeypatch.setattr(voice_samples,'submission_assets',lambda job:[{'id':'voice'}])
+            monkeypatch.setattr(voice_samples,'sample_data_uri',lambda asset:'data:audio/wav;base64,AAAA')
+            monkeypatch.setattr(hc_atom,'_wait_seedance_v3',lambda *args:{'assets':[]})
+            bodies=[]
+            monkeypatch.setattr(hc_atom,'_post_task',lambda worker,job,client,path,body:(bodies.append(body) or {'id':'remote'}))
+            hc_atom.generate_video(Worker(),item,configured)
+            body=bodies[0]
+            assert body['ratio']=='16:9'
+            assert [c['role'] for c in body['content'][1:]] == (['reference_image','reference_video','reference_audio'] if with_media else ['reference_image'])
+            assert ('omni_reference_task_type' in body)==('2.5' in model)
+            if with_media: assert body['content'][2]['video_url']['url'].endswith('/silent')
+            item['provider_job_id']='remote'
+            hc_atom.generate_video(Worker(),item,configured)
+            assert len(bodies)==1

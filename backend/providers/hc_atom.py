@@ -120,11 +120,7 @@ def list_models(provider):
             'id': model_id,
             'name': str(item.get('name') or item.get('display_name') or model_id),
             'kind': kind,
-            'capabilities': {
-                'image_reference': kind in ('image', 'video'),
-                'max_references': 10 if kind == 'image' else 1 if kind == 'video' else None,
-                'end_frame': False,
-            },
+            'capabilities': _local_capabilities(provider, kind, model_id),
         })
     configured = provider.get('models') if isinstance(provider.get('models'), dict) else {}
     return sorted(result, key=lambda row: (row['id'] != configured.get(row['kind']), row['id']))
@@ -145,8 +141,18 @@ def check_configured_model(provider, kind):
     }
 
 
+def _local_capabilities(provider, kind, target):
+    from ..motion_references import capability
+    caps = capability(provider, target) if kind == 'video' else {}
+    return {'image_reference': kind in ('image', 'video'),
+            'max_references': caps.get('max_images', 10 if kind == 'image' else 1 if kind == 'video' else None),
+            'end_frame': False}
+
+
 def model_capabilities(provider, kind, model_id=None):
     target = str(model_id or model_for(provider, kind)).strip()
+    if kind == 'video':
+        return _local_capabilities(provider, kind, target)
     model = next((item for item in list_models(provider) if item['id'] == target and item['kind'] == kind), None)
     if model:
         return model['capabilities']
@@ -404,7 +410,12 @@ def _register_seedance_asset(worker, job, client, provider, asset):
 
 
 def _generate_seedance_v3(worker, job, provider, model, refs, params):
-    if len(refs) > 1:
+    multimodal = (job['input'].get('generation_mode') or {}).get('requested') == 'multimodal'
+    if multimodal:
+        from ..motion_references import capability
+        if not capability(provider, model)['supported']:
+            raise ValueError('当前幻场模型未实现多模态参考')
+    if len(refs) > 1 and not multimodal:
         raise ValueError('幻场 Seedance 当前最多提交一张首帧，请移除多余引用')
     if job['input'].get('end_asset_id'):
         raise ValueError('幻场 Seedance 当前尚未开放尾帧绑定，请清除尾帧')
@@ -418,7 +429,22 @@ def _generate_seedance_v3(worker, job, provider, model, refs, params):
                 'type': 'text',
                 'text': _seedance_prompt(job['input']['prompt'], requested, submitted),
             }]
-            if refs:
+            if multimodal:
+                from ..motion_references import silent_motion_asset
+                from ..provider_assets import public_asset_url
+                for reference in refs:
+                    content.append({'type': 'image_url', 'image_url': {'url': _register_seedance_asset(worker, job, client, provider, reference)}, 'role': 'reference_image'})
+                if job['input'].get('motion_reference'):
+                    reference = silent_motion_asset(job)
+                    content.append({'type': 'video_url', 'video_url': {'url': public_asset_url(provider, reference['id'])}, 'role': 'reference_video'})
+                if job['input'].get('voice_samples'):
+                    from ..voice_samples import submission_assets, sample_data_uri
+                    for reference in submission_assets(job):
+                        content.append({'type': 'audio_url', 'audio_url': {'url': sample_data_uri(reference)}, 'role': 'reference_audio'})
+                elif job['input'].get('dialogue_audio'):
+                    from .volcengine_ark import _dialogue_reference_audio
+                    content.append({'type': 'audio_url', 'audio_url': {'url': _dialogue_reference_audio(job, submitted)}, 'role': 'reference_audio'})
+            elif refs:
                 content.append({
                     'type': 'image_url',
                     'image_url': {'url': _register_seedance_asset(worker, job, client, provider, refs[0])},
@@ -431,10 +457,14 @@ def _generate_seedance_v3(worker, job, provider, model, refs, params):
                 'model': model,
                 'content': content,
                 'resolution': resolution,
-                'ratio': 'adaptive' if refs else str(job['input'].get('ratio') or params.get('ratio') or '16:9'),
+                'ratio': 'adaptive' if refs and not multimodal else str(job['input'].get('ratio') or params.get('ratio') or '16:9'),
                 'duration': submitted,
                 'generate_audio': bool(params.get('generate_audio', True)),
             }
+            if multimodal and '2.5' in model:
+                body['omni_reference_task_type'] = 'reference'
+            if multimodal and (job['input'].get('voice_samples') or job['input'].get('dialogue_audio')):
+                body['generate_audio'] = True
             value = _post_task(worker, job, client, path, body)
             remote = value.get('id') or value.get('taskId') or value.get('task_id')
             if not remote:
