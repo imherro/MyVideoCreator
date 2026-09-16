@@ -329,3 +329,39 @@ def test_source_document_moves_to_trash_and_restores_with_chapters_and_events(so
     assert [item["id"] for item in visible_chapters] == [chapter["id"]]
     assert client.get(f'/api/productions/{production["id"]}/source-events').json()[0]["summary"] == "旧事件仍可恢复"
     assert client.post(f'/api/trash/chapter/{second_chapter["id"]}/restore').status_code == 200
+
+def test_append_import_preserves_source_and_existing_chapters(source_client):
+    client=source_client
+    production,_=new_production(client);base=f'/api/productions/{production["id"]}'
+    original=client.post(base+'/sources/import',json={'title':'唯一原著','type':'txt','content':'第一章 开始\n原有正文'}).json()
+    chapters=client.get(base+'/chapters').json();first=chapters[0]
+    response=client.post(base+'/sources/'+original['id']+'/chapters/import',json={'title':'补充文件','type':'markdown','source_id':original['id'],'content':'# 第二章\n后来。\n# 第三章\n结尾。'})
+    assert response.status_code==200,response.text
+    assert response.json()['title']=='唯一原著'
+    assert response.json()['imported_count']==2 and response.json()['chapter_count']==3
+    assert len(client.get(base+'/sources').json())==1
+    chapters=client.get(base+'/chapters').json()
+    assert chapters[0]==first
+    assert [c['chapter_no'] for c in chapters]==[1,2,3]
+    assert chapters[1]['id']==response.json()['first_chapter_id']
+    # Deleted chapter slots stay unique so restoring does not collide with appended chapters.
+    assert client.delete(base+'/chapters/'+chapters[-1]['id']).status_code==200
+    response=client.post(base+'/sources/import',json={'title':'追加','source_id':original['id'],'content':'第四章\n新增'})
+    assert response.status_code==200 and response.json()['chapter_count']==3
+    assert client.get(base+'/chapters').json()[-1]['chapter_no']==4
+
+
+def test_append_import_rejects_trashed_or_other_production_source(source_client):
+    client=source_client
+    production,_=new_production(client);base=f'/api/productions/{production["id"]}'
+    source=client.post(base+'/sources',json={'title':'已有空原著'}).json()
+    # A source without chapters is still the existing source, not a reason to create another.
+    body={'title':'文件','source_id':source['id'],'content':'第一章\n正文'}
+    other,_=new_production(client)
+    assert client.post(f'/api/productions/{other["id"]}/sources/import',json=body).status_code==404
+    assert client.get(f'/api/productions/{other["id"]}/sources').json()==[]
+    assert client.post(base+'/sources/import',json=body).status_code==200
+    assert client.delete(base+'/sources/'+source['id']).status_code==200
+    assert client.post(base+'/sources/import',json=body).status_code==404
+    assert client.get(base+'/sources').json()==[]
+    assert client.post(base+'/sources/import',json={'title':'新的原著','content':'新正文'}).status_code==200

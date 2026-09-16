@@ -26,6 +26,11 @@ export function SourceLibraryPage({
   const [chapterContent, setChapterContent] = useState("");
   const [dirtyChapters, setDirtyChapters] = useState<Set<string>>(new Set());
   const fileRef = useRef<HTMLInputElement>(null);
+  const importTarget = useRef<{productionId: string; sourceId?: string; sourceName?: string} | null>(null);
+  const moreRef = useRef<HTMLDetailsElement>(null);
+  const loadSequence = useRef(0);
+  const [loadedProduction, setLoadedProduction] = useState('');
+  const ready = loadedProduction === productionId;
   const textProviders = useMemo(
     () => [{ id: "local", name: "本地 llama.cpp", local: true, model: "" }, ...providers.filter((provider) => !provider.kind || provider.kind === "text")],
     [providers],
@@ -41,25 +46,30 @@ export function SourceLibraryPage({
   const activeSource = sources.find((item) => item.id === chapter?.source_id) || sources[0];
 
   async function load() {
+    const sequence = ++loadSequence.current;
     const [nextSources, nextChapters, nextEvents] = await Promise.all([
       request(`/productions/${productionId}/sources`),
       request(`/productions/${productionId}/chapters`),
       request(`/productions/${productionId}/source-events`),
     ]);
+    if (sequence !== loadSequence.current) return;
+    setLoadedProduction(productionId);
     setSources(nextSources);
     setChapters(nextChapters);
     setEvents(nextEvents);
     setActive((value) => value && nextChapters.some((item: AnyValue) => item.id === value) ? value : nextChapters[0]?.id || "");
   }
 
-  useEffect(() => { setSelected(new Set()); setDirtyChapters(new Set()); void load().catch(report); }, [productionId, refreshKey]);
+  useEffect(() => { setSelected(new Set()); setDirtyChapters(new Set()); void load().catch(report); return () => {loadSequence.current++;}; }, [productionId, refreshKey]);
   useEffect(() => {
     setProviderId(defaultProviderId);
     setModel(defaultModelId);
   }, [productionId, projectId, defaultTarget?.providerId, defaultTarget?.modelId]);
 
   function run(action: () => Promise<void>) { void action().catch(report); }
-  function openCreateSource() {
+  function openCreateSource(additional = false) {
+    if (!ready || busy || (sources.length > 0 && !additional)) return;
+    if (moreRef.current) moreRef.current.open = false;
     setSourceName("");
     setChapterTitle("第一章");
     setChapterContent("");
@@ -94,17 +104,28 @@ export function SourceLibraryPage({
       notify(mode === "source" ? "原著和第一章已建立" : "章节已新增");
     } finally { setBusy(false); }
   }
+  function chooseImport(additional = false) {
+    if (!ready || busy) return;
+    importTarget.current = {productionId, sourceId: additional ? undefined : activeSource?.id, sourceName: additional ? undefined : activeSource?.title};
+    if (moreRef.current) moreRef.current.open = false;
+    fileRef.current?.click();
+  }
   async function importFile(file: File) {
+    const target = importTarget.current;
+    if (!target || target.productionId !== productionId) throw new Error('作品已切换，请重新选择导入文件');
     setBusy(true);
     try {
-      await request(`/productions/${productionId}/sources/import`, { method: "POST", body: JSON.stringify({
+      for (const edited of chapters.filter(item => dirtyChapters.has(item.id))) await persistChapter(edited);
+      const importPath = target.sourceId ? `/productions/${productionId}/sources/${target.sourceId}/chapters/import` : `/productions/${productionId}/sources/import`;
+      const imported = await request(importPath, { method: "POST", body: JSON.stringify({
         title: file.name.replace(/\.(txt|md|markdown)$/i, ""),
         type: /\.md|\.markdown$/i.test(file.name) ? "markdown" : "txt",
-        content: await file.text(), metadata: { filename: file.name },
+        content: await file.text(), metadata: { filename: file.name }, source_id: target.sourceId,
       }) });
       await load();
       onChanged?.();
-      notify(`已导入 ${file.name}`);
+      setActive(imported.first_chapter_id || "");
+      notify(target.sourceId ? `已向“${target.sourceName}”追加 ${imported.imported_count} 章，原有章节保持不变` : `已导入原著“${imported.title}”`);
     } finally { setBusy(false); }
   }
   async function persistChapter(target: AnyValue) {
@@ -178,10 +199,11 @@ export function SourceLibraryPage({
       <div><span className="eyebrow">PRODUCTION SOURCE LIBRARY</span><h1>整部作品原著库</h1><p>Production 共享资料 · 章节与分集的对应关系在改编策划和单集剧本中设置。</p></div>
       <div className="settings-actions">
         <button onClick={() => run(load)} disabled={busy}><RefreshCw size={15}/>刷新</button>
-        <button onClick={() => fileRef.current?.click()} disabled={busy}><Upload size={15}/>导入 TXT / Markdown</button>
-        <button onClick={openCreateSource} disabled={busy}><FilePlus2 size={15}/>新建原著</button>
-        <button onClick={openCreateChapter} disabled={busy || !sources.length}><Plus size={15}/>新增章节</button>
+        <button onClick={() => chooseImport()} disabled={busy || !ready} title={activeSource ? `追加到“${activeSource.title}”，不会覆盖原有章节` : "导入 TXT / Markdown"}><Upload size={15}/>{activeSource ? "导入章节到当前原著" : "导入 TXT / Markdown"}</button>
+        <span title={sources.length ? "已有原著，请使用新增章节" : undefined}><button onClick={() => openCreateSource()} disabled={busy || !ready || sources.length > 0}><FilePlus2 size={15}/>新建原著</button></span>
+        <button className={sources.length ? "primary" : undefined} onClick={openCreateChapter} disabled={busy || !ready || !sources.length}><Plus size={15}/>新增章节</button>
         <button className="danger-button" onClick={() => run(deleteActiveSource)} disabled={busy || !activeSource} title="移入回收站，可恢复"><Trash2 size={15}/>移除当前原著</button>
+        {ready && sources.length > 0 && <details className="source-more-menu" ref={moreRef}><summary>更多</summary><div><button disabled={busy} onClick={() => openCreateSource(true)}><FilePlus2 size={15}/>添加另一部原著</button><button disabled={busy} onClick={() => chooseImport(true)}><Upload size={15}/>导入为另一部原著</button></div></details>}
       </div>
     </header>
     <input ref={fileRef} hidden type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" onChange={(event) => { const file = event.target.files?.[0]; if (file) run(() => importFile(file)); event.target.value = ""; }}/>

@@ -1260,6 +1260,7 @@ class SourceCreate(BaseModel):
 
 class SourceImport(SourceCreate):
     content:str=Field(min_length=1,max_length=20_000_000)
+    source_id:str|None=None
 
 class ChapterCreate(BaseModel):
     title:str=Field(min_length=1,max_length=300)
@@ -1316,17 +1317,36 @@ def import_source_document(production_id:str,body:SourceImport):
     if body.type not in SOURCE_TYPES:raise ValueError('原著类型无效')
     if not body.title.strip():raise ValueError('原著名称不能为空')
     chapters=split_chapters(body.content)
-    source_id=s.uid('source-');now=time.time()
+    source_id=body.source_id or s.uid('source-');now=time.time()
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
-        c.execute('INSERT INTO source_documents VALUES(?,?,?,?,?,?,?)',(
-            source_id,production_id,body.type,body.title.strip(),s.dumps(body.metadata),now,now,
-        ))
-        for number,(title,content) in enumerate(chapters,1):
-            c.execute('INSERT INTO source_chapters VALUES(?,?,?,?,?,?,?,?,?)',(
-                s.uid('chapter-'),source_id,number,title,content,number,1,now,now,
+        if body.source_id:
+            existing=c.execute('''SELECT id FROM source_documents WHERE id=? AND production_id=?
+                AND NOT EXISTS(SELECT 1 FROM deleted_items d WHERE d.kind='source' AND d.item_id=source_documents.id)''',
+                (source_id,production_id)).fetchone()
+            if not existing:raise HTTPException(404,'目标原著不存在或已在回收站，请刷新后重新选择')
+            start=c.execute('SELECT COALESCE(MAX(chapter_no),0)+1 value FROM source_chapters WHERE source_id=?',(source_id,)).fetchone()['value']
+            c.execute('UPDATE source_documents SET updated=? WHERE id=?',(now,source_id))
+        else:
+            start=1
+            c.execute('INSERT INTO source_documents VALUES(?,?,?,?,?,?,?)',(
+                source_id,production_id,body.type,body.title.strip(),s.dumps(body.metadata),now,now,
             ))
-    return {**source_document_row(production_id,source_id),'chapter_count':len(chapters)}
+        first_chapter_id=None
+        for number,(title,content) in enumerate(chapters,start):
+            chapter_id=s.uid('chapter-')
+            if first_chapter_id is None:first_chapter_id=chapter_id
+            c.execute('INSERT INTO source_chapters VALUES(?,?,?,?,?,?,?,?,?)',(
+                chapter_id,source_id,number,title,content,number,1,now,now,
+            ))
+        count=c.execute('''SELECT COUNT(*) value FROM source_chapters sc WHERE source_id=?
+            AND NOT EXISTS(SELECT 1 FROM deleted_items d WHERE d.kind='chapter' AND d.item_id=sc.id)''',(source_id,)).fetchone()['value']
+    return {**source_document_row(production_id,source_id),'chapter_count':count,'imported_count':len(chapters),'first_chapter_id':first_chapter_id}
+
+@app.post('/api/productions/{production_id}/sources/{source_id}/chapters/import')
+def import_source_chapters(production_id:str,source_id:str,body:SourceImport):
+    return import_source_document(production_id,body.model_copy(update={'source_id':source_id}))
+
 
 @app.delete('/api/productions/{production_id}/sources/{source_id}')
 def delete_source_document(production_id:str,source_id:str):
