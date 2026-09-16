@@ -92,6 +92,7 @@ import { ArkProviderSettings } from "./ArkProviderSettings";
 import { GenerationPolicyPanel } from "./GenerationPolicyPanel";
 import { VisualStylePicker } from "./VisualStylePicker";
 import type { GenerationPolicy } from "./generationPolicy";
+import { effectiveProjectTargets, projectProviders, type ProjectModelPool } from "./modelAccess.ts";
 import { FilmBiblePanel } from "./filmBible/FilmBiblePanel";
 import {
   bindVisualVersion,
@@ -231,6 +232,7 @@ type Doc = {
   schemaVersion: number;
   filmBible: Any;
   generationPolicy: GenerationPolicy;
+  modelPool?: ProjectModelPool | null;
   nodes: Node[];
   edges: Edge[];
   shots: Any[];
@@ -2311,6 +2313,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     assets,
     jobs,
     generationPolicy: doc.generationPolicy,
+    modelPool: doc.modelPool || undefined,
     providers: config.providers,
     localModels: system.models,
     request: api,
@@ -2758,7 +2761,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           <SourceLibraryPage
             productionId={project.production_id}
             projectId={project.id}
-            providers={config.providers}
+            providers={projectProviders(doc.modelPool || undefined, config.providers, "text", system.models)}
             defaultTarget={(doc as Any).generationPolicy?.text}
             refreshKey={workflowDataRevision.source}
             request={api}
@@ -2769,7 +2772,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           <AdaptationPage
             productionId={project.production_id}
             projectId={project.id}
-            providers={config.providers}
+            providers={projectProviders(doc.modelPool || undefined, config.providers, "text", system.models)}
             defaultTarget={(doc as Any).generationPolicy?.text}
             refreshKey={workflowDataRevision.adaptation}
             request={api}
@@ -2786,7 +2789,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           <ScriptRoomPage
             productionId={project.production_id}
             currentEpisodeNo={project.episode_no}
-            providers={config.providers}
+            providers={projectProviders(doc.modelPool || undefined, config.providers, "text", system.models)}
             defaultTarget={(doc as Any).generationPolicy?.text}
             refreshKey={workflowDataRevision.script}
             request={api}
@@ -2894,7 +2897,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             document={doc}
             assets={assets}
             jobs={jobs}
-            providers={config.providers}
+            providers={projectProviders(doc.modelPool || undefined, config.providers, "video", system.models)}
             busy={busy}
             request={api}
             onPatchShot={(uid, patch) =>
@@ -3461,6 +3464,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               data={data}
               providers={config.providers}
               localModels={system.models}
+              allowedTargets={effectiveProjectTargets(doc.modelPool || undefined, config.providers, data.kind === "storyboard" ? "text" : data.kind, system.models)}
               request={api}
               onChange={changeModel}
             />
@@ -4016,7 +4020,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                     <button disabled={!visualStyleDraft.trim() || visualStyleDraft.trim() === doc.style} onClick={()=>{update((document)=>setProjectVisualStyle(document,visualStyleDraft.trim()));setNotice("视觉风格已应用；旧媒体保留，相关生成结果已标记为待更新");}}>应用风格</button>
                     <small>修改后会把已生成的分镜图和视频标记为待更新；旧媒体和剪辑内容会保留，不会自动生成。</small>
                   </div>
-                  <GenerationPolicyPanel value={doc.generationPolicy} providers={config.providers} localModels={system.models} onChange={(generationPolicy)=>update((document)=>({...document,generationPolicy}))}/>
+                  <GenerationPolicyPanel value={doc.generationPolicy} modelPool={doc.modelPool || undefined} providers={config.providers} localModels={system.models} onChange={(generationPolicy)=>update((document)=>({...document,generationPolicy}))} onModelPoolChange={(modelPool)=>update((document)=>({...document,modelPool}))}/>
                   <div className="project-bible-heading"><div><span className="eyebrow">PROJECT BIBLE</span><h3>创作约束</h3></div><button className="quiet" onClick={()=>setPanel("filmBible")}><BookOpen size={15}/>打开塑角造景 {Object.keys(visualBibleOf(doc).cards).length || ""}<ChevronRight size={14}/></button></div>
                   <p className="muted">这里只修改文字约束，不会覆盖已有 VisualCard、VisualVersion 或锁定参考图。</p>
                   <label>世界 / 时代<input value={projectBibleFields.worldEra} onChange={(event)=>update((document)=>mergeBibleFields(document,{...bibleFields(document),worldEra:event.target.value}))}/></label>
@@ -4563,6 +4567,8 @@ function SettingsPanel({
   const [value, setValue] = useState<Any>(config),
     [status, setStatus] = useState(""),
     [busy, setBusy] = useState(false),
+    [settingsTab, setSettingsTab] = useState<"providers" | "runtime">("providers"),
+    [openProviderId, setOpenProviderId] = useState<string>(config.providers?.[0]?.id || ""),
     [arkCatalogs, setArkCatalogs] = useState<Record<string, Any[]>>({}),
     [arkVerified, setArkVerified] = useState<Record<string, boolean>>({}),
     [arkChecks, setArkChecks] = useState<Record<string, Record<string, Any>>>({});
@@ -4657,6 +4663,11 @@ function SettingsPanel({
   }
   return (
     <>
+      <div className="settings-tabs settings-tabs-wide">
+        <button className={settingsTab === "providers" ? "active" : ""} onClick={() => setSettingsTab("providers")}>供应商与模型库</button>
+        <button className={settingsTab === "runtime" ? "active" : ""} onClick={() => setSettingsTab("runtime")}>本地运行设置</button>
+      </div>
+      {settingsTab === "runtime" && <section className="settings-section">
       <div className="hardware-card">
         <Monitor size={23} />
         <div>
@@ -4757,10 +4768,20 @@ function SettingsPanel({
       >
         卸载空闲文本模型
       </button>
+      </section>}
+      {settingsTab === "providers" && <section className="settings-section">
       <h3>模型服务</h3>
-      <p className="muted">配置文本、图像和视频服务，并在项目设置中选择默认模型。</p>
+      <p className="muted">每张卡片对应一个供应商。先填写 Key 并验证，再为文本、图片、视频或声音圈选系统可用模型；项目只能从这些模型中选择。</p>
       {value.providers.map((p: Any, i: number) => (
-        <article className="provider-card" key={p.id}>
+        <details className="provider-card" key={p.id} open={openProviderId === p.id} onToggle={(event) => {
+          const opened = event.currentTarget.open;
+          if (opened && openProviderId !== p.id) setOpenProviderId(p.id);
+          if (!opened && openProviderId === p.id) setOpenProviderId("");
+        }}>
+          <summary className="provider-summary">
+            <span><b>{p.name || "未命名供应商"}</b><small>{p.type} · {p.local ? "本地" : "云端"}</small></span>
+            <em>{Object.values(p.enabled_models || {}).flat().length || (p.model || Object.values(p.models || {}).filter(Boolean).length) ? "已配置" : "待配置"}</em>
+          </summary>
           <div className="field-heading">
             <input
               aria-label="服务名称"
@@ -4797,6 +4818,7 @@ function SettingsPanel({
                           local: false,
                           url: e.target.value === "hc_atom" ? "https://api-aigc.fzyinghe.com" : e.target.value === "runninghub" ? "https://www.runninghub.ai" : "https://ark.cn-beijing.volces.com/api/v3",
                           models: p.models || { text: "", image: "", video: "" },
+                          enabled_models: p.enabled_models || {},
                         }
                       : e.target.value === "volcengine_speech"
                         ? {
@@ -4806,6 +4828,7 @@ function SettingsPanel({
                             url: "https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse",
                             model: p.model || "zh_female_vv_uranus_bigtts",
                             resource_id: p.resource_id || "seed-tts-2.0",
+                            enabled_models: p.enabled_models || { audio: [p.resource_id || "seed-tts-2.0"] },
                           }
                       : ["volcengine_ark", "hc_atom", "runninghub"].includes(p.type)
                         ? { type: e.target.value, kind: "text", model: p.models?.text || "", models: undefined }
@@ -4903,7 +4926,7 @@ function SettingsPanel({
             <>
               <label>
                 Resource ID
-                <input value={p.resource_id || "seed-tts-2.0"} onChange={(e) => patchProvider(i, { resource_id: e.target.value })}/>
+                <input value={p.resource_id || "seed-tts-2.0"} onChange={(e) => patchProvider(i, { resource_id: e.target.value, enabled_models: { ...p.enabled_models, audio: e.target.value.trim() ? [e.target.value.trim()] : [] } })}/>
                 <small>常用值为 seed-tts-2.0；必须与已开通的豆包语音实例和音色匹配。</small>
               </label>
               <div className="two-fields">
@@ -5044,7 +5067,7 @@ function SettingsPanel({
               <small>需匹配返回 id、status 与 video_url 的网关协议。</small>
             </>
           )}
-        </article>
+        </details>
       ))}
       <div className="settings-actions">
         <button
@@ -5108,6 +5131,11 @@ function SettingsPanel({
                     image: "doubao-seedream-5-0-pro-260628",
                     video: "doubao-seedance-2-5-260628",
                   },
+                  enabled_models: {
+                    text: ["doubao-seed-2-1-pro-260628"],
+                    image: ["doubao-seedream-5-0-pro-260628"],
+                    video: ["doubao-seedance-2-5-260628"],
+                  },
                   parameters: {
                     image: { size: "2K", watermark: false, max_references: 10 },
                     video: { duration: 5, resolution: "720p", ratio: "16:9", generate_audio: true },
@@ -5132,6 +5160,7 @@ function SettingsPanel({
                   url: "https://api-aigc.fzyinghe.com",
                   local: false,
                   models: { text: "", image: "", video: "" },
+                  enabled_models: { text: [], image: [], video: [] },
                   parameters: {
                     image: { size: "1024x1024", n: 1 },
                     video: { duration: 5, ratio: "16:9" },
@@ -5160,6 +5189,11 @@ function SettingsPanel({
                     image: "seedream-v5-pro",
                     video: "bytedance/seedance-2.5-token",
                   },
+                  enabled_models: {
+                    text: ["bytedance/doubao-seed-2.1-pro"],
+                    image: ["seedream-v5-pro"],
+                    video: ["bytedance/seedance-2.5-token"],
+                  },
                   parameters: {
                     image: { size: "1024x1024", resolution: "2k", outputFormat: "jpeg", max_references: 10 },
                     video: { duration: 5, resolution: "720p", ratio: "16:9", generateAudio: true },
@@ -5186,6 +5220,7 @@ function SettingsPanel({
                   kind: "audio",
                   model: "zh_female_vv_uranus_bigtts",
                   resource_id: "seed-tts-2.0",
+                  enabled_models: { audio: ["seed-tts-2.0"] },
                   parameters: { format: "mp3", sample_rate: 24000, speech_rate: 0 },
                 },
               ],
@@ -5216,6 +5251,8 @@ function SettingsPanel({
           连接 Maestro
         </button>
       </div>
+      </section>}
+      {settingsTab === "runtime" && <section className="settings-section">
       {system.runtime?.maestro_found && (
         <button
           className="secondary full"
@@ -5242,6 +5279,7 @@ function SettingsPanel({
           onChange={(e) => setValue({ ...value, ffmpeg: e.target.value })}
         />
       </label>
+      </section>}
       {status && <p className="success-text">{status}</p>}
       <button className="primary full" disabled={busy} onClick={save}>
         <Save size={16} />

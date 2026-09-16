@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { ModelSelector } from "../ModelSelector.tsx";
 import type { GenerationPolicy } from "../generationPolicy.ts";
+import { effectiveProjectTargets, type ProjectModelPool } from "../modelAccess.ts";
 import type {
   VisualAttribute,
   VisualBible,
@@ -61,6 +62,7 @@ export function FilmBiblePanel({
   assets,
   jobs,
   generationPolicy,
+  modelPool,
   providers,
   localModels,
   request,
@@ -99,6 +101,7 @@ export function FilmBiblePanel({
   assets: Array<Record<string, any>>;
   jobs: Array<Record<string, any>>;
   generationPolicy: GenerationPolicy | undefined;
+  modelPool?: ProjectModelPool;
   providers: Array<Record<string, any>>;
   localModels: Array<Record<string, any>>;
   request: (path: string) => Promise<any>;
@@ -141,7 +144,8 @@ export function FilmBiblePanel({
   });
   const [referenceBusy, setReferenceBusy] = useState(false);
   const [referenceError, setReferenceError] = useState("");
-  const speechProviders = providers.filter((item) => item.type === "volcengine_speech");
+  const allowedAudioProviders = new Set(effectiveProjectTargets(modelPool, providers, "audio", localModels).map((target) => target.providerId));
+  const speechProviders = providers.filter((item) => item.type === "volcengine_speech" && allowedAudioProviders.has(item.id));
   const storedVoice = card ? voiceProfiles[card.id] : undefined;
   const [voiceDraft, setVoiceDraft] = useState<VoiceProfile>(() =>
     defaultVoiceProfile("", speechProviders[0]?.id || ""),
@@ -475,6 +479,7 @@ export function FilmBiblePanel({
               }}
               providers={providers}
               localModels={localModels}
+              allowedTargets={effectiveProjectTargets(modelPool, providers, "image", localModels)}
               request={request}
               onChange={(patch) =>
                 onSetImageOverride(card.id, {

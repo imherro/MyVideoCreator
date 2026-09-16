@@ -32,6 +32,15 @@ export function ArkProviderSettings({
 }) {
   function modelField(kind: ArkKind) {
     const options = catalog.filter((model) => model.kind === kind);
+    const configured = String(provider.models?.[kind] || "").trim();
+    const enabled: string[] = Array.isArray(provider.enabled_models?.[kind])
+      ? provider.enabled_models[kind]
+      : configured ? [configured] : [];
+    const choiceMap = new Map<string, Value>();
+    for (const model of options) choiceMap.set(String(model.id), model);
+    for (const id of enabled) choiceMap.set(id, choiceMap.get(id) || { id, name: id, kind });
+    if (configured) choiceMap.set(configured, choiceMap.get(configured) || { id: configured, name: configured, kind });
+    const choices = [...choiceMap.values()];
     const check = checks[kind];
     const listId = `ark-${provider.id}-${kind}-models`;
     return (
@@ -52,12 +61,17 @@ export function ArkProviderSettings({
           list={listId}
           placeholder={verified ? `选择或填写${LABELS[kind]}模型 ID` : "验证 Key 后读取可用模型"}
           value={provider.models?.[kind] || ""}
-          onChange={(event) =>
+          onChange={(event) => {
+            const modelId = event.target.value.trim();
             onPatch({
               models: { ...provider.models, [kind]: event.target.value },
+              enabled_models: {
+                ...provider.enabled_models,
+                [kind]: modelId ? [...new Set([...enabled, modelId])] : enabled,
+              },
               changed_model_kind: kind,
-            })
-          }
+            });
+          }}
         />
         <datalist id={listId}>
           {options.map((model) => (
@@ -71,6 +85,26 @@ export function ArkProviderSettings({
               : "目录中没有自动识别到此类模型，可以手动填写接入点 ID。"
             : "请先保存并验证 Key。"}
         </small>
+        <div className="provider-model-pool">
+          <b>系统启用模型（可多选）</b>
+          {choices.length ? choices.map((model) => {
+            const checked = enabled.includes(model.id);
+            return <label className="model-choice" key={model.id}>
+              <input type="checkbox" checked={checked} onChange={(event) => {
+                const next = event.target.checked
+                  ? [...new Set([...enabled, model.id])]
+                  : enabled.filter((id) => id !== model.id);
+                const defaultModel = configured === model.id && !event.target.checked ? next[0] || "" : configured || next[0] || "";
+                onPatch({
+                  enabled_models: { ...provider.enabled_models, [kind]: next },
+                  models: { ...provider.models, [kind]: defaultModel },
+                  changed_model_kind: kind,
+                });
+              }}/>
+              <span>{model.name || model.id}<small>{model.id}</small></span>
+            </label>;
+          }) : <p className="muted">验证 Key 后可从目录多选；也可先在上方填写一个模型 ID。</p>}
+        </div>
         {check && (
           <small className={check.status === "listed" ? "success-text" : "warning-text"}>
             {check.message}

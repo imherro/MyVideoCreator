@@ -1,4 +1,5 @@
 import type { GenerationPolicy } from "./generationPolicy.ts";
+import { defaultProjectModelPool, enabledModelIds, type ProjectModelPool } from "./modelAccess.ts";
 import { invalidate } from "./graph.ts";
 import { setProjectVisualStyle } from "./filmBible/versioning.ts";
 
@@ -27,21 +28,24 @@ export type ProjectSetupDraft = {
   platform: string;
   brief: string;
   generationPolicy: GenerationPolicy;
+  modelPool: ProjectModelPool;
   bible: ProjectBibleFields;
 };
 
 export function defaultGenerationPolicy(providers: Value[]): GenerationPolicy {
-  const ark = providers.find((provider) => provider.type === "volcengine_ark");
-  if (!ark) return { text: null, image: null, video: null };
+  const ordered = [...providers].sort((left, right) => Number(right.type === "volcengine_ark") - Number(left.type === "volcengine_ark"));
   return Object.fromEntries(
     (["text", "image", "video"] as const).map((kind) => [
       kind,
-      { providerId: ark.id, modelId: ark.models?.[kind] || "" },
+      (() => {
+        const provider = ordered.find((item) => enabledModelIds(item, kind).length);
+        return provider ? { providerId: provider.id, modelId: enabledModelIds(provider, kind)[0] } : null;
+      })(),
     ]),
   ) as GenerationPolicy;
 }
 
-export function defaultProjectSetupDraft(providers: Value[]): ProjectSetupDraft {
+export function defaultProjectSetupDraft(providers: Value[], localModels: Value[] = []): ProjectSetupDraft {
   return {
     name: "",
     episodeTitle: "第 01 集",
@@ -56,6 +60,7 @@ export function defaultProjectSetupDraft(providers: Value[]): ProjectSetupDraft 
     platform: "通用短视频",
     brief: "",
     generationPolicy: defaultGenerationPolicy(providers),
+    modelPool: defaultProjectModelPool(providers, localModels),
     bible: {
       worldEra: "",
       visualTone: "",
@@ -108,6 +113,7 @@ export function projectSetupPayload(draft: ProjectSetupDraft) {
     platform: draft.platform,
     brief: draft.brief,
     generation_policy: draft.generationPolicy,
+    model_pool: draft.modelPool,
     film_bible: {
       story: compactObject({ worldEra: draft.bible.worldEra }),
       style: compactObject({

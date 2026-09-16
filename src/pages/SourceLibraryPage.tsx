@@ -33,6 +33,8 @@ export function SourceLibraryPage({
   const defaultModelId = defaultTarget?.modelId || fallbackTextProvider.models?.text || fallbackTextProvider.model || "";
   const [providerId, setProviderId] = useState(defaultProviderId);
   const [model, setModel] = useState(defaultModelId);
+  const activeTextProvider = textProviders.find((item) => item.id === providerId);
+  const allowedTextModels: string[] = activeTextProvider?.enabled_models?.text || (activeTextProvider?.models?.text ? [activeTextProvider.models.text] : activeTextProvider?.model ? [activeTextProvider.model] : []);
   const chapter = chapters.find((item) => item.id === active);
   const activeSource = sources.find((item) => item.id === chapter?.source_id) || sources[0];
 
@@ -180,8 +182,8 @@ export function SourceLibraryPage({
       </> : <div className="empty-state"><BookOpen/><h3>导入或新建原著</h3></div>}</main>
       <aside className="source-analysis">
         <h3>AI 事件提取</h3><p>作品级分析 · 已选 {selected.size} 章。任务失败时保留已有事件。</p>
-        <label>文本服务<select value={providerId} onChange={(event) => { setProviderId(event.target.value); const provider = textProviders.find((item) => item.id === event.target.value); setModel(provider?.models?.text || provider?.model || ""); }}>{textProviders.map((provider) => <option key={provider.id} value={provider.id}>{provider.local ? "本地" : "云端"} · {provider.name}</option>)}</select></label>
-        <label>模型 ID<input value={model} placeholder="本地留空使用默认模型" onChange={(event) => setModel(event.target.value)}/></label>
+        <label>文本服务<select value={providerId} onChange={(event) => { setProviderId(event.target.value); const provider = textProviders.find((item) => item.id === event.target.value); setModel(provider?.enabled_models?.text?.[0] || provider?.models?.text || provider?.model || ""); }}>{textProviders.map((provider) => <option key={provider.id} value={provider.id}>{provider.local ? "本地" : "云端"} · {provider.name}</option>)}</select></label>
+        <label>模型{providerId === "local" ? <input value={model} placeholder="留空使用本地默认模型" onChange={(event) => setModel(event.target.value)}/> : <select value={model} onChange={(event) => setModel(event.target.value)}>{!allowedTextModels.includes(model) && model && <option value={model} disabled>{model}（已停用）</option>}{allowedTextModels.map((modelId) => <option value={modelId} key={modelId}>{modelId}</option>)}</select>}</label>
         <button disabled={busy || !selected.size} onClick={() => run(extract)}><Sparkles size={15}/>提取所选章节事件</button>
       </aside>
     </div>

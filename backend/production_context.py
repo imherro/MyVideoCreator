@@ -8,8 +8,8 @@ from .project_schema import empty_film_bible, empty_generation_policy, migrate_d
 from .adaptation import empty_adaptation_context, normalize_adaptation_context
 
 
-CONTEXT_SCHEMA_VERSION = 2
-SHARED_DOCUMENT_KEYS = ('filmBible', 'generationPolicy', 'style')
+CONTEXT_SCHEMA_VERSION = 3
+SHARED_DOCUMENT_KEYS = ('filmBible', 'generationPolicy', 'modelPool', 'style')
 PRODUCTION_ONLY_KEYS = SHARED_DOCUMENT_KEYS + (
     'adaptationPlan', 'episodePlans', 'monetizationPlan',
 )
@@ -22,6 +22,7 @@ def new_production_context(generation_policy=None):
         'generationPolicy': copy.deepcopy(
             generation_policy or empty_generation_policy()
         ),
+        'modelPool': None,
         'style': '电影写实',
         **empty_adaptation_context(),
     }
@@ -47,6 +48,8 @@ def normalize_production_context(value, generation_policy=None):
         result['generationPolicy'] = copy.deepcopy(policy)
     for kind in ('text', 'image', 'video'):
         result['generationPolicy'].setdefault(kind, None)
+    model_pool=source.get('modelPool')
+    result['modelPool']=copy.deepcopy(model_pool) if isinstance(model_pool,dict) else None
     if 'style' in source:
         result['style'] = copy.deepcopy(source['style'])
     adaptation = normalize_adaptation_context(source)
@@ -110,6 +113,9 @@ def merge_migration_contexts(documents, generation_policy=None):
         'generationPolicy',
         [context['generationPolicy'] for context in contexts],
         default['generationPolicy'],
+    )
+    merged['modelPool'] = resolve(
+        'modelPool', [context['modelPool'] for context in contexts], default['modelPool'],
     )
     film_keys = set(default['filmBible'])
     for context in contexts:

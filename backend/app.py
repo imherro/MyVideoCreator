@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from . import store as s, runtime
 from .prompts import TEMPLATES
-from .generation_policy import default_ark_policy, validate_generation_policy
+from .generation_policy import default_ark_policy, validate_generation_policy, validate_model_pool, validate_policy_in_pool
 from .project_schema import empty_film_bible, migrate_document, new_document
 from .production_context import (
     SHARED_DOCUMENT_KEYS,
@@ -292,6 +292,7 @@ class ProjectCreate(BaseModel):
     platform:str=Field(default='通用短视频',min_length=1,max_length=100)
     brief:str|None=Field(default=None,max_length=24000)
     generation_policy:dict|None=None
+    model_pool:dict|None=None
     film_bible:dict|None=None
 
 def normalized_project_name(name:str)->str:
@@ -299,7 +300,9 @@ def normalized_project_name(name:str)->str:
 
 def project_create_document(body:ProjectCreate):
     providers=s.get_setting('providers',[])
-    document=new_document(default_ark_policy(providers))
+    # API callers created before model pools existed keep inherited behavior.
+    # The current UI always submits an explicit reviewed model_pool.
+    document=new_document(default_ark_policy(providers),None)
     if body.style is not None:
         style=body.style.strip()
         if not style:raise ValueError('视觉风格不能为空')
@@ -326,6 +329,9 @@ def project_create_document(body:ProjectCreate):
         document['generationPolicy']=validate_generation_policy(
             body.generation_policy,providers,allow_missing=False,
         )
+    if body.model_pool is not None:
+        document['modelPool']=validate_model_pool(body.model_pool,providers,allow_missing=False)
+    validate_policy_in_pool(document['generationPolicy'],document.get('modelPool'))
     if body.film_bible is not None:
         if not isinstance(body.film_bible,dict):raise ValueError('Project Bible 必须是对象')
         unknown=set(body.film_bible)-{'story','style','continuity'}
@@ -394,6 +400,8 @@ def save_project(pid:str,body:ProjectSave):
     # Preserve deleted provider ids so ordinary project edits remain savable;
     # the resolver reports the invalid target before any generation starts.
     document['generationPolicy']=validate_generation_policy(document['generationPolicy'],s.get_setting('providers',[]),allow_missing=True)
+    document['modelPool']=validate_model_pool(document.get('modelPool'),s.get_setting('providers',[]),allow_missing=True)
+    validate_policy_in_pool(document['generationPolicy'],document.get('modelPool'))
     projected_context=production_context_from_document(document)
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
@@ -683,6 +691,14 @@ async def update_settings(request:Request):
         for p in body['providers']:
             masked_key_set=bool(p.pop('api_key_set',False))
             if not p.get('id') or p.get('type') not in ('openai','comfy','maestro','video_api','minimax','replicate','volcengine_ark','volcengine_speech','hc_atom','runninghub'): raise ValueError('模型服务配置无效')
+            enabled=p.get('enabled_models')
+            if enabled is not None:
+                if not isinstance(enabled,dict) or set(enabled)-{'text','image','video','audio'}:
+                    raise ValueError('系统启用模型配置无效')
+                for kind,models in enabled.items():
+                    if not isinstance(models,list) or any(not isinstance(model,str) for model in models):
+                        raise ValueError(f'{kind} 启用模型必须是字符串数组')
+                    enabled[kind]=list(dict.fromkeys(model.strip() for model in models if model.strip()))
             if p.get('type')=='volcengine_ark':
                 from .providers.volcengine_ark import DEFAULT_BASE_URL
                 p['url']=p.get('url') or DEFAULT_BASE_URL
@@ -943,6 +959,19 @@ def create_job_record(c,pid,body):
         from .minimax_video import payload
         if body.kind!='video':raise ValueError('MiniMax 原生服务仅支持视频节点')
         payload(body.input,selected)
+    if body.kind!='export':
+        state=read_project_state(c,pid)
+        model_pool=(state or {}).get('document',{}).get('modelPool')
+        if isinstance(model_pool,dict):
+            pool_kind='text' if body.kind=='storyboard' else body.kind
+            allowed=model_pool.get(pool_kind,[])
+            provider_id=str(body.input.get('provider') or 'local')
+            if pool_kind=='audio':
+                permitted=any(target.get('providerId')==provider_id for target in allowed if isinstance(target,dict))
+            else:
+                model_id=str(body.input.get('model') or (((selected or {}).get('models') or {}).get(pool_kind)) or (selected or {}).get('model') or '')
+                permitted=any(target.get('providerId')==provider_id and target.get('modelId')==model_id for target in allowed if isinstance(target,dict))
+            if not permitted:raise ValueError('所选服务或模型不在当前项目的可用模型中，请到项目设置中启用')
     references=list(body.input.get('asset_ids',[]))
     if body.input.get('end_asset_id'):references.append(body.input['end_asset_id'])
     if selected and selected.get('type')=='volcengine_ark':

@@ -40,6 +40,8 @@ export function AdaptationPage({
   const defaultModelId = defaultTarget?.modelId || fallbackTextProvider.models?.text || fallbackTextProvider.model || "";
   const [providerId, setProviderId] = useState(defaultProviderId);
   const [model, setModel] = useState(defaultModelId);
+  const activeTextProvider = textProviders.find((item) => item.id === providerId);
+  const allowedTextModels: string[] = activeTextProvider?.enabled_models?.text || (activeTextProvider?.models?.text ? [activeTextProvider.models.text] : activeTextProvider?.model ? [activeTextProvider.model] : []);
 
   async function load() {
     const [value, sourceChapters] = await Promise.all([
@@ -137,7 +139,7 @@ export function AdaptationPage({
       </article>
       <MonetizationEditor draft={draft} setDraft={setDraft} />
     </main><aside className="episode-plan-list"><h3>分集导航</h3>{draft.episodePlans.map((item: EpisodePlan) => <button key={item.episodeNo} className={active === item.episodeNo ? "active" : ""} onClick={() => setActive(item.episodeNo)}><span>EP{String(item.episodeNo).padStart(2, "0")}</span><small className={item.status}>{STATUS_LABELS[item.status] || item.status}</small></button>)}</aside></div>
-    <footer className="domain-generation-bar"><div><b>AI 基于原著生成整个改编工作台</b><small>{draft.sourceEventCount ? `${draft.sourceEventCount} 条原著事件 · 将生成故事骨架、策略、分集规划和商业卡点` : "尚未提取原著事件，请先完成原著分析"}</small></div><label>服务<select value={providerId} onChange={(e) => { setProviderId(e.target.value); const p = textProviders.find((x) => x.id === e.target.value); setModel(p?.models?.text || p?.model || ""); }}>{textProviders.map((item) => <option key={item.id} value={item.id}>{item.local ? "本地" : "云端"} · {item.name}</option>)}</select></label><label>模型<input value={model} placeholder="本地默认" onChange={(e) => setModel(e.target.value)} /></label>{draft.sourceEventCount ? <button className="primary" disabled={busy} onClick={() => run(generate)}><Sparkles size={15} />生成整个工作台</button> : <button className="primary" disabled={busy} onClick={onOpenSource}>先提取原著事件</button>}</footer>
+    <footer className="domain-generation-bar"><div><b>AI 基于原著生成整个改编工作台</b><small>{draft.sourceEventCount ? `${draft.sourceEventCount} 条原著事件 · 将生成故事骨架、策略、分集规划和商业卡点` : "尚未提取原著事件，请先完成原著分析"}</small></div><label>服务<select value={providerId} onChange={(e) => { setProviderId(e.target.value); const p = textProviders.find((x) => x.id === e.target.value); setModel(p?.enabled_models?.text?.[0] || p?.models?.text || p?.model || ""); }}>{textProviders.map((item) => <option key={item.id} value={item.id}>{item.local ? "本地" : "云端"} · {item.name}</option>)}</select></label><label>模型{providerId === "local" ? <input value={model} placeholder="本地默认" onChange={(e) => setModel(e.target.value)} /> : <select value={model} onChange={(e) => setModel(e.target.value)}>{!allowedTextModels.includes(model) && model && <option value={model} disabled>{model}（已停用）</option>}{allowedTextModels.map((modelId) => <option value={modelId} key={modelId}>{modelId}</option>)}</select>}</label>{draft.sourceEventCount ? <button className="primary" disabled={busy} onClick={() => run(generate)}><Sparkles size={15} />生成整个工作台</button> : <button className="primary" disabled={busy} onClick={onOpenSource}>先提取原著事件</button>}</footer>
   </section>;
 }
 

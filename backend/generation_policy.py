@@ -2,13 +2,69 @@
 from __future__ import annotations
 
 KINDS = ('text', 'image', 'video')
+MODEL_POOL_KINDS = KINDS + ('audio',)
+
+def _configured_model(provider, kind):
+    if kind == 'audio' and provider.get('type') == 'volcengine_speech':
+        return str(provider.get('resource_id') or 'seed-tts-2.0')
+    return str((provider.get('models') or {}).get(kind) or provider.get('model') or '')
+
+def enabled_models(provider, kind):
+    if provider.get('kind') and provider.get('kind') != kind:
+        return []
+    configured=(provider.get('enabled_models') or {}).get(kind)
+    if isinstance(configured,list):
+        values=[str(value).strip() for value in configured if str(value).strip()]
+        if values:return list(dict.fromkeys(values))
+        if kind in (provider.get('enabled_models') or {}):return []
+    fallback=_configured_model(provider,kind)
+    return [fallback] if fallback else []
+
+def default_model_pool(providers):
+    result={kind:[] for kind in MODEL_POOL_KINDS}
+    for provider in providers:
+        for kind in MODEL_POOL_KINDS:
+            result[kind].extend({'providerId':provider['id'],'modelId':model} for model in enabled_models(provider,kind))
+    return result
+
+def validate_model_pool(pool,providers,allow_missing=False):
+    if pool is None:return None
+    if not isinstance(pool,dict):raise ValueError('项目模型池必须是对象')
+    configured={provider.get('id'):provider for provider in providers}
+    result={}
+    for kind in MODEL_POOL_KINDS:
+        values=pool.get(kind,[])
+        if not isinstance(values,list):raise ValueError(f'项目可用{kind}模型必须是数组')
+        targets=[];seen=set()
+        for target in values:
+            if not isinstance(target,dict) or not target.get('providerId') or not isinstance(target.get('modelId'),str):
+                raise ValueError(f'项目可用{kind}模型配置无效')
+            provider_id=target['providerId'];model_id=target['modelId'].strip();key=(provider_id,model_id)
+            if not model_id or key in seen:continue
+            if provider_id=='local' and kind=='text':
+                targets.append({'providerId':'local','modelId':model_id});seen.add(key);continue
+            provider=configured.get(provider_id)
+            if not provider and allow_missing:
+                targets.append({'providerId':provider_id,'modelId':model_id});seen.add(key);continue
+            if not provider:raise ValueError(f'项目可用{kind}模型所用服务已不存在')
+            if provider.get('kind') and provider['kind']!=kind:raise ValueError(f'项目可用{kind}模型与服务用途不匹配')
+            if model_id not in enabled_models(provider,kind) and not allow_missing:raise ValueError(f'{provider.get("name",provider_id)} 未在系统模型库启用 {model_id}')
+            targets.append({'providerId':provider_id,'modelId':model_id});seen.add(key)
+        result[kind]=targets
+    return result
+
+def validate_policy_in_pool(policy,pool):
+    if pool is None:return
+    for kind in KINDS:
+        target=policy.get(kind)
+        if target is not None and target not in pool.get(kind,[]):
+            raise ValueError(f'项目默认{kind}模型必须先加入项目可用模型')
 
 def default_ark_policy(providers):
     ark = next((p for p in providers if p.get('type') == 'volcengine_ark'), None)
     if not ark:
         return {kind: None for kind in KINDS}
-    models = ark.get('models') or {}
-    return {kind: {'providerId': ark['id'], 'modelId': models.get(kind, '')} for kind in KINDS}
+    return {kind: ({'providerId': ark['id'], 'modelId': enabled_models(ark,kind)[0]} if enabled_models(ark,kind) else None) for kind in KINDS}
 
 def validate_generation_policy(policy, providers, allow_missing=False):
     if not isinstance(policy, dict):

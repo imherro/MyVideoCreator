@@ -52,6 +52,10 @@ def test_project_create_with_setup_fields_owns_data_and_has_no_generation_side_e
             kind: {"providerId": configured_provider["id"], "modelId": configured_provider["models"][kind]}
             for kind in ("text", "image", "video")
         },
+        "model_pool": {
+            kind: ([{"providerId": configured_provider["id"], "modelId": configured_provider["models"][kind]}] if kind != "audio" else [])
+            for kind in ("text", "image", "video", "audio")
+        },
         "film_bible": {
             "story": {"worldEra": "当代江南"},
             "style": {"visualTone": "克制", "avoidItems": ["高饱和"]},
@@ -71,6 +75,7 @@ def test_project_create_with_setup_fields_owns_data_and_has_no_generation_side_e
     assert document["videoFormat"] == "mov"
     assert document["brief"] == payload["brief"]
     assert document["generationPolicy"] == payload["generation_policy"]
+    assert document["modelPool"] == payload["model_pool"]
     assert document["filmBible"]["story"]["worldEra"] == "当代江南"
     assert document["filmBible"]["visual"] == {"cards": {}, "versions": {}}
     assert document["filmBible"]["styleVersion"] == 1
@@ -80,11 +85,12 @@ def test_project_create_with_setup_fields_owns_data_and_has_no_generation_side_e
         episode = db.execute("SELECT document FROM projects WHERE id=?", (project["id"],)).fetchone()
         production = db.execute("SELECT name,shared_context FROM productions WHERE id=?", (project["production_id"],)).fetchone()
     stored_episode = json.loads(episode["document"])
-    assert not {"style", "generationPolicy", "filmBible"}.intersection(stored_episode)
+    assert not {"style", "generationPolicy", "modelPool", "filmBible"}.intersection(stored_episode)
     stored_context = json.loads(production["shared_context"])
     assert production["name"] == "花信未迟"
     assert stored_context["style"] == payload["style"]
     assert stored_context["generationPolicy"] == payload["generation_policy"]
+    assert stored_context["modelPool"] == payload["model_pool"]
     assert stored_context["adaptationPlan"]["format"] == {
         "episodeCount": 12, "targetDuration": 60.0, "ratio": "9:16", "platform": "抖音",
     }

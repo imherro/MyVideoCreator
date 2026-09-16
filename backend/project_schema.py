@@ -5,7 +5,7 @@ import copy
 import json
 import uuid
 
-CURRENT_SCHEMA_VERSION = 6
+CURRENT_SCHEMA_VERSION = 7
 
 def empty_film_bible():
     return {
@@ -20,11 +20,12 @@ def empty_film_bible():
 def empty_generation_policy():
     return {'text': None, 'image': None, 'video': None}
 
-def new_document(generation_policy=None):
+def new_document(generation_policy=None, model_pool=None):
     return {
         'schemaVersion': CURRENT_SCHEMA_VERSION,
         'filmBible': empty_film_bible(),
         'generationPolicy': copy.deepcopy(generation_policy or empty_generation_policy()),
+        'modelPool': copy.deepcopy(model_pool),
         'nodes': [], 'edges': [], 'shots': [], 'timeline': [], 'characters': [],
         'brief': '', 'style': '电影写实', 'ratio': '16:9', 'duration': 15,
         'videoResolution': '720p',
@@ -87,6 +88,13 @@ def _migrate_v5_to_v6(value):
     value['schemaVersion']=6
     return value
 
+def _migrate_v6_to_v7(value):
+    # None means an older project inherits the current system model library.
+    # Once the user edits the project model pool it becomes an explicit map.
+    value.setdefault('modelPool', None)
+    value['schemaVersion']=7
+    return value
+
 def migrate_document(document):
     """Return a migrated copy. Reject future schemas rather than downgrading."""
     source = document if isinstance(document, dict) else {}
@@ -115,6 +123,9 @@ def migrate_document(document):
         elif version == 5:
             value = _migrate_v5_to_v6(value)
             version = 6
+        elif version == 6:
+            value = _migrate_v6_to_v7(value)
+            version = 7
         else:
             raise ValueError(f'缺少项目 Schema v{version} 的迁移程序')
     return value
