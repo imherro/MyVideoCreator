@@ -105,7 +105,9 @@ export function deriveWorkflowGuide(input: {
           : sourceEventCount
             ? { stage: "adaptation", state: "ready", headline: adaptationReview.headline, reasons: adaptationReview.reason ? [adaptationReview.reason] : [] }
             : { stage: "adaptation", state: "blocked", headline: "先完成原著事件提取", reasons: ["当前没有可供改编引用的原著事件。"], action: { label: "前往原著", stage: "source" } },
-    script: quickCanvasScript && currentScript?.status === "approved"
+    script: activeJob(jobs, (job) => job.input?.stage === "script_generation")
+      ? { stage: "script", state: "running", headline: "剧本正在生成", reasons: ["生成中的分集不可重复提交，完成后自动刷新。"] }
+      : quickCanvasScript && currentScript?.status === "approved"
       ? { stage: "script", state: "complete", headline: "本集画布剧本已批准", reasons: [] }
       : quickCanvasScript && currentScript?.status === "review"
         ? { stage: "script", state: "review", headline: "本集画布剧本等待审核", reasons: ["批准后即可进入分镜规划。"] }

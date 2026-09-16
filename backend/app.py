@@ -925,6 +925,11 @@ def create_job_record(c,pid,body):
             ORDER BY created DESC LIMIT 1""",(pid,body.node_id,body.kind)).fetchone()
         if active:
             raise HTTPException(409,'该资产参考图已有任务排队或运行中，请等待完成后再生成')
+    if body.input.get('episode_script_generation') is not None:
+        active=c.execute("""SELECT id FROM jobs WHERE project_id=? AND node_id=?
+            AND kind='text' AND status IN ('queued','running') LIMIT 1""",(pid,body.node_id)).fetchone()
+        if active:
+            raise HTTPException(409,'本集剧本已在排队或生成中，请等待完成后再生成')
     if body.kind!='export' and not body.input.get('prompt','').strip(): raise ValueError('请输入生成描述')
     if body.kind=='video':
         from .state_review import require_video_source_reviews
@@ -1906,6 +1911,29 @@ def jobs(pid:str):
     with s.db() as c:
         return [s.unpack(r) for r in c.execute('SELECT * FROM jobs WHERE project_id=? ORDER BY created DESC LIMIT 200',(pid,))]
 
+@app.get('/api/productions/{production_id}/job-statuses')
+def production_job_statuses(production_id:str):
+    production(production_id)
+    with s.db() as c:
+        rows=c.execute('''WITH visible_jobs AS (
+            SELECT j.id,j.project_id,j.node_id,j.kind,j.status,j.created,j.updated,
+                json_extract(j.input,'$.stage') stage,
+                json_extract(j.input,'$.episode_script_generation.episodeNo') script_episode_no
+            FROM jobs j JOIN projects p ON p.id=j.project_id
+            WHERE p.production_id=? AND NOT EXISTS(
+                SELECT 1 FROM deleted_items d WHERE d.kind='project' AND d.item_id=p.id)
+        ) SELECT * FROM visible_jobs WHERE status IN ('queued','running')
+            OR id IN (SELECT id FROM visible_jobs ORDER BY updated DESC,id LIMIT 200)
+            ORDER BY created DESC,id''',(production_id,)).fetchall()
+    result=[]
+    for row in rows:
+        item={key:row[key] for key in ('id','project_id','node_id','kind','status','created','updated')}
+        item['input']={'stage':row['stage']}
+        if row['script_episode_no'] is not None:
+            item['input']['episode_script_generation']={'productionId':production_id,'episodeNo':row['script_episode_no']}
+        result.append(item)
+    return result
+
 @app.get('/api/jobs/{jid}')
 def read_job(jid:str):
     with s.db() as c:
@@ -2000,10 +2028,11 @@ async def events(request:Request,after:int|None=None):
         cursor = _event_cursor(latest, after, request.headers.get('last-event-id'))
         while not await request.is_disconnected():
             with s.db() as c:
-                rows=c.execute('SELECT * FROM events WHERE id>? ORDER BY id LIMIT 100',(cursor,)).fetchall()
+                rows=c.execute('''SELECT e.*,p.production_id FROM events e LEFT JOIN projects p ON p.id=e.project_id
+                    WHERE e.id>? ORDER BY e.id LIMIT 100''',(cursor,)).fetchall()
             for row in rows:
                 cursor=row['id']
-                yield f'id: {cursor}\ndata: {s.dumps({"project_id":row["project_id"],**json.loads(row["payload"])})}\n\n'
+                yield f'id: {cursor}\ndata: {s.dumps({"project_id":row["project_id"],"production_id":row["production_id"],**json.loads(row["payload"])})}\n\n'
             if not rows: yield ': heartbeat\n\n'
             await asyncio.sleep(2)
     return StreamingResponse(stream(),media_type='text/event-stream',headers={'X-Accel-Buffering':'no'})

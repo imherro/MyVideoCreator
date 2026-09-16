@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, Check, RefreshCw, Save, Sparkles } from "lucide-react";
 import { STATUS_LABELS, normalizeEpisodeSelection, splitList } from "../adaptation";
+import { activeScriptEpisodes, mergeTaskSnapshots } from "../taskCenter";
 
 type Value = Record<string, any>;
 
 export function ScriptRoomPage({
-  productionId, currentEpisodeNo, providers, defaultTarget, refreshKey = 0, request, notify, report, onChanged, onSelectEpisode, onEnterEpisode,
+  productionId, currentEpisodeNo, providers, defaultTarget, refreshKey = 0, jobs, onJobsSubmitted, request, notify, report, onChanged, onSelectEpisode, onEnterEpisode,
 }: {
   productionId: string; currentEpisodeNo: number; providers: Value[]; defaultTarget?: Value; refreshKey?: number;
+  jobs: Value[]; onJobsSubmitted: (jobs: Value[]) => void;
   request: (path: string, options?: RequestInit) => Promise<any>;
   notify: (message: string) => void; report: (error: unknown) => void;
   onChanged: (projectId?: string) => void | Promise<void>;
@@ -20,6 +22,11 @@ export function ScriptRoomPage({
   const [draft, setDraft] = useState<Value | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [submittedJobs, setSubmittedJobs] = useState<Value[]>([]);
+  const loadedProduction = useRef<string | null>(null);
+  const runningEpisodes = activeScriptEpisodes(mergeTaskSnapshots(submittedJobs, jobs), productionId);
+  const activeGenerating = runningEpisodes.has(active);
+  const selectedGenerating = [...selected].some((number) => runningEpisodes.has(number));
   const textProviders = useMemo(
     () => [{ id: "local", name: "本地 llama.cpp", local: true, model: "" }, ...providers.filter((p) => !p.kind || p.kind === "text")],
     [providers],
@@ -43,7 +50,12 @@ export function ScriptRoomPage({
     setActive(episodeNo);
     setDraft(await request(`/productions/${productionId}/episode-scripts/${episodeNo}`));
   }
-  useEffect(() => { setItems([]); setDraft(null); setSelected(new Set()); void loadList(currentEpisodeNo).catch(report); }, [productionId, refreshKey]);
+  useEffect(() => {
+    const changed = loadedProduction.current !== productionId;
+    loadedProduction.current = productionId;
+    if (changed) { setItems([]); setDraft(null); setSelected(new Set()); setSubmittedJobs([]); }
+    void loadList(changed ? currentEpisodeNo : active).catch(report);
+  }, [productionId, refreshKey]);
   useEffect(() => {
     if (currentEpisodeNo !== active) void selectEpisode(currentEpisodeNo).catch(report);
   }, [currentEpisodeNo]);
@@ -78,6 +90,7 @@ export function ScriptRoomPage({
   async function generate(episodeNos: number[]) {
     const normalized = normalizeEpisodeSelection(episodeNos, items.length);
     if (!normalized.length) return;
+    if (normalized.some((number) => runningEpisodes.has(number))) throw new Error("所选剧本已在排队或生成中，请等待完成后再生成");
     const provider = textProviders.find((value) => value.id === defaultProviderId) || fallbackTextProvider;
     const providerId = provider.id;
     const modelId = defaultModelId || provider?.models?.text || provider?.model || "";
@@ -87,6 +100,8 @@ export function ScriptRoomPage({
       method: "POST",
       body: JSON.stringify({ episode_nos: normalized, provider: providerId, model: modelId, submission_id: `scripts-${Date.now()}` }),
     });
+    setSubmittedJobs((known) => mergeTaskSnapshots(known, result.jobs));
+    onJobsSubmitted(result.jobs);
     await onChanged(); await loadList(active);
     notify(`已创建 ${result.count} 个剧本任务，可在任务中心查看`);
   }
@@ -100,12 +115,12 @@ export function ScriptRoomPage({
     </div></header>
     <div className="script-room-layout">
       <aside className="script-episode-list"><header><b>分集</b><small>勾选后批量生成</small></header>{items.map((value) => <div className={active === value.episodeNo ? "active" : ""} key={value.episodeNo}>
-        <input type="checkbox" checked={selected.has(value.episodeNo)} onChange={(e) => setSelected((current) => { const next = new Set(current); e.target.checked ? next.add(value.episodeNo) : next.delete(value.episodeNo); return next; })} />
-        <button onClick={() => run(async () => { await onSelectEpisode(value.episodeNo); await selectEpisode(value.episodeNo); })}><b>EP{String(value.episodeNo).padStart(2, "0")}</b><span>{value.episodeTitle}</span><small className={value.script?.status || value.plan.status}>{STATUS_LABELS[value.script?.status || value.plan.status]}</small></button>
+        <input type="checkbox" disabled={runningEpisodes.has(value.episodeNo) && !selected.has(value.episodeNo)} checked={selected.has(value.episodeNo)} onChange={(e) => setSelected((current) => { const next = new Set(current); e.target.checked ? next.add(value.episodeNo) : next.delete(value.episodeNo); return next; })} />
+        <button onClick={() => run(async () => { await onSelectEpisode(value.episodeNo); await selectEpisode(value.episodeNo); })}><b>EP{String(value.episodeNo).padStart(2, "0")}</b><span>{value.episodeTitle}</span><small className={value.script?.status || value.plan.status}>{runningEpisodes.has(value.episodeNo) ? (runningEpisodes.get(value.episodeNo) === "queued" ? "排队中" : "生成中") : STATUS_LABELS[value.script?.status || value.plan.status]}</small></button>
       </div>)}</aside>
       <main>{draft && plan ? <>
         {draft.metadata?.origin === "canvas" && <div className="notice"><b>来自画布快速创作</b><span>这里保存的是同一份正式剧本；修改后画布投影会同步更新。</span></div>}
-        <div className="script-summary-strip"><span className={`workflow-status ${draft.status}`}>{STATUS_LABELS[draft.status]}</span><span>目标 {plan.targetDuration} 秒</span><span>{plan.paywallRole}</span><span>{draft.project_id ? "已建立 Episode" : "首次保存或生成时建立 Episode"}</span></div>
+        <div className="script-summary-strip"><span className={`workflow-status ${activeGenerating ? "running" : draft.status}`}>{activeGenerating ? (runningEpisodes.get(active) === "queued" ? "排队中" : "生成中") : STATUS_LABELS[draft.status]}</span><span>目标 {plan.targetDuration} 秒</span><span>{plan.paywallRole}</span><span>{draft.project_id ? "已建立 Episode" : "首次保存或生成时建立 Episode"}</span></div>
         <article className="domain-card"><div className="domain-fields">
           <label>标题<input value={draft.title} onChange={(e) => patch({ title: e.target.value })} /></label>
           <label>预计时长（秒）<input type="number" value={draft.estimatedDuration} onChange={(e) => patch({ estimatedDuration: Number(e.target.value) })} /></label>
@@ -118,9 +133,9 @@ export function ScriptRoomPage({
           <label>角色（逗号或换行）<textarea rows={3} value={draft.characters.join("、")} onChange={(e) => patch({ characters: splitList(e.target.value) })} /></label>
           <label>场景（逗号或换行）<textarea rows={3} value={draft.scenes.join("、")} onChange={(e) => patch({ scenes: splitList(e.target.value) })} /></label>
           <label>道具（逗号或换行）<textarea rows={3} value={draft.props.join("、")} onChange={(e) => patch({ props: splitList(e.target.value) })} /></label>
-        </div></article><div className="script-state-actions"><button disabled={busy} onClick={() => run(() => transition("needs-changes"))}>退回修改</button><button disabled={busy} onClick={() => run(() => generate([active]))}><Sparkles size={15} />{draft.body ? "重新生成本集" : "生成本集"}</button>{draft.status === "approved" && <button className="primary" disabled={busy || !draft.project_id} onClick={() => run(() => Promise.resolve(onEnterEpisode(active)))} >进入分镜规划<ArrowRight size={15}/></button>}</div>
+        </div></article><div className="script-state-actions"><button disabled={busy} onClick={() => run(() => transition("needs-changes"))}>退回修改</button><button disabled={busy || activeGenerating} onClick={() => run(() => generate([active]))}><Sparkles size={15} />{activeGenerating ? (runningEpisodes.get(active) === "queued" ? "本集排队中" : "本集生成中") : draft.body ? "重新生成本集" : "生成本集"}</button>{draft.status === "approved" && <button className="primary" disabled={busy || !draft.project_id} onClick={() => run(() => Promise.resolve(onEnterEpisode(active)))} >进入分镜规划<ArrowRight size={15}/></button>}</div>
       </> : <div className="empty-state"><h3>先完成分集规划</h3><p>改编策划批准后，可以在这里逐集生成和修订剧本。</p></div>}</main>
     </div>
-    <footer className="domain-generation-bar"><div><b>批量生成所选剧本</b><small>已选 {selected.size} 集 · 使用项目默认模型：{configuredDefaultProvider.name} · {defaultModelId || "服务默认"}</small></div><button className="primary" disabled={busy || !selected.size} onClick={() => run(() => generate([...selected]))}><Sparkles size={15} />生成 {selected.size} 集</button></footer>
+    <footer className="domain-generation-bar"><div><b>批量生成所选剧本</b><small>已选 {selected.size} 集 · 使用项目默认模型：{configuredDefaultProvider.name} · {defaultModelId || "服务默认"}</small></div><button className="primary" disabled={busy || !selected.size || selectedGenerating} onClick={() => run(() => generate([...selected]))}><Sparkles size={15} />{selectedGenerating ? "所选剧本生成中" : `生成 ${selected.size} 集`}</button></footer>
   </section>;
 }

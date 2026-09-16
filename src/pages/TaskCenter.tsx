@@ -39,6 +39,7 @@ export function TaskCenter({
   currentProjectId,
   currentDocument,
   currentJobs,
+  jobStatuses,
   providers,
   request,
   onRefreshCurrent,
@@ -50,6 +51,7 @@ export function TaskCenter({
   currentProjectId: string;
   currentDocument: Value;
   currentJobs: Value[];
+  jobStatuses: Value[];
   providers: Value[];
   request: (path: string, init?: RequestInit) => Promise<any>;
   onRefreshCurrent: () => Promise<void>;
@@ -82,7 +84,7 @@ export function TaskCenter({
     }
   }
 
-  useEffect(() => { void load(); }, [episodes.map((episode) => episode.id).join("|")]);
+  useEffect(() => { void load(); }, [episodes.map((episode) => episode.id).join("|"), jobStatuses.map((job) => `${job.id}:${job.status}`).join("|")]);
   useEffect(() => {
     setJobs((items) => [
       ...items.filter((job) => job.project_id !== currentProjectId),

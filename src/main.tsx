@@ -134,6 +134,7 @@ import { acceptVoiceResult, saveVoiceProfile, setVoiceLocked, voiceProfilesOf } 
 import { catalogVoice, CUSTOM_VOICE_ID, DOUBAO_TTS2_VOICES } from "./filmBible/voiceCatalog";
 import { StoryboardWorkspace } from "./pages/StoryboardWorkspace";
 import { VideoProductionWorkspace } from "./pages/VideoProductionWorkspace";
+import { activeTaskCount, mergeTaskSnapshots } from "./taskCenter";
 import { TaskCenter } from "./pages/TaskCenter";
 import { TaskDetailPage } from "./pages/TaskDetailPage";
 import {
@@ -607,6 +608,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     [doc, setDoc] = useState<Doc | null>(null),
     [assets, setAssets] = useState<Asset[]>([]),
     [jobs, setJobs] = useState<Job[]>([]),
+    [productionJobs, setProductionJobs] = useState<Any[]>([]),
     [visualUsage, setVisualUsage] = useState<VisualUsage[]>([]),
     [workflowContext, setWorkflowContext] = useState<Any>({ adaptation: null, scripts: [] }),
     [system, setSystem] = useState<Any>({
@@ -733,16 +735,18 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         const productionId = current.current.project?.id === pid
           ? current.current.project.production_id
           : undefined;
-        const [a, j, usages, adaptation, scripts] = await Promise.all([
+        const [a, j, usages, adaptation, scripts, jobStatuses] = await Promise.all([
           api(`/projects/${pid}/assets?scope=production`),
           api(`/projects/${pid}/jobs`),
           productionId ? api(`/productions/${productionId}/visual-usage`) : Promise.resolve([]),
           productionId ? api(`/productions/${productionId}/adaptation`) : Promise.resolve(null),
           productionId ? api(`/productions/${productionId}/scripts`) : Promise.resolve([]),
+          productionId ? api(`/productions/${productionId}/job-statuses`) : Promise.resolve([]),
         ]);
         if (current.current.project?.id === pid) {
           setAssets(a);
           setJobs(j);
+          setProductionJobs(jobStatuses);
           setVisualUsage(usages);
           setWorkflowContext({ adaptation, scripts });
         }
@@ -771,15 +775,16 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       throw new Error("项目尚未保存，已保留当前编辑。请先解决保存冲突。");
     // Only switch views after every part of the new project snapshot arrives.
     // This leaves the current canvas visible if a refresh fails mid-request.
-    let p: Project, a: Asset[], j: Job[], usages: VisualUsage[], adaptation: Any, scripts: Any[];
+    let p: Project, a: Asset[], j: Job[], usages: VisualUsage[], adaptation: Any, scripts: Any[], jobStatuses: Any[];
     try {
       p = await api("/projects/" + pid);
-      [a, j, usages, adaptation, scripts] = await Promise.all([
+      [a, j, usages, adaptation, scripts, jobStatuses] = await Promise.all([
         api(`/projects/${pid}/assets?scope=production`),
         api(`/projects/${pid}/jobs`),
         api(`/productions/${p.production_id}/visual-usage`),
         api(`/productions/${p.production_id}/adaptation`),
         api(`/productions/${p.production_id}/scripts`),
+        api(`/productions/${p.production_id}/job-statuses`),
       ]);
     } catch (e: any) {
       setSyncFailure({
@@ -808,6 +813,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setDoc(projectedDocument);
     setAssets(a);
     setJobs(j);
+    setProductionJobs(jobStatuses);
     setVisualUsage(usages);
     setWorkflowContext({ adaptation, scripts });
     setSelected(null);
@@ -910,7 +916,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             }).catch(report);
           }
         }
-        if (data.project_id === pid && data.type === "job")
+        if (pid && data.type === "job" && (data.project_id === pid || data.production_id === current.current.project?.production_id))
           refresh(pid!).catch(() => {});
       } catch {
         setSyncFailure({
@@ -1112,7 +1118,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     }
   }, [jobs, doc?.applied, config.providers, system.models]);
   useEffect(() => {
-    const completed = jobs.filter((job) => job.status === "succeeded");
+    const completed = productionJobs.filter((job) => job.status === "succeeded");
     const newlyCompleted = completed.filter((job) => !observedCompletedJobs.current.has(job.id));
     completed.forEach((job) => observedCompletedJobs.current.add(job.id));
     const workflowCompleted = newlyCompleted.filter((job) =>
@@ -1139,7 +1145,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         }
       }
     }
-  }, [jobs]);
+  }, [productionJobs]);
   useEffect(() => {
     const context = (document as any).modelContext;
     if (!context?.registerTool) return;
@@ -1254,9 +1260,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   const pendingInitialStateNodes =
     node?.data.kind === "video" ? pendingInitialStateChecks(node.id) : [];
   const activeJob = jobs.find((j) => j.node_id === selected);
-  const activeCount = jobs.filter((j) =>
-    ["queued", "running"].includes(j.status),
-  ).length;
+  const activeCount = activeTaskCount(productionJobs);
   function editNode(patch: Any) {
     if (!selected) return;
     update((d) => {
@@ -2254,7 +2258,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     scripts: workflowContext.scripts,
     currentProject: project,
     document: doc,
-    jobs,
+    jobs: mergeTaskSnapshots(jobs, productionJobs.filter((job) =>
+      ["source_analysis", "adaptation_generation", "adaptation_episode_generation", "script_generation"].includes(job.input?.stage))),
   });
   const projectBibleFields = bibleFields(doc);
   const filmBiblePanelProps: React.ComponentProps<typeof FilmBiblePanel> = {
@@ -2735,6 +2740,12 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           <ScriptRoomPage
             productionId={project.production_id}
             currentEpisodeNo={project.episode_no}
+            jobs={productionJobs}
+            onJobsSubmitted={(submitted) => {
+              if (current.current.project?.production_id === project.production_id) {
+                setProductionJobs((known) => mergeTaskSnapshots(known, submitted));
+              }
+            }}
             providers={projectProviders(doc.modelPool || undefined, config.providers, "text", system.models)}
             defaultTarget={(doc as Any).generationPolicy?.text}
             refreshKey={workflowDataRevision.script}
@@ -2743,6 +2754,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             report={report}
             onChanged={async (changedProjectId) => {
               await refreshProductionHierarchy();
+              await refresh(project.id);
               if (changedProjectId === project.id) await openProject(project.id);
             }}
             onSelectEpisode={async (episodeNo) => {
@@ -4010,6 +4022,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 currentProjectId={project.id}
                 currentDocument={doc}
                 currentJobs={jobs}
+                jobStatuses={productionJobs}
                 providers={config.providers}
                 request={api}
                 onRefreshCurrent={() => refresh(project.id)}

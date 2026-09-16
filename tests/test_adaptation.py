@@ -178,6 +178,16 @@ def test_script_generation_requires_explicit_approval_and_selected_set_isolated(
     second = client.post(f'/api/productions/{production["id"]}/script-generations',json=body)
     assert first.status_code == second.status_code == 200, first.text
     assert [job["id"] for job in first.json()["jobs"]] == [job["id"] for job in second.json()["jobs"]]
+    duplicate = client.post(f'/api/productions/{production["id"]}/script-generations', json={
+        **body, 'episode_nos': [6, 5], 'submission_id': 'duplicate-different-batch',
+    })
+    assert duplicate.status_code == 409, duplicate.text
+    assert '本集剧本已在排队或生成中' in duplicate.json()['detail']
+    # The earlier unblocked selection in the same batch is rolled back too.
+    assert client.get(f'/api/productions/{production["id"]}/episode-scripts/6').json()['revision'] == 0
+    statuses = client.get(f'/api/productions/{production["id"]}/job-statuses').json()
+    assert {job['id'] for job in statuses} == {job['id'] for job in first.json()['jobs']}
+    assert all(job['status'] == 'queued' and 'prompt' not in job['input'] for job in statuses)
     assert {job["kind"] for job in first.json()["jobs"]} == {"text"}
     assert {job["scope"] for job in first.json()["jobs"]} == {"episode"}
     assert {job["input"]["episode_script_generation"]["episodeNo"] for job in first.json()["jobs"]} == {5, 8, 12}
@@ -195,6 +205,13 @@ def test_script_generation_requires_explicit_approval_and_selected_set_isolated(
         result = worker.text({**job,"status":"running"},{"url":"http://unused","local":True})
         assert result["script"]["status"] == "review"
         s.job_update(job["id"],status="succeeded",result=result)
+
+    retried = client.post(f'/api/productions/{production["id"]}/script-generations', json={
+        **body, 'episode_nos': [5], 'submission_id': 'retry-after-script-completed',
+    })
+    assert retried.status_code == 200, retried.text
+    assert retried.json()['jobs'][0]['id'] != first.json()['jobs'][0]['id']
+    s.job_update(retried.json()['jobs'][0]['id'], status='cancelled')
 
     scripts = client.get(f'/api/productions/{production["id"]}/scripts').json()
     changed = {item["episodeNo"] for item in scripts if item["script"] and item["script"]["body"]}
@@ -521,3 +538,33 @@ def test_legacy_repair_requires_recorded_approval_and_unchanged_content(adaptati
     assert script['body'] == 'finished script'
     if not change_shared_content:
         assert result['episodePlans'][0] == approved['episodePlans'][0]
+
+
+def test_production_job_statuses_include_old_active_sibling_jobs_without_large_payloads(adaptation_client):
+    client = adaptation_client
+    production, first, _, _ = setup_production(client, count=2)
+    second = client.post(f'/api/productions/{production["id"]}/episodes', json={'title': '第二集'}).json()
+    other = client.post('/api/projects', json={'name': '其他作品'}).json()
+    records = []
+    for index in range(205):
+        job_id = s.uid('status-test-')
+        records.append((job_id, job_id, first['id'], 'node', 'text', 'succeeded',
+            s.dumps({'prompt': 'large input', 'stage': 'script_generation'}), index + 10, index + 10))
+    active_id = s.uid('status-test-')
+    other_id = s.uid('status-test-')
+    marker = {'stage': 'script_generation', 'episode_script_generation': {'episodeNo': 2, 'productionId': production['id']}}
+    records.extend([
+        (active_id, active_id, second['id'], 'episode-script:' + second['id'], 'text', 'running', s.dumps(marker), 1, 1),
+        (other_id, other_id, other['id'], 'node', 'text', 'running', '{}', 999, 999),
+    ])
+    with s.db() as connection:
+        connection.executemany('''INSERT INTO jobs(id,submission_id,project_id,node_id,kind,status,input,created,updated)
+            VALUES(?,?,?,?,?,?,?,?,?)''', records)
+    response = client.get(f'/api/productions/{production["id"]}/job-statuses')
+    assert response.status_code == 200, response.text
+    jobs = response.json()
+    assert len(jobs) == 201
+    assert {job['id'] for job in jobs if job['status'] == 'running'} == {active_id}
+    assert other_id not in {job['id'] for job in jobs}
+    assert next(job for job in jobs if job['id'] == active_id)['input'] == marker
+    assert all('prompt' not in job['input'] and 'result' not in job for job in jobs)

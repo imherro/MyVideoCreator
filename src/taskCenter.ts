@@ -1,5 +1,26 @@
 type Value = Record<string, any>;
 
+export function activeTaskCount(jobs: Value[]) {
+  return new Set(jobs.filter((job) => ["queued", "running"].includes(job.status)).map((job) => job.id)).size;
+}
+
+export function activeScriptEpisodes(jobs: Value[], productionId: string) {
+  const result = new Map<number, string>();
+  for (const job of jobs) {
+    const marker = job.input?.episode_script_generation;
+    if (marker?.productionId === productionId && ["queued", "running"].includes(job.status)) {
+      result.set(Number(marker.episodeNo), job.status);
+    }
+  }
+  return result;
+}
+
+export function mergeTaskSnapshots(known: Value[], incoming: Value[]) {
+  const tasks = new Map(known.map((job) => [job.id, job]));
+  for (const job of incoming) tasks.set(job.id, job);
+  return [...tasks.values()];
+}
+
 export type TaskEpisode = {
   id: string;
   production_id: string;

@@ -4,7 +4,28 @@ import {
   deriveTaskCenterRows,
   filterTaskCenterRows,
   taskShotLabel,
+  activeTaskCount,
+  activeScriptEpisodes,
+  mergeTaskSnapshots,
 } from "../src/taskCenter.ts";
+
+test("activity spans episodes and completed snapshots release script generation locks", () => {
+  const job = { id: "script-2", project_id: "ep-2", status: "queued", input: {
+    stage: "script_generation", episode_script_generation: { productionId: "prod", episodeNo: 2 },
+  } };
+  const jobs = [job, { id: "old", project_id: "ep-1", status: "succeeded" }];
+  assert.equal(activeTaskCount(jobs), 1);
+  assert.equal(activeTaskCount([...jobs, job]), 1);
+  assert.equal(activeScriptEpisodes(jobs, "prod").get(2), "queued");
+  assert.equal(activeScriptEpisodes(jobs, "prod").has(1), false);
+  assert.equal(activeScriptEpisodes(jobs, "other").size, 0);
+  for (const status of ["succeeded", "failed", "cancelled", "interrupted"]) {
+    const updated = mergeTaskSnapshots(jobs, [{ ...job, status }]);
+    assert.equal(activeTaskCount(updated), 0);
+    assert.equal(activeScriptEpisodes(updated, "prod").size, 0);
+  }
+  assert.equal(activeScriptEpisodes([{ ...job, status: "running" }], "prod").get(2), "running");
+});
 
 const episodes = [
   { id: "ep-1", production_id: "prod", episode_no: 1, episode_title: "第一集", name: "第一集" },
