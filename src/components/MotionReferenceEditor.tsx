@@ -1,3 +1,4 @@
+import { RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from 'react';
 import { motionCharacters, supportsMotionReference, videoGenerationMode, type MotionReference } from '../motionReference.ts';
 import { dialogueMode, dialogueModeLabels, voiceSampleRows } from '../dialogueMode.ts';
@@ -86,21 +87,31 @@ export function MotionReferenceEditor(props: Props) {
       </div>
       <label>动作补充说明<textarea rows={2} value={reference.description || ''} onChange={e => patch({description:e.target.value})} placeholder="例如：参考转身、抬头的动作顺序，保持机器人没有手臂"/></label>
     </>}
-      <button disabled={working || props.busy || (mode === 'multimodal' && !supported)} onClick={() => void compile()}>{working ? '正在检查素材…' : '刷新最终提交与参考清单'}</button>
-      <h4>最终提交与参考清单</h4>
+      <div className="motion-preview-heading"><h4>最终提交与参考清单</h4><button className="icon-button" type="button" title="刷新最终提交与参考清单" aria-label="刷新最终提交与参考清单" disabled={working || props.busy || (mode === 'multimodal' && !supported)} onClick={() => void compile()}><RefreshCw size={15} className={working ? 'spin' : ''}/></button>{working && <small role="status">正在更新…</small>}</div>
       {!preview && !error && <p>{working ? "正在加载参考素材与提示词…" : "等待预览…"}</p>}
-      {preview && <div className="motion-submission-preview"><b>镜头计划 {preview.planned_shot_duration} 秒 · {preview.motion_reference ? `动作参考 ${Number(preview.motion_reference.media?.duration).toFixed(2)} 秒` : '无动作参考'} · 实际提交 {preview.shot_duration} 秒</b>
-        <p>选择模式：{preview.generation_mode?.requested} · 提交模式：{preview.generation_mode?.actual}</p>
-        {preview.dialogue_mode && <p>对白方式：{dialogueModeLabels[preview.dialogue_mode.actual]}</p>}
+      {preview && <div className="motion-submission-preview">
+        <div className="motion-preview-facts">
+          <span>镜头计划 <b>{preview.planned_shot_duration} 秒</b></span>
+          <span>实际提交 <b>{preview.shot_duration} 秒</b></span>
+          {preview.motion_reference && <span>动作参考 <b>{Number(preview.motion_reference.media?.duration).toFixed(2)} 秒</b></span>}
+          <span>生成模式 <b>{({multimodal:'多模态参考',first_frame:'严格首帧',first_last_frame:'严格首尾帧',legacy:'兼容历史'} as Value)[preview.generation_mode?.actual] || preview.generation_mode?.actual}</b></span>
+          {preview.generation_mode?.requested !== preview.generation_mode?.actual && <span>选择模式 <b>{preview.generation_mode?.requested}</b></span>}
+          {preview.dialogue_mode && <span>对白 <b>{dialogueModeLabels[preview.dialogue_mode.actual]}</b></span>}
+        </div>
         {(preview.voice_samples || []).map((sample:Value)=><p key={sample.characterCardId}>{sample.characterName} → @音频{sample.index} · 声音 V{sample.voiceVersion} · 仅参考音色</p>)}
         {(preview.motion_warnings || []).map((warning: string) => <p key={warning} className="warning">{warning}</p>)}
-        <div className="motion-inline-prompt">{String(preview.prompt || '').split(/(@(?:图片|视频|音频)\d+)/g).map((part, index) => {
+        <div className="motion-inline-prompt">{String(preview.prompt || '').split(/\r?\n/).map((line, lineIndex) => {
+          if (!line.trim()) return <div className="motion-prompt-gap" key={lineIndex}/>;
+          if (/^\[\/[^\]]+\]$/.test(line.trim())) return null;
+          if (/^\[[^\]]+\]$/.test(line.trim())) return <h5 key={lineIndex}>{line.trim().slice(1, -1)}</h5>;
+          return <p className={/^@(?:图片|视频|音频)\d+/.test(line.trim()) ? 'motion-prompt-reference-line' : ''} key={lineIndex}>{line.split(/(@(?:图片|视频|音频)\d+)/g).map((part, index) => {
           const match = /^@(图片|视频|音频)(\d+)$/.exec(part);
           if (!match) return part;
           const kind = ({图片:'image',视频:'video',音频:'audio'} as Value)[match[1]];
           const item = (preview.reference_manifest || []).find((entry: Value) => entry.kind === kind && Number(entry.index) === Number(match[2]));
           const media = item && (props.assets.find(a => a.id === item.assetId) || (kind === 'video' ? asset : undefined));
           return media?.url ? <InlineReference key={`${index}:${media.id}`} label={part} kind={kind} name={item.name || media.name} url={media.url}/> : part;
+        })}</p>;
         })}</div>
       </div>}
     {error && <p className="error" role="alert">{error}</p>}
