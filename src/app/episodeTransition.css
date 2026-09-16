@@ -4,7 +4,7 @@
   z-index: 10000;
   display: grid;
   place-items: center;
-  background: rgb(0 0 0 / 38%);
+  background: rgb(0 0 0 / 68%);
   cursor: progress;
 }
 .episode-transition.is-loading { animation: episode-veil-in 140ms ease-out both; }
