@@ -1,4 +1,4 @@
-import { RefreshCw } from "lucide-react";
+import { ChevronDown, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from 'react';
 import { motionCharacters, supportsMotionReference, videoGenerationMode, type MotionReference } from '../motionReference.ts';
 import { dialogueMode, dialogueModeLabels, voiceSampleRows } from '../dialogueMode.ts';
@@ -18,6 +18,7 @@ export function MotionReferenceEditor(props: Props) {
   const asset = props.assets.find(a => a.id === reference?.assetId);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState('');
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [preview, setPreview] = useState<Value | null>(null);
   const signature = JSON.stringify([props.shot, props.node?.data, props.document.videoDuration, props.document.videoReferenceMode, props.document.dialogueMode, props.document.filmBible, props.assets.map(a => [a.id,a.category])]);
   const currentSignature = useRef(signature);
@@ -50,10 +51,10 @@ export function MotionReferenceEditor(props: Props) {
     finally { setWorking(false); }
   }
   useEffect(() => {
-    if (props.busy) return;
+    if (props.busy || !previewOpen) return;
     const timer = window.setTimeout(() => { void compile(); }, 700);
     return () => window.clearTimeout(timer);
-  }, [signature, props.busy]);
+  }, [signature, props.busy, previewOpen]);
   const patch = (value: Partial<MotionReference>) => props.onPatch({ motionReference: { ...reference, ...value } });
   return <section className="motion-reference-editor" aria-label="镜头动作参考">
     <div className="motion-reference-actions">
@@ -87,7 +88,8 @@ export function MotionReferenceEditor(props: Props) {
       </div>
       <label>动作补充说明<textarea rows={2} value={reference.description || ''} onChange={e => patch({description:e.target.value})} placeholder="例如：参考转身、抬头的动作顺序，保持机器人没有手臂"/></label>
     </>}
-      <div className="motion-preview-heading"><h4>最终提交与参考清单</h4><button className="icon-button" type="button" title="刷新最终提交与参考清单" aria-label="刷新最终提交与参考清单" disabled={working || props.busy || (mode === 'multimodal' && !supported)} onClick={() => void compile()}><RefreshCw size={15} className={working ? 'spin' : ''}/></button>{working && <small role="status">正在更新…</small>}</div>
+      <div className="motion-preview-heading"><button type="button" className="motion-preview-toggle" aria-expanded={previewOpen} onClick={() => setPreviewOpen(value => !value)}><ChevronDown size={15} style={{transform: previewOpen ? undefined : "rotate(-90deg)"}}/><span>最终提交与参考清单</span></button><button className="icon-button" type="button" title="刷新最终提交与参考清单" aria-label="刷新最终提交与参考清单" disabled={working || props.busy || (mode === 'multimodal' && !supported)} onClick={() => { if (!previewOpen) setPreviewOpen(true); else void compile(); }}><RefreshCw size={15} className={working ? 'spin' : ''}/></button>{working && <small role="status">正在更新…</small>}</div>
+      {previewOpen && <>
       {!preview && !error && <p>{working ? "正在加载参考素材与提示词…" : "等待预览…"}</p>}
       {preview && <div className="motion-submission-preview">
         <div className="motion-preview-facts">
@@ -114,6 +116,7 @@ export function MotionReferenceEditor(props: Props) {
         })}</p>;
         })}</div>
       </div>}
+      </>}
     {error && <p className="error" role="alert">{error}</p>}
   </section>;
 }
