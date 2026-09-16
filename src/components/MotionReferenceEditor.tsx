@@ -1,7 +1,7 @@
 import { ChevronDown, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from 'react';
 import { motionCharacters, supportsMotionReference, videoGenerationMode, type MotionReference } from '../motionReference.ts';
-import { dialogueMode, dialogueModeLabels, voiceSampleRows } from '../dialogueMode.ts';
+import { dialogueMode, dialogueModeLabels } from '../dialogueMode.ts';
 
 type Value = Record<string, any>;
 type Props = {
@@ -74,8 +74,6 @@ export function MotionReferenceEditor(props: Props) {
 
     {dialogueMode(props.document,props.shot) === 'voice_sample' && <div>
       {mode !== 'multimodal' && (props.shot.dialogues || []).some((line:Value)=>String(line.text || '').trim()) && <div><p className="error">音色样本需要多模态参考。切换后，起止画面由严格约束变为构图参考。</p><button disabled={props.busy} onClick={()=>props.onPatch({videoReferenceMode:'multimodal'})}>确认改用多模态参考</button></div>}
-      {voiceSampleRows(props.document,props.shot,props.assets).map((row:Value)=><div key={row.cardId}><b>{row.name}</b> · {row.ready ? `已确认声音 V${row.profile.referenceVersion}` : '请到塑角造景确认角色声音参考'}{row.ready && <audio controls preload="none" src={row.asset.url} aria-label={`${row.name}声音参考试听`}/>}</div>)}
-      {!(props.shot.dialogues || []).some((line:Value)=>String(line.text || '').trim()) && <small>本镜无对白，不提交角色音色样本。</small>}
     </div>}
     {reference && <>
       {mode !== 'multimodal' && <div><p className="error">当前模式与动作视频不兼容。切换后起止画面约束将变为参考语义。</p><button onClick={()=>props.onPatch({videoReferenceMode:'multimodal'})}>确认改用多模态参考</button></div>}
