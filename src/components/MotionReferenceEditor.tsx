@@ -56,15 +56,13 @@ export function MotionReferenceEditor(props: Props) {
       {voiceSampleRows(props.document,props.shot,props.assets).map((row:Value)=><div key={row.cardId}><b>{row.name}</b> · {row.ready ? `已确认声音 V${row.profile.referenceVersion}` : '请到塑角造景确认角色声音参考'}{row.ready && <audio controls preload="none" src={row.asset.url} aria-label={`${row.name}声音参考试听`}/>}</div>)}
       {!(props.shot.dialogues || []).some((line:Value)=>String(line.text || '').trim()) && <small>本镜无对白，不提交角色音色样本。</small>}
     </div>}
-    <header><b>动作参考视频</b><small>可选 · 每镜 1 个完整 MP4</small></header>
-    <p>多模态中，分镜图作为起始构图参考，不保证严格首帧。动作素材原声会去除，固定对白照常保留。添加或移除动作参考不会改变生成模式。</p>
     <div className="motion-reference-actions">
-      <label>选择动作参考视频<select aria-label="动作参考视频" disabled={working || props.busy} value={reference?.assetId || ''} onChange={e => bind(e.target.value)}>
+      <label>从项目素材选择动作参考<select aria-label="动作参考视频" disabled={working || props.busy} value={reference?.assetId || ''} onChange={e => bind(e.target.value)}>
         <option value="">不使用动作参考</option>
         {reference && !asset && <option value={reference.assetId}>素材已丢失或删除</option>}
         {props.assets.filter(a => a.kind === 'video' && !a.metadata?.motionDerivedFrom).map(a => <option key={a.id} value={a.id}>{a.name} · {Number(a.metadata?.duration || 0).toFixed(2)} 秒</option>)}
       </select></label>
-      <label className="motion-upload">上传 MP4 并绑定本镜头<input aria-label="上传动作参考 MP4" type="file" accept=".mp4,video/mp4" disabled={working || props.busy} onChange={e => { void upload(e.target.files?.[0]); e.target.value = ''; }}/></label>
+      <label className="motion-upload">从电脑上传动作参考（MP4）<input aria-label="上传动作参考 MP4" type="file" accept=".mp4,video/mp4" disabled={working || props.busy} onChange={e => { void upload(e.target.files?.[0]); e.target.value = ''; }}/></label>
       {reference && <button disabled={working} onClick={() => bind('')}>移除绑定</button>}
     </div>
     {reference && <>
