@@ -292,6 +292,7 @@ class ProjectCreate(BaseModel):
     video_ratio:str=Field(default='16:9')
     video_duration:int=Field(default=-1)
     video_format:str=Field(default='mp4')
+    video_reference_mode:str=Field(default='multimodal')
     episode_count:int=Field(default=1,ge=1,le=500)
     platform:str=Field(default='通用短视频',min_length=1,max_length=100)
     brief:str|None=Field(default=None,max_length=24000)
@@ -328,6 +329,9 @@ def project_create_document(body:ProjectCreate):
     document['videoRatio']=body.video_ratio
     document['videoDuration']=body.video_duration
     document['videoFormat']=body.video_format
+    if body.video_reference_mode not in ('legacy','multimodal','first_frame','first_last_frame'):
+        raise ValueError('视频生成模式无效')
+    document['videoReferenceMode']=body.video_reference_mode
     if body.brief is not None:document['brief']=body.brief
     if body.generation_policy is not None:
         document['generationPolicy']=validate_generation_policy(
@@ -417,6 +421,8 @@ def save_project(pid:str,body:ProjectSave):
             **{key:projected_context[key] for key in SHARED_DOCUMENT_KEYS},
         }
         if old['revision']!=body.revision: raise HTTPException(409,'项目已在其他页面更新，请重新加载后编辑。')
+        from .motion_references import invalidate_motion_changes
+        document=invalidate_motion_changes(state['document'],document)
         from .adaptation import project_script_to_document
         episode_document=episode_document_from_document(
             project_script_to_document(c,pid,document)
@@ -990,7 +996,7 @@ def create_job_record(c,pid,body):
             if 'image_reference_sources' in body.input
             else len(body.input.get('asset_ids',[]))
         )
-        if body.kind=='video' and ark_video_reference_count>1:
+        if body.kind=='video' and ark_video_reference_count>1 and not body.input.get('motion_compiler'):
             raise ValueError('当前火山方舟视频最多接受一张首帧，请移除多余引用')
         if body.kind=='video' and body.input.get('end_asset_id') and ark_video_reference_count!=1:
             raise ValueError('使用火山方舟尾帧时必须同时指定一张首帧')
@@ -1031,6 +1037,31 @@ def create_job_record(c,pid,body):
         c.execute('INSERT INTO job_private VALUES(?,?)',(jid,s.dumps(selected)))
     return s.unpack(c.execute('SELECT * FROM jobs WHERE id=?',(jid,)).fetchone())
 
+@app.get('/api/projects/{pid}/motion-capabilities')
+def motion_capabilities(pid:str,provider_id:str,model:str):
+    project(pid)
+    from .motion_references import capability
+    provider=next((p for p in s.get_setting('providers',[]) if p.get('id')==provider_id),None)
+    return capability(provider,model)
+
+@app.get('/api/projects/{pid}/nodes/{node_id}/video-preview')
+def video_submission_preview(pid:str,node_id:str):
+    saved=project(pid)
+    with s.db() as c:
+        state=read_project_state(c,pid)
+    document=state['document']
+    node=next((n for n in document.get('nodes',[]) if n['id']==node_id),None)
+    if not node or node.get('data',{}).get('kind')!='video':
+        raise HTTPException(404,'视频节点不存在')
+    from .video_dialogue import compile_shot_video_input,bind_fixed_dialogue_audio
+    from .motion_references import compile_motion_input
+    data=compile_shot_video_input(document,node_id,'video',node['data'])
+    provider=next((p for p in s.get_setting('providers',[]) if p.get('id')==data.get('provider')),None)
+    if provider and provider.get('type') in ('volcengine_ark','runninghub'):
+        data=bind_fixed_dialogue_audio(document,node_id,'video',data,production_assets(saved['production_id'],kind='audio'))
+    data=compile_motion_input(document,node_id,'video',data,pid,provider)
+    return {key:data.get(key) for key in ('prompt','reference_manifest','motion_reference','motion_warnings','planned_shot_duration','shot_duration','motion_compiler','generation_mode')}
+
 @app.post('/api/projects/{pid}/jobs')
 def submit(pid:str,body:JobCreate):
     saved_project=project(pid)
@@ -1054,13 +1085,15 @@ def submit(pid:str,body:JobCreate):
             production_assets(saved_project['production_id'],kind='audio'),
             production_context=project_state['production_context'],
         )
+    from .motion_references import compile_motion_input
+    prepared_input=compile_motion_input(project_state['document'],body.node_id,body.kind,prepared_input,pid,selected_provider)
     if body.kind in ('text','storyboard') and prepared_input.get('target_duration') is None:
         prepared_input={**prepared_input,'target_duration':saved_project['document'].get('duration',15)}
     body=body.model_copy(update={'input':prepared_input})
     tracking = None
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
-        if body.input.get('reference_compiler'):
+        if body.input.get('reference_compiler') or body.input.get('motion_compiler'):
             current_revision=c.execute('''SELECT e.revision,p.revision production_revision
                 FROM projects e JOIN productions p ON p.id=e.production_id
                 WHERE e.id=?''',(pid,)).fetchone()
@@ -1751,6 +1784,7 @@ async def run_workflow(pid:str,request:Request):
     from .reference_compiler import compile_shot_image_input
     from .video_dialogue import bind_fixed_dialogue_audio, compile_shot_video_input
     from .visual_references import resolve_image_model_capabilities
+    from .motion_references import resolve_generation_mode
     available_audio_assets=production_assets(p['production_id'],kind='audio')
     capability_cache={}
     def cached_image_capabilities(provider,model_id):
@@ -1832,15 +1866,17 @@ async def run_workflow(pid:str,request:Request):
                 }
             from .providers.volcengine_ark import max_image_references
             reference_count=len(data['asset_ids'])+generated_image_parents
-            if kind=='video' and reference_count>1:
+            shot=next((shot for shot in p['document'].get('shots',[]) if (shot.get('videoNode') or (shot.get('pipeline') or {}).get('videoNodeId'))==node['id']),{})
+            multimodal=resolve_generation_mode(p['document'],shot,data)['requested']=='multimodal'
+            if kind=='video' and reference_count>1 and not multimodal:
                 raise ValueError('当前火山方舟视频最多接受一张首帧，请只保留一条图像连线或一张素材')
-            if kind=='video' and data.get('end_asset_id') and reference_count!=1:
+            if kind=='video' and data.get('end_asset_id') and reference_count!=1 and not multimodal:
                 raise ValueError('使用火山方舟尾帧时必须同时保留一张首帧')
             if kind=='image' and reference_count>max_image_references(provider):
                 raise ValueError(f'当前火山方舟图片模型最多支持 {max_image_references(provider)} 张参考图，请移除多余引用')
         if provider and provider.get('type')=='hc_atom':
             reference_count=len(data['asset_ids'])+generated_image_parents
-            if kind=='video' and reference_count>1:
+            if kind=='video' and reference_count>1 and not (p['document'].get('videoReferenceMode')=='multimodal' or any((shot.get('videoNode') or (shot.get('pipeline') or {}).get('videoNodeId'))==node['id'] and shot.get('videoReferenceMode')=='multimodal' for shot in p['document'].get('shots',[]))):
                 raise ValueError('幻场 AI 通用视频接口最多提交一张参考图')
             if kind=='video' and data.get('end_asset_id'):
                 raise ValueError('幻场 AI 通用视频接口暂未声明尾帧协议，请清除尾帧')
@@ -1875,11 +1911,17 @@ async def run_workflow(pid:str,request:Request):
             data['target_duration']=data.get('target_duration') or p['document'].get('duration',15)
         if kind=='storyboard':
             data['film_bible']=data.get('film_bible') is not False
+        from .motion_references import compile_motion_input
+        data=compile_motion_input(project_state['document'],node['id'],kind,data,pid,provider)
+        if data.get('motion_compiler'):
+            if generated_image_parents:
+                raise ValueError('动作参考任务需要已完成的视觉参考；请先生成上游图片，再提交视频')
+            reference_sources=data['image_reference_sources']
         prepared.append((node,parents,data,reference_sources))
     jobs_by_node={};created=[]
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
-        if any(data.get('reference_compiler') for _,_,data,_ in prepared):
+        if any(data.get('reference_compiler') or data.get('motion_compiler') for _,_,data,_ in prepared):
             current_revision=c.execute('''SELECT e.revision,p.revision production_revision
                 FROM projects e JOIN productions p ON p.id=e.production_id
                 WHERE e.id=?''',(pid,)).fetchone()

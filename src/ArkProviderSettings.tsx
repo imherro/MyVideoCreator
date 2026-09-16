@@ -128,6 +128,7 @@ export function ArkProviderSettings({
       {modelField("text")}
       {modelField("image")}
       {modelField("video")}
+      {provider.type === 'volcengine_ark' && <label>动作视频下载地址（安影公网地址）<input type="url" placeholder="https://vc.goroc.com" value={provider.public_base_url || ''} onChange={event=>onPatch({public_base_url:event.target.value})}/><small>仅动作视频需要；使用限时签名供方舟下载，不会发送登录凭据。纯局域网可使用 RunningHub 文件上传。</small></label>}
       <label>
         图片模型参考图上限
         <input

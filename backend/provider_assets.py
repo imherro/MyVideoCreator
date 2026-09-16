@@ -44,7 +44,7 @@ def public_asset_url(provider: dict, asset_id: str, ttl: int = DEFAULT_TTL) -> s
     ).strip().rstrip('/')
     parsed = urlparse(base)
     if parsed.scheme not in ('http', 'https') or not parsed.netloc or parsed.username:
-        raise ValueError('请在幻场 AI 设置中填写安影的公网访问地址，例如 https://vc.goroc.com')
+        raise ValueError('该供应商需下载参考素材，请在供应商设置中填写安影的公网访问地址，例如 https://vc.goroc.com；仅局域网部署可选择支持文件上传的 RunningHub')
     expires = int(time.time()) + max(60, min(int(ttl), DEFAULT_TTL))
     token = signature(asset_id, expires)
     return f'{base}/api/provider-assets/{quote(asset_id, safe="")}?expires={expires}&signature={token}'

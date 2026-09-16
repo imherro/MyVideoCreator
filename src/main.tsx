@@ -133,6 +133,8 @@ import type { VoiceProfile } from "./filmBible/types";
 import { acceptVoiceResult, saveVoiceProfile, setVoiceLocked, voiceProfilesOf } from "./filmBible/voices";
 import { catalogVoice, CUSTOM_VOICE_ID, DOUBAO_TTS2_VOICES } from "./filmBible/voiceCatalog";
 import { StoryboardWorkspace } from "./pages/StoryboardWorkspace";
+import { MotionReferenceEditor } from "./components/MotionReferenceEditor";
+import { videoGenerationMode } from "./motionReference";
 import { VideoProductionWorkspace } from "./pages/VideoProductionWorkspace";
 import { activeTaskCount, mergeTaskSnapshots } from "./taskCenter";
 import { TaskCenter } from "./pages/TaskCenter";
@@ -246,6 +248,7 @@ type Doc = {
   ratio: string;
   duration: number;
   videoResolution: string;
+  videoReferenceMode?: string;
   videoRatio?: string;
   videoDuration?: number;
   videoFormat?: string;
@@ -1245,7 +1248,10 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   }, [project?.id, update, config.providers, system.models]);
   const node = doc?.nodes.find((n) => n.id === selected);
   const data = (node?.data || {}) as Any;
+  const selectedVideoShot = doc?.shots.find(s => (s.videoNode || s.pipeline?.videoNodeId) === node?.id);
+  const selectedVideoMode = videoGenerationMode(doc || {}, selectedVideoShot || {});
   function pendingInitialStateChecks(targetId: string) {
+    if (videoGenerationMode(doc || {}, doc?.shots.find(s => (s.videoNode || s.pipeline?.videoNodeId) === targetId) || {}) === "multimodal") return [];
     return (doc?.edges || [])
       .filter((edge) => edge.target === targetId)
       .map((edge) => doc?.nodes.find((item) => item.id === edge.source))
@@ -1274,20 +1280,11 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     if (!selected) return;
     if (data.canonicalScriptProjection)
       patch = { ...patch, generationPolicyInherited: false };
-    const provider = patch.provider
-      ? config.providers.find((item: Any) => item.id === patch.provider)
-      : undefined;
-    // A tail frame is not supported by the native Hailuo path. Clear a stale
-    // setting immediately when the user switches services, rather than fail
-    // only after a cloud submission has been attempted.
-    update((d) =>
-      patchNode(
-        d,
-        selected,
-        provider?.type === "minimax" ? { ...patch, end_asset_id: "" } : patch,
-      ),
-    );
+    // Preserve references on provider changes; incompatible combinations are
+    // rejected before submission instead of silently removing selected media.
+    update((d) => patchNode(d, selected, patch));
   }
+
   function newNode(
     kind: string,
     prompt = "",
@@ -1826,7 +1823,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     const targets = validateVideoSubmission(rows, shotUids);
     let extendedCount = 0;
     for (const target of targets) {
-      if (target.effectiveDuration > target.plannedDuration) {
+      if (target.effectiveDuration > target.plannedDuration && videoGenerationMode(prepared, target.shot) === 'legacy') {
         prepared = updateShot(prepared, target.shot.id, { duration: target.effectiveDuration }) as Doc;
         extendedCount += 1;
       }
@@ -1860,6 +1857,21 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     } finally {
       setBusy(false);
     }
+  }
+  async function uploadMotionReference(file: File) {
+    const projectId = current.current.project?.id;
+    if (!projectId) throw new Error('请先选择项目');
+    const form = new FormData(); form.append('file', file);
+    const asset = await api(`/projects/${projectId}/assets?category=reference`, {method:'POST',body:form});
+    if (current.current.project?.id !== projectId) throw new Error('项目已切换，素材已上传至原项目，请在原项目绑定');
+    setAssets(previous => [asset, ...previous.filter(item => item.id !== asset.id)]);
+    return asset;
+  }
+  async function previewVideoSubmission(nodeId: string) {
+    const projectId = current.current.project?.id;
+    await save();
+    if (dirty.current || current.current.project?.id !== projectId) throw new Error('请先保存当前镜头再预览');
+    return api(`/projects/${projectId}/nodes/${encodeURIComponent(nodeId)}/video-preview`);
   }
   async function uploadFiles(files: FileList | null, category = uploadCategory) {
     if (!files || !project) return;
@@ -2871,6 +2883,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             }}
             onOpenEditor={() => activateWorkflowStage("editor")}
             onPreview={setPreview}
+            onUploadMotion={uploadMotionReference}
+            onCompileVideo={previewVideoSubmission}
           />
         ) : view === "editor" ? (
           <Suspense fallback={<div className="loading">加载剪辑工作区…</div>}>
@@ -3421,7 +3435,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               request={api}
               onChange={changeModel}
             />
-            {data.kind === "video" &&
+            {data.kind === "video" && selectedVideoShot && <MotionReferenceEditor shot={selectedVideoShot} document={doc} assets={assets} provider={config.providers.find((p:Any)=>p.id===data.provider)} node={node} busy={busy} onPatch={patch=>update(document=>updateStoryboardShot(document,shotIdentity(selectedVideoShot),patch))} onUpload={uploadMotionReference} onCompile={()=>previewVideoSubmission(node.id)}/>}
+            {data.kind === "video" && selectedVideoMode === "multimodal" && <p className="muted">多模态参考：关联分镜图作为起始构图参考，角色、场景、道具按绑定追加，不是严格首帧。</p>}
+            {data.kind === "video" && selectedVideoMode !== "multimodal" &&
               ["minimax", "volcengine_ark"].includes(
                 config.providers.find((p: Any) => p.id === data.provider)
                   ?.type,
@@ -3463,14 +3479,14 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   </label>
                 );
               })()}
-            {data.kind === "video" &&
+            {data.kind === "video" && (selectedVideoMode === "first_last_frame" || selectedVideoMode === "legacy" || data.end_asset_id) &&
               config.providers.find((p: Any) => p.id === data.provider)
                 ?.type && ["volcengine_ark", "runninghub"].includes(config.providers.find((p: Any) => p.id === data.provider)?.type) && (
                 <label>
-                  尾帧（可选，首尾帧视频）
+                  {selectedVideoMode === "multimodal" ? "结束构图参考（非硬尾帧）" : "尾帧（可选，首尾帧视频）"}
                   <select
                     value={data.end_asset_id || ""}
-                    disabled={sourceAssets(node.id).length !== 1}
+                    disabled={selectedVideoMode !== "multimodal" && sourceAssets(node.id).length !== 1}
                     onChange={(e) =>
                       editNode({ end_asset_id: e.target.value })
                     }
@@ -3485,7 +3501,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                       ))}
                   </select>
                   <small>
-                    先保留一张首帧，再选择同宽高比的尾帧；模型会生成两帧之间的连续运动。
+                    {selectedVideoMode === "multimodal" ? "作为结束构图的普通参考，不锁定最后一帧。" : "先保留一张首帧，再选择同宽高比的尾帧；模型会生成两帧之间的连续运动。"}
                   </small>
                 </label>
               )}
@@ -3527,9 +3543,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                       />
                     </label>
                   </div>
-                  {data.kind === "video" && (
+                  {data.kind === "video" && (selectedVideoMode === "first_last_frame" || selectedVideoMode === "legacy" || data.end_asset_id) && (
                     <label>
-                      尾帧（可选，仅适用模型）
+                      {selectedVideoMode === "multimodal" ? "结束构图参考（非硬尾帧）" : "尾帧（可选，仅适用模型）"}
                       <select
                         value={data.end_asset_id || ""}
                         onChange={(e) =>
@@ -3968,6 +3984,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   <div className="two-fields">
                     <label>图像画幅<select value={doc.ratio} onChange={(event)=>{update((document)=>applyRatioChange(document,event.target.value));setNotice("画幅已修改；已有分镜图和视频保留并标记为待更新");}}><option>21:9</option><option>16:9</option><option>4:3</option><option>1:1</option><option>3:4</option><option>9:16</option></select><small>资产图与分镜图按该比例生成。</small></label>
                     <label>目标时长（秒）<input type="number" min="5" max="3000" value={doc.duration} onChange={(event)=>update((document)=>applyTargetDuration(document,Number(event.target.value)))}/><small>策划目标，不会裁剪已有镜头或成片。</small></label>
+                    <label>默认视频生成模式<select value={doc.videoReferenceMode || 'legacy'} onChange={event=>update(document=>applyVideoOutputSetting(document,{videoReferenceMode:event.target.value}))}><option value="multimodal">多模态参考（默认）</option><option value="first_frame">严格首帧（高级）</option><option value="first_last_frame">严格首尾帧（高级）</option>{(!doc.videoReferenceMode || doc.videoReferenceMode === 'legacy') && <option value="legacy">兼容历史模式（保持原有行为）</option>}</select><small>影响继承项目设置的镜头。模式修改后旧视频保留并标记需更新，历史任务不变。</small></label>
                     <label>视频分辨率<select value={doc.videoResolution || "720p"} onChange={(event)=>{update((document)=>applyVideoResolution(document,event.target.value));setNotice("视频分辨率已修改；已有视频保留并标记为待更新");}}>{VIDEO_RESOLUTIONS.map((value)=><option key={value} value={value}>{value === "1080p" ? "1080p（10bit 位深）" : `${value}（8bit 位深）`}</option>)}</select><small>所有新视频任务继承该设置。</small></label>
                     <label>视频宽高比<select value={doc.videoRatio || doc.ratio || "16:9"} onChange={(event)=>update((document)=>applyVideoOutputSetting(document,{videoRatio:event.target.value}))}>{VIDEO_RATIOS.map((value)=><option key={value}>{value}</option>)}</select><small>首帧模型可选择 adaptive。</small></label>
                     <label>视频输出时长<select value={doc.videoDuration ?? -1} onChange={(event)=>update((document)=>applyVideoOutputSetting(document,{videoDuration:Number(event.target.value)}))}><option value={-1}>-1（按分镜和对白自动）</option>{Array.from({length:27},(_,index)=>index+4).map((value)=><option key={value} value={value}>{value} 秒</option>)}</select><small>默认使用分镜时长；对白更长时自动延长。</small></label>

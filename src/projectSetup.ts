@@ -24,6 +24,7 @@ export type ProjectSetupDraft = {
   videoRatio: "21:9" | "16:9" | "4:3" | "1:1" | "3:4" | "9:16" | "adaptive";
   videoDuration: number;
   videoFormat: "mp4" | "mov";
+  videoReferenceMode: "multimodal" | "first_frame" | "first_last_frame";
   episodeCount: number;
   platform: string;
   brief: string;
@@ -69,6 +70,7 @@ export function defaultProjectSetupDraft(providers: Value[], _localModels: Value
     videoRatio: "16:9",
     videoDuration: -1,
     videoFormat: "mp4",
+    videoReferenceMode: "multimodal",
     episodeCount: 1,
     platform: "通用短视频",
     brief: "",
@@ -122,6 +124,7 @@ export function projectSetupPayload(draft: ProjectSetupDraft) {
     video_ratio: draft.videoRatio,
     video_duration: draft.videoDuration,
     video_format: draft.videoFormat,
+    video_reference_mode: draft.videoReferenceMode,
     episode_count: draft.episodeCount,
     platform: draft.platform,
     brief: draft.brief,
@@ -203,9 +206,12 @@ export function applyVideoResolution<T extends Value & { nodes: any[]; edges: an
 
 export function applyVideoOutputSetting<T extends Value & { nodes: any[]; edges: any[]; shots: any[] }>(
   document: T,
-  patch: { videoRatio?: string; videoDuration?: number; videoFormat?: string },
+  patch: { videoRatio?: string; videoDuration?: number; videoFormat?: string; videoReferenceMode?: string },
 ): T {
   if (Object.entries(patch).every(([key, value]) => document[key] === value)) return document;
-  const videoNodes = (document.nodes || []).filter((node) => node.data?.kind === "video").map((node) => node.id);
+  const videoNodes = (document.nodes || []).filter((node) => node.data?.kind === "video" && (
+    !patch.videoReferenceMode || Object.keys(patch).length > 1 ||
+    !document.shots.find(shot => (shot.videoNode || shot.pipeline?.videoNodeId) === node.id)?.videoReferenceMode
+  )).map((node) => node.id);
   return invalidate({ ...document, ...patch }, videoNodes) as unknown as T;
 }

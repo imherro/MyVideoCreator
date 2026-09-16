@@ -401,7 +401,8 @@ def _dialogue_reference_prompt(prompt, image_count=0):
 
 
 def generate_video(worker, job, provider):
-    if len(job['input'].get('asset_ids',[]))>1:
+    motion = (job['input'].get('generation_mode') or {}).get('requested') == 'multimodal'
+    if len(job['input'].get('asset_ids',[]))>1 and not motion:
         raise ValueError('当前火山方舟视频最多接受一张首帧，请移除多余引用')
     if job['input'].get('end_asset_id') and len(job['input'].get('asset_ids',[]))!=1:
         raise ValueError('使用火山方舟尾帧时必须同时指定一张首帧')
@@ -422,7 +423,16 @@ def generate_video(worker, job, provider):
         if not remote:
             assets=common.assets_for(job)
             content=[{'type': 'text', 'text': job['input']['prompt']}]
-            if assets:
+            if motion:
+                from ..motion_references import silent_motion_asset
+                from ..provider_assets import public_asset_url
+                for asset in assets:
+                    content.append({'type':'image_url','image_url':{'url':seedance_frame(asset)['url']},'role':'reference_image'})
+                if job['input'].get('motion_reference'):
+                    worker.progress(job, '准备静音动作参考视频')
+                    reference = silent_motion_asset(job)
+                    content.append({'type':'video_url','video_url':{'url':public_asset_url(provider,reference['id'])},'role':'reference_video'})
+            elif assets:
                 first=seedance_frame(assets[0])
                 content.append({
                     'type':'image_url',
@@ -452,7 +462,7 @@ def generate_video(worker, job, provider):
             )
             if dialogue_reference:
                 worker.progress(job, '编排固定对白音频参考')
-                prompt = _dialogue_reference_prompt(
+                prompt = prompt if motion else _dialogue_reference_prompt(
                     prompt, sum(item.get('role') == 'reference_image' for item in content),
                 )
                 content.append({
@@ -469,11 +479,11 @@ def generate_video(worker, job, provider):
                     False if job['input'].get('dialogue_audio') else bool(params.get('generate_audio', True))
                 ),
             }
-            if dialogue_reference:
+            if (dialogue_reference or motion) and (not motion or selected_model.startswith('doubao-seedance-2-5')):
                 body['omni_reference_task_type'] = 'reference'
             # Seedance derives image-to-video output ratio from the first frame
             # and rejects an explicit ratio for first-frame/first-last-frame jobs.
-            if not assets or dialogue_reference:
+            if not assets or dialogue_reference or motion:
                 body['ratio'] = str(job['input'].get('ratio') or params.get('ratio') or '16:9')
             if worker.cancelled(job):
                 raise InterruptedError()

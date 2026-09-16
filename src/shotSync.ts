@@ -27,6 +27,9 @@ export function updateShot<T extends {shots:Value[];nodes:Node[];edges:Edge[]}>(
   next={...next,shots:next.shots.map(s=>s.id===id?{...s,prompts_need_review:true}:s)};
  }
  const audioChanged='audio' in patch&&patch.audio!==shot.audio;
+ if(['motionReference','videoReferenceMode'].some(field=>field in patch&&JSON.stringify(patch[field])!==JSON.stringify(shot[field]))){
+  next=invalidate(next,[videoNodeId].filter(Boolean));
+ }
  if(audioChanged){
   next=invalidate(next,[videoNodeId].filter(Boolean));
   next={...next,shots:next.shots.map(s=>s.id===id?{...s,prompts_need_review:true}:s)};

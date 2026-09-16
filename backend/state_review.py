@@ -34,6 +34,10 @@ def unreviewed_image_sources(document, video_node_id, include_pending=False):
 
 
 def require_video_source_reviews(document, video_node_id, include_pending=False):
+    shot = next((shot for shot in document.get('shots', [])
+                 if (shot.get('videoNode') or (shot.get('pipeline') or {}).get('videoNodeId')) == video_node_id), {})
+    if (shot.get('videoReferenceMode') or document.get('videoReferenceMode')) == 'multimodal':
+        return
     sources = unreviewed_image_sources(document, video_node_id, include_pending)
     if sources:
         raise ValueError("请先在关联分镜图中确认首帧状态，再生成视频：" + "、".join(sources))

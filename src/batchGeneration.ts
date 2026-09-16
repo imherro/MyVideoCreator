@@ -1,3 +1,4 @@
+import { videoGenerationMode, supportsMotionReference } from "./motionReference.ts";
 import { requiresInitialStateReview } from "./graph.ts";
 import {
   isStateCard,
@@ -183,15 +184,22 @@ function planShotNodes(
       continue;
     }
     if (kind === "shot_videos") {
+      const mode = videoGenerationMode(document,shot);
+      if (mode === 'multimodal' && !supportsMotionReference(provider,String(node.data.model || ''))) {
+        result.blocked.push({id:node.id,label,reason:'当前适配器尚不支持所选多模态模式'}); continue;
+      }
+      if (shot.motionReference && mode !== 'multimodal') {
+        result.blocked.push({id:node.id,label,reason:'动作参考需确认切换为多模态'}); continue;
+      }
       const imageId = shot.imageNode || shot.pipeline?.imageNodeId;
       const image = imageId ? nodes.get(imageId) : undefined;
-      if (!image?.data.assetId || image.data.stale) {
+      if ((!image?.data.assetId && mode !== "multimodal") || image?.data.stale) {
         result.blocked.push({ id: node.id, label, reason: "对应分镜图尚未生成或已经过期" });
         continue;
       }
       if (
-        requiresInitialStateReview(image.data.prompt) &&
-        !image.data.state_reviewed
+        mode !== "multimodal" && requiresInitialStateReview(image?.data.prompt) &&
+        !image?.data.state_reviewed
       ) {
         result.blocked.push({ id: node.id, label, reason: "对应分镜图尚未核验首帧状态" });
         continue;

@@ -26,11 +26,11 @@ def probe(path):
             data=json.loads(result.stdout);video=next((x for x in data.get('streams',[]) if x.get('codec_type')=='video'),{})
             parts=video.get('avg_frame_rate','0/1').split('/')
             fps=float(parts[0])/float(parts[1]) if len(parts)==2 and float(parts[1]) else 0
-            return {'duration':float(data.get('format',{}).get('duration',0)),'width':video.get('width'),'height':video.get('height'),'fps':fps,'has_audio':any(x.get('codec_type')=='audio' for x in data.get('streams',[]))}
+            return {'duration':float(data.get('format',{}).get('duration',0)),'width':video.get('width'),'height':video.get('height'),'fps':fps,'video_codec':video.get('codec_name'),'container':data.get('format',{}).get('format_name'),'has_audio':any(x.get('codec_type')=='audio' for x in data.get('streams',[]))}
     result=subprocess.run([executable,'-hide_banner','-i',str(path)],capture_output=True,timeout=30,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
     text=result.stderr.decode('utf-8',errors='replace')
     duration=re.search(r'Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)',text)
     video=next((line for line in text.splitlines() if 'Video:' in line),'')
     size=re.search(r'\b(\d{2,5})x(\d{2,5})\b',video);fps=re.search(r'([\d.]+) fps',video)
     if not duration: raise ValueError('无法读取素材时长，请检查媒体文件是否完整')
-    return {'duration':int(duration[1])*3600+int(duration[2])*60+float(duration[3]),'width':int(size[1]) if size else None,'height':int(size[2]) if size else None,'fps':float(fps[1]) if fps else None,'has_audio':'Audio:' in text}
+    return {'duration':int(duration[1])*3600+int(duration[2])*60+float(duration[3]),'width':int(size[1]) if size else None,'height':int(size[2]) if size else None,'fps':float(fps[1]) if fps else None,'video_codec':(re.search(r'Video:\s*(\w+)',video).group(1) if re.search(r'Video:\s*(\w+)',video) else None),'has_audio':'Audio:' in text}

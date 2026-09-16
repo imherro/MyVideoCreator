@@ -25,7 +25,7 @@ def authenticated(client):
     return client
 
 def project(c):
-    response=c.post('/api/projects',json={'name':'测试短片'})
+    response=c.post('/api/projects',json={'name':'测试短片','video_reference_mode':'legacy'})
     assert response.status_code==200,response.text
     return response.json()
 
@@ -235,7 +235,7 @@ def test_film_bible_and_shot_bindings_round_trip_through_project_document(authen
       'provenance':{'jobId':'job-reference','providerId':'ark','modelId':'seedream-custom','targetSource':'override'},
     }]
     visual['versions'][version_id]['provenance']={'lockedAt':124}
-    doc['shots']=[{'id':'shot-001','uid':'shot-stable-1','order':1,'assetBindings':{
+    doc['shots']=[{'id':'shot-001','uid':'shot-stable-1','order':1,'videoReferenceMode':'multimodal','assetBindings':{
       'characters':[{'role':'林岚','versionId':version_id}],'scene':None,'props':[]},'pipeline':{}}]
     saved=c.put('/api/projects/'+p['id'],json={'name':p['name'],'revision':p['revision'],'document':doc})
     assert saved.status_code==200,saved.text

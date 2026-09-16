@@ -93,7 +93,7 @@ export function acceptResult<T extends Graph>(graph:T,job:ResultJob,jobs:ResultJ
   }
   const next=invalidate(graph,[job.node_id],expectedNodes);
   const compiledPrompt=Boolean(
-    job.input.reference_compiler||job.input.shot_video_projection||job.input.dialogue_projection
+    job.input.reference_compiler||job.input.shot_video_projection||job.input.dialogue_projection||job.input.motion_compiler
   );
   return {...next,nodes:next.nodes.map(node=>node.id!==job.node_id?node:{...node,data:{...node.data,
     text:job.result.text||node.data.text,assetId:job.result.assets?.[0]?.id||node.data.assetId,resultJob:job.id,
@@ -114,7 +114,7 @@ export function reconcileCompiledVideoResults<T extends Graph>(graph:T,jobs:Resu
     // planned_shot_duration repairs results submitted before
     // shot_video_projection was introduced; those jobs already contain the
     // canonical duration marker and are safe when revision and asset match.
-    const compiled=job?.input?.shot_video_projection||job?.input?.dialogue_projection||
+    const compiled=job?.input?.shot_video_projection||job?.input?.dialogue_projection||job?.input?.motion_compiler||
       job?.input?.planned_shot_duration!=null;
     const sameTake=job?.status==='succeeded'&&compiled&&
       job.result?.assets?.[0]?.id===node.data.assetId&&

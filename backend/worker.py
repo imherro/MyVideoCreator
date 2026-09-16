@@ -125,7 +125,7 @@ class Worker:
         s.job_update(job['id'],phase=phase,progress=percent)
     def execute(self,job):
         inp=dict(job['input']); kind=job['kind']
-        if kind=='video':
+        if kind=='video' and not inp.get('motion_compiler') and not job.get('provider_job_id'):
             from .state_review import require_video_source_reviews
             with s.db() as c:
                 saved=c.execute('SELECT document FROM projects WHERE id=?',(job['project_id'],)).fetchone()
@@ -155,7 +155,7 @@ class Worker:
                     )
                 else:
                     raise ValueError('批次图像参考来源已损坏，请重新运行画布')
-        if upstream_text and not inp.get('reference_compiler'):
+        if upstream_text and not inp.get('reference_compiler') and not inp.get('motion_compiler'):
             inp['prompt']=inp['prompt']+'\n\n上游创作内容：\n'+'\n\n'.join(upstream_text)
         inp['asset_ids']=(
             asset_ids

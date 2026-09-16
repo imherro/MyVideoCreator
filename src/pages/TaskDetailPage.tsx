@@ -120,6 +120,7 @@ export function TaskDetailPage({ jobId, request }: { jobId: string; request: (pa
           <h3>User Prompt</h3><pre className="debug-block">{job.input?.prompt || "未记录"}</pre>
           <h3>Output Schema · {job.input?.schema_version || "无版本"}</h3><pre className="debug-block">{job.input?.response_schema ? JSON.stringify(job.input.response_schema, null, 2) : "此任务没有结构化输出 Schema"}</pre>
         </>}
+        {job.input?.generation_mode && <><h3>视频生成模式</h3><p>用户选择：{job.input.generation_mode.requested}（{job.input.generation_mode.source === 'shot' ? '镜头覆盖' : '项目默认'}） · 实际提交：{job.input.generation_mode.actual}</p><h4>实际提交参考素材</h4><ul>{(job.input.reference_manifest || []).map((item:Value)=><li key={`${item.kind}:${item.index}`}>{item.kind} {item.index} · {item.name} · {item.purpose || (item.audio === 'stripped' ? '动作参考，已去除原声' : '参考')}{item.duration ? ` · ${item.duration} 秒` : ''}</li>)}</ul>{(job.input.motion_warnings || []).map((warning:string)=><p key={warning}>{warning}</p>)}</>}
         <h3>请求参数</h3><pre className="debug-block">{JSON.stringify(parameters, null, 2)}</pre>
       </section>
       <section className="task-detail-card">

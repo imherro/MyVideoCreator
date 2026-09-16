@@ -223,6 +223,8 @@ def generate_image(worker, job, provider):
     with httpx.Client(timeout=120, headers=_headers(provider, False), trust_env=True) as client:
         remote = job.get('provider_job_id')
         if not remote:
+            if worker.cancelled(job):
+                raise InterruptedError()
             body = {
                 'prompt': job['input']['prompt'], 'width': width, 'height': height,
                 'resolution': str(params.get('resolution') or '2k'),
@@ -232,6 +234,8 @@ def generate_image(worker, job, provider):
             if refs:
                 endpoint = '/openapi/v2/seedream-v5-pro/image-to-image'
                 body['imageUrls'] = [_upload(client, root, asset) for asset in refs]
+            if worker.cancelled(job):
+                raise InterruptedError()
             value = common.checked(client.post(root + endpoint, json=body))
             remote = value.get('taskId')
             if not remote:
@@ -241,6 +245,10 @@ def generate_image(worker, job, provider):
 
 
 def generate_video(worker, job, provider):
+    if job.get('provider_job_id'):
+        # A durable remote task no longer depends on local reference files.
+        with httpx.Client(timeout=120, headers=_headers(provider, False), trust_env=True) as client:
+            return _wait_task(worker, job, client, _root(provider), job['provider_job_id'], 'video')
     model = str(job['input'].get('model') or model_for(provider, 'video')).strip()
     if model not in (DEFAULT_VIDEO_MODEL, 'bytedance/seedance-2.5-global-token'):
         raise ValueError('当前 RunningHub 视频适配器仅支持 Seedance 2.5 Token 配置')
@@ -268,7 +276,33 @@ def generate_video(worker, job, provider):
         remote = job.get('provider_job_id')
         if not remote:
             dialogue_reference = bool(job['input'].get('dialogue_audio'))
-            if dialogue_reference:
+            if worker.cancelled(job):
+                raise InterruptedError()
+            if (job['input'].get('generation_mode') or {}).get('requested') == 'multimodal':
+                from ..motion_references import silent_motion_asset
+                from .volcengine_ark import _dialogue_reference_audio
+                if tail:
+                    raise ValueError('动作参考不能与首尾帧模式混用')
+                worker.progress(job, '准备多模态参考素材')
+                endpoint = f'/openapi/v2/bytedance/{global_segment}/multimodal-video'
+                body = {**base,
+                        'imageUrls': [_upload(client, root, asset) for asset in refs],
+                        'ratio': str(job['input'].get('ratio') or params.get('ratio') or 'adaptive'),
+                        'realPersonMode': True, 'conversionSlots': ['all'], 'omniReferenceTaskType': 'reference'}
+                if job['input'].get('motion_reference'):
+                    body['videoUrls'] = [_upload(client, root, silent_motion_asset(job))]
+                if dialogue_reference:
+                    # This endpoint documents URI media inputs. Upload the
+                    # compiled dialogue track just like the other local media.
+                    import base64
+                    track = s.ASSETS / (s.uid('motion-dialogue-') + '.mp3')
+                    try:
+                        track.write_bytes(base64.b64decode(_dialogue_reference_audio(job, duration).split(',', 1)[1]))
+                        body['audioUrls'] = [_upload(client, root, {'path': track.name, 'mime': 'audio/mpeg'})]
+                    finally:
+                        track.unlink(missing_ok=True)
+                    body['generateAudio'] = True
+            elif dialogue_reference:
                 from .volcengine_ark import _dialogue_reference_audio, _dialogue_reference_prompt
                 worker.progress(job, '编排固定对白音频参考')
                 endpoint = f'/openapi/v2/bytedance/{global_segment}/multimodal-video'
@@ -294,6 +328,8 @@ def generate_video(worker, job, provider):
             else:
                 endpoint = f'/openapi/v2/bytedance/{global_segment}/multimodal-video'
                 body = {**base, 'imageUrls': [_upload(client, root, asset) for asset in refs], 'ratio': str(params.get('ratio') or job['input'].get('ratio') or 'adaptive'), 'realPersonMode': True, 'conversionSlots': ['all'], 'omniReferenceTaskType': 'auto'}
+            if worker.cancelled(job):
+                raise InterruptedError()
             value = common.checked(client.post(root + endpoint, json=body))
             remote = value.get('taskId')
             if not remote:

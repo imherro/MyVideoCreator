@@ -1,5 +1,6 @@
 import { requiresInitialStateReview } from "./graph.ts";
 import { shotIdentity } from "./storyboard.ts";
+import { supportsMotionReference, videoGenerationMode } from "./motionReference.ts";
 
 type Value = Record<string, any>;
 
@@ -105,15 +106,23 @@ export function deriveVideoProductionRows(
       false
     );
     let readinessReason = "";
+    const motion = Boolean(shot.motionReference);
+    const mode = videoGenerationMode(document, shot);
     if (!videoNode) readinessReason = "视频生成节点不存在";
-    else if (!firstFrame) readinessReason = "缺少已生成的首帧";
+    else if (mode === 'multimodal' && !supportsMotionReference(provider, String(videoNode.data?.model || ''))) readinessReason = "当前供应商/模型适配器尚不支持多模态参考";
+    else if (motion && (!assetMap.has(shot.motionReference.assetId) || assetMap.get(shot.motionReference.assetId)?.kind !== 'video')) readinessReason = "动作参考视频已丢失";
+    else if (motion && mode !== 'multimodal') readinessReason = "动作视频与当前模式不兼容，请确认改用多模态参考";
+    else if (mode === 'first_frame' && videoNode.data?.end_asset_id) readinessReason = "单首帧模式不能提交尾帧";
+    else if (mode === 'first_last_frame' && !endFrame) readinessReason = "首尾帧模式缺少尾帧";
+    else if (['first_frame','first_last_frame'].includes(mode) && dialogueAudioAssets.length) readinessReason = "固定对白音频需使用多模态参考";
+    else if (!firstFrame && mode !== 'multimodal') readinessReason = "缺少已生成的首帧";
     else if (imageNode?.data?.stale) readinessReason = "首帧已经过期，请先重新生成并核验";
-    else if (requiresInitialStateReview(imageNode?.data?.prompt) && !imageNode?.data?.state_reviewed)
+    else if (mode !== 'multimodal' && requiresInitialStateReview(imageNode?.data?.prompt) && !imageNode?.data?.state_reviewed)
       readinessReason = "首帧包含关键初始状态，尚未人工核验";
     else if (!String(videoNode.data?.prompt || "").trim()) readinessReason = "Video Prompt 为空";
     else if (!provider || videoNode.data?.provider === "local") readinessReason = "尚未选择可用的视频 Provider";
     else if (!String(videoNode.data?.model || "").trim()) readinessReason = "尚未选择视频模型";
-    else if (videoNode.data?.end_asset_id && !endFrameSupported) readinessReason = "当前模型不支持尾帧";
+    else if (mode !== 'multimodal' && videoNode.data?.end_asset_id && !endFrameSupported) readinessReason = "当前模型不支持尾帧";
     else if (dialogueReadinessReason) readinessReason = dialogueReadinessReason;
 
     let status: VideoProductionStatus;
