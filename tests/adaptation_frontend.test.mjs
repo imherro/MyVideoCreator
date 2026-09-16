@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {appendEpisodeForChapter,createEpisodePlans,normalizeEpisodeSelection,splitList} from '../src/adaptation.ts';
+import {appendEpisodeForChapter,createEpisodePlans,normalizeEpisodeSelection,resolvePlanningEpisode,splitList} from '../src/adaptation.ts';
 
 test('episode planner creates sixty stable plans and preserves existing edits',()=>{
   const plans=createEpisodePlans(60,60);
@@ -26,4 +26,21 @@ test('an unassigned source chapter can create the next episode plan',()=>{
 
 test('production lists are trimmed and deduplicated',()=>{
   assert.deepEqual(splitList('阿青，老周\n阿青, 密使'),['阿青','老周','密使']);
+});
+
+test('planning initially focuses the unfinished episode instead of the last production episode',()=>{
+  const plans=[{episodeNo:1,status:'approved'},{episodeNo:2,status:'approved'},{episodeNo:3,status:'review'}];
+  assert.equal(resolvePlanningEpisode(plans,undefined,[1,2]),3);
+});
+
+test('EP03 planning focus survives approval and return from the script room',()=>{
+  const plans=[{episodeNo:1,status:'approved'},{episodeNo:2,status:'approved'},{episodeNo:3,status:'approved'},{episodeNo:4,status:'review'}];
+  assert.equal(resolvePlanningEpisode(plans,3,[1,2]),3);
+  assert.equal(resolvePlanningEpisode(plans,2,[1,2]),2);
+});
+
+test('invalid remembered focus falls back to an available plan without creating an episode',()=>{
+  const plans=[{episodeNo:1,status:'approved'},{episodeNo:2,status:'review'}];
+  assert.equal(resolvePlanningEpisode(plans,99,[1]),2);
+  assert.equal(resolvePlanningEpisode([],3),0);
 });

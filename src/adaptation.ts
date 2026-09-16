@@ -80,3 +80,14 @@ export function adaptationReviewSummary(value: Record<string, any>) {
   }
   return { status: shared, headline: shared === "approved" ? "改编策划已批准" : shared === "review" ? "改编策划等待审核" : "可以建立改编策划", reason: shared === "review" ? "批准后才可生成逐集剧本。" : "" };
 }
+
+// Planning selection is independent of whether an episode production project exists yet.
+export function resolvePlanningEpisode(
+  plans: Pick<EpisodePlan, "episodeNo" | "status">[],
+  preferred?: number,
+  protectedEpisodeNos: number[] = [],
+): number {
+  if (preferred && plans.some((plan) => plan.episodeNo === preferred)) return preferred;
+  return plans.find((plan) => plan.status !== "approved" && !protectedEpisodeNos.includes(plan.episodeNo))?.episodeNo
+    || plans[0]?.episodeNo || 0;
+}

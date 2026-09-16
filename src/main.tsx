@@ -627,6 +627,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       model_directories: [],
     });
   const [workflowStage, setWorkflowStage] = useState<WorkflowStage>(initialWorkflowStage);
+  // Adaptation and scripts share a production-scoped focus, including uncreated episodes.
+  const [planningEpisodeFocus, setPlanningEpisodeFocus] = useState<Record<string, number>>({});
   const [selected, setSelected] = useState<string | null>(null),
     [view, setView] = useState(defaultViewForStage(initialWorkflowStage)),
     [panel, setPanel] = useState<string | null>(null),
@@ -812,6 +814,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     // Update the imperative snapshot before scheduling React state changes.
     // This prevents an autosave tick from pairing the new project id with the
     // previous project's document while the project switch is being rendered.
+    if (current.current.project?.production_id === p.production_id && current.current.project.id !== p.id) {
+      setPlanningEpisodeFocus((known) => ({ ...known, [p.production_id]: p.episode_no }));
+    }
     current.current = { project: openedProject, doc: projectedDocument };
     nodeMeasurements.current.clear();
     setLayoutVersion((value) => value + 1);
@@ -2804,6 +2809,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           />
         ) : workflowStage === "adaptation" ? (
           <AdaptationPage
+            key={project.production_id}
+            focusedEpisodeNo={planningEpisodeFocus[project.production_id]}
+            onSelectEpisode={(episodeNo) => setPlanningEpisodeFocus((known) => known[project.production_id] === episodeNo ? known : { ...known, [project.production_id]: episodeNo })}
             productionId={project.production_id}
             projectId={project.id}
             providers={projectProviders(doc.modelPool || undefined, config.providers, "text", system.models)}
@@ -2821,8 +2829,10 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           />
         ) : workflowStage === "script" ? (
           <ScriptRoomPage
+            key={project.production_id}
             productionId={project.production_id}
-            currentEpisodeNo={project.episode_no}
+            currentEpisodeNo={planningEpisodeFocus[project.production_id] || project.episode_no}
+            onFocusEpisode={(episodeNo) => setPlanningEpisodeFocus((known) => known[project.production_id] === episodeNo ? known : { ...known, [project.production_id]: episodeNo })}
             jobs={productionJobs}
             onJobsSubmitted={(submitted) => {
               if (current.current.project?.production_id === project.production_id) {
@@ -2843,6 +2853,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             onSelectEpisode={async (episodeNo) => {
               const episode = currentEpisodes.find((item) => item.episode_no === episodeNo);
               if (episode && episode.id !== project.id) await openProject(episode.id);
+              setPlanningEpisodeFocus((known) => ({ ...known, [project.production_id]: episodeNo }));
             }}
             onEnterEpisode={async (episodeNo) => {
               const hierarchy = await refreshProductionHierarchy();

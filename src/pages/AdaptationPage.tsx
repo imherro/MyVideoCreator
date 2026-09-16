@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Lock, Plus, RefreshCw, Save, Sparkles } from "lucide-react";
 import {
   DURATION_OPTIONS,
@@ -9,6 +9,7 @@ import {
   STATUS_LABELS,
   appendEpisodeForChapter,
   adaptationReviewSummary,
+  resolvePlanningEpisode,
   createEpisodePlans,
   type EpisodePlan,
 } from "../adaptation";
@@ -21,17 +22,21 @@ const storyGroups = [
 ] as const;
 
 export function AdaptationPage({
-  productionId, projectId, providers, defaultTarget, refreshKey = 0, request, notify, report, onRevision, onOpenSource,
+  productionId, projectId, focusedEpisodeNo, onSelectEpisode, providers, defaultTarget, refreshKey = 0, request, notify, report, onRevision, onOpenSource,
 }: {
   productionId: string; projectId: string; providers: Value[]; defaultTarget?: Value; refreshKey?: number;
   request: (path: string, options?: RequestInit) => Promise<any>;
   notify: (message: string) => void; report: (error: unknown) => void;
+  focusedEpisodeNo?: number;
+  onSelectEpisode: (episodeNo: number) => void;
   onRevision: (revision: number) => void;
   onOpenSource: () => void;
 }) {
   const [draft, setDraft] = useState<Value | null>(null);
   const [chapters, setChapters] = useState<Value[]>([]);
-  const [active, setActive] = useState(0);
+  const active = focusedEpisodeNo || 0;
+  const focusRef = useRef(focusedEpisodeNo);
+  focusRef.current = focusedEpisodeNo;
   const [busy, setBusy] = useState(false);
   const textProviders = useMemo(
     () => [{ id: "local", name: "本地 llama.cpp", local: true, model: "" }, ...providers.filter((p) => !p.kind || p.kind === "text")],
@@ -53,10 +58,9 @@ export function AdaptationPage({
     setDraft(value);
     onRevision(value.revision);
     setChapters(sourceChapters);
-    setActive((current) => value.episodePlans.some((plan: EpisodePlan) => plan.episodeNo === current) ? current
-      : value.episodePlans.find((plan: EpisodePlan) => plan.status !== "approved" && !value.protectedEpisodeNos?.includes(plan.episodeNo))?.episodeNo || 1);
+    onSelectEpisode(resolvePlanningEpisode(value.episodePlans, focusRef.current, value.protectedEpisodeNos));
   }
-  useEffect(() => { setDraft(null); setActive(0); }, [productionId]);
+  useEffect(() => { setDraft(null); }, [productionId]);
   useEffect(() => { void load().catch(report); }, [productionId, refreshKey]);
   useEffect(() => {
     setProviderId(defaultProviderId);
@@ -87,7 +91,7 @@ export function AdaptationPage({
       },
       episodePlans: plans,
     });
-    setActive(episodeNo);
+    onSelectEpisode(episodeNo);
     notify(chapterId ? `已用该章节建立 EP${String(episodeNo).padStart(2, "0")}，保存草稿后生效` : `已新增 EP${String(episodeNo).padStart(2, "0")}，请设置原著章节引用`);
   }
   async function save(showNotice = true) {
@@ -176,7 +180,7 @@ export function AdaptationPage({
     </header>
     <div className="adaptation-layout"><aside className="episode-plan-list">
       <div className="episode-plan-list-heading"><h3>分集导航</h3><button className="icon-button" title="新增分集" aria-label="新增分集" disabled={busy || draft.episodePlans.length >= 500} onClick={() => createEpisode()}><Plus size={14}/></button></div>
-      <div className="episode-plan-buttons">{draft.episodePlans.map((item: EpisodePlan) => <button key={item.episodeNo} className={active === item.episodeNo ? "active" : ""} onClick={() => setActive(item.episodeNo)}><span>EP{String(item.episodeNo).padStart(2, "0")}</span>{protectedEpisodes.has(item.episodeNo) ? <small className="protected"><Lock size={9}/>成片锁定</small> : <small className={item.status}>{STATUS_LABELS[item.status] || item.status}</small>}</button>)}</div>
+      <div className="episode-plan-buttons">{draft.episodePlans.map((item: EpisodePlan) => <button key={item.episodeNo} className={active === item.episodeNo ? "active" : ""} onClick={() => onSelectEpisode(item.episodeNo)}><span>EP{String(item.episodeNo).padStart(2, "0")}</span>{protectedEpisodes.has(item.episodeNo) ? <small className="protected"><Lock size={9}/>成片锁定</small> : <small className={item.status}>{STATUS_LABELS[item.status] || item.status}</small>}</button>)}</div>
       <div className="adaptation-chapter-index"><h4>原著章节 <span>{chapters.length}</span></h4>{chapters.map((chapter) => {
         const assigned = chapterAssignments.get(chapter.id) || [];
         return <div className={assigned.length ? "assigned" : "unassigned"} key={chapter.id}>

@@ -6,13 +6,14 @@ import { activeScriptEpisodes, mergeTaskSnapshots } from "../taskCenter";
 type Value = Record<string, any>;
 
 export function ScriptRoomPage({
-  productionId, currentEpisodeNo, providers, defaultTarget, refreshKey = 0, jobs, onJobsSubmitted, request, notify, report, onChanged, onSelectEpisode, onEnterEpisode,
+  productionId, currentEpisodeNo, onFocusEpisode, providers, defaultTarget, refreshKey = 0, jobs, onJobsSubmitted, request, notify, report, onChanged, onSelectEpisode, onEnterEpisode,
 }: {
   productionId: string; currentEpisodeNo: number; providers: Value[]; defaultTarget?: Value; refreshKey?: number;
   jobs: Value[]; onJobsSubmitted: (jobs: Value[]) => void;
   request: (path: string, options?: RequestInit) => Promise<any>;
   notify: (message: string) => void; report: (error: unknown) => void;
   onChanged: (projectId?: string) => void | Promise<void>;
+  onFocusEpisode: (episodeNo: number) => void;
   onSelectEpisode: (episodeNo: number) => void | Promise<void>;
   onEnterEpisode: (episodeNo: number) => void | Promise<void>;
 }) {
@@ -24,6 +25,8 @@ export function ScriptRoomPage({
   const [busy, setBusy] = useState(false);
   const [submittedJobs, setSubmittedJobs] = useState<Value[]>([]);
   const loadedProduction = useRef<string | null>(null);
+  const loadSequence = useRef(0);
+  useEffect(() => () => { loadSequence.current += 1; }, []);
   const runningEpisodes = activeScriptEpisodes(mergeTaskSnapshots(submittedJobs, jobs), productionId);
   const activeGenerating = runningEpisodes.has(active);
   const selectedGenerating = [...selected].some((number) => runningEpisodes.has(number));
@@ -37,18 +40,26 @@ export function ScriptRoomPage({
   const configuredDefaultProvider = textProviders.find((provider) => provider.id === defaultProviderId) || fallbackTextProvider;
 
   async function loadList(preferred = active) {
+    const sequence = ++loadSequence.current;
     const [scripts, sourceChapters] = await Promise.all([
       request(`/productions/${productionId}/scripts`),
       request(`/productions/${productionId}/chapters`),
     ]);
-    setItems(scripts); setChapters(sourceChapters);
+    if (sequence !== loadSequence.current) return;
     const target = scripts.some((item: Value) => item.episodeNo === preferred) ? preferred : scripts[0]?.episodeNo || 1;
+    const nextDraft = scripts.length ? await request(`/productions/${productionId}/episode-scripts/${target}`) : null;
+    if (sequence !== loadSequence.current) return;
+    setItems(scripts); setChapters(sourceChapters);
     setActive(target);
-    setDraft(scripts.length ? await request(`/productions/${productionId}/episode-scripts/${target}`) : null);
+    setDraft(nextDraft);
+    if (scripts.length) onFocusEpisode(target);
   }
   async function selectEpisode(episodeNo: number) {
+    const sequence = ++loadSequence.current;
     setActive(episodeNo);
-    setDraft(await request(`/productions/${productionId}/episode-scripts/${episodeNo}`));
+    setDraft(null);
+    const nextDraft = await request(`/productions/${productionId}/episode-scripts/${episodeNo}`);
+    if (sequence === loadSequence.current) setDraft(nextDraft);
   }
   useEffect(() => {
     const changed = loadedProduction.current !== productionId;
