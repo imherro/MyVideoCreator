@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, ArrowUpRight, CheckSquare2, Film, Image as ImageIcon, Play, RefreshCw, Scissors } from "lucide-react";
 import { deriveVideoProductionRows, videoSubmissionSummary, type VideoProductionStatus } from "../videoProduction.ts";
 import { compileVideoPrompt } from "../videoDialogue.ts";
@@ -68,6 +68,15 @@ export function VideoProductionWorkspace(props: Props) {
   const [filter, setFilter] = useState<"all" | VideoProductionStatus>("all");
   const [selected, setSelected] = useState<string[]>([]);
   const [reviewing, setReviewing] = useState(false);
+  const reviewDialog = useRef<HTMLDialogElement>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const submissionPending = useRef(false);
+  useEffect(() => {
+    const dialog = reviewDialog.current;
+    if (!dialog) return;
+    if (reviewing && !dialog.open) dialog.showModal();
+    else if (!reviewing && dialog.open) dialog.close();
+  }, [reviewing]);
   const [error, setError] = useState("");
   const identities = rows.map((row) => row.uid);
   useEffect(() => setSelected((items) => items.filter((item) => identities.includes(item))), [identities.join("|")]);
@@ -78,9 +87,13 @@ export function VideoProductionWorkspace(props: Props) {
   const submissionBlockers = selectedRows.filter((row) => row.readinessReason || row.status === "generating");
   const toggle = (uid: string) => setSelected((items) => items.includes(uid) ? items.filter((item) => item !== uid) : [...items, uid]);
   const submit = async (uids: string[]) => {
+    if (submissionPending.current) return;
+    submissionPending.current = true;
+    setSubmitting(true);
     setError("");
     try { await props.onGenerate(uids); setReviewing(false); }
     catch (reason: any) { setError(reason?.message || String(reason)); }
+    finally { submissionPending.current = false; setSubmitting(false); }
   };
   return <section className="video-production-workspace">
     <header className="video-production-header">
@@ -92,14 +105,17 @@ export function VideoProductionWorkspace(props: Props) {
     {!!rows.length && <div className="video-selection-bar" role="group" aria-label="批量生成视频">
       <label className="check-label"><input type="checkbox" checked={selected.length === rows.length} onChange={(event) => setSelected(event.target.checked ? identities : [])}/>全选 {rows.length} 镜</label>
       <span>已选 {selected.length} 镜</span>
-      <button className="primary compact" disabled={props.busy || !selected.length} onClick={() => setReviewing(true)}><Film size={15}/>生成所选视频</button>
+      <button className="primary compact" disabled={props.busy || !selected.length} onClick={() => { setError(""); setReviewing(true); }}><Film size={15}/>生成所选视频</button>
     </div>}
-    {reviewing && <div className="video-submit-review" role="dialog" aria-label="批量生成确认">
-      <div><CheckSquare2 size={20}/><div><b>提交前复核</b><p>将提交 {summary.count} 个明确选中的视频任务{summary.cloudCount ? `，其中 ${summary.cloudCount} 个使用云端服务` : ""}。</p></div></div>
+    <dialog ref={reviewDialog} className="video-submit-review video-submit-review-dialog" aria-labelledby="video-review-title" onClose={() => setReviewing(false)} onCancel={(event) => { if (submitting) event.preventDefault(); else setReviewing(false); }}>
+      <div><CheckSquare2 size={20}/><div><b id="video-review-title">提交前复核</b><p>将提交 {summary.count} 个明确选中的视频任务{summary.cloudCount ? `，其中 ${summary.cloudCount} 个使用云端服务` : ""}。</p></div></div>
+      <div className="video-review-body">
       <ul>{summary.groups.map((group) => <li key={`${group.providerId}:${group.modelId}`}><span>{group.cloud ? "云端" : "本地"}</span><b>{group.providerName}</b><code>{group.modelId}</code><em>× {group.count}</em></li>)}</ul>
       {!!submissionBlockers.length && <p className="error"><AlertCircle size={15}/>有 {submissionBlockers.length} 个所选镜头暂不可提交：{submissionBlockers.slice(0,2).map((row) => `SHOT ${String(row.index+1).padStart(2,"0")} ${row.status === "generating" ? "任务已在队列中" : row.readinessReason}`).join("；")}</p>}
-      <div className="settings-actions"><button onClick={() => setReviewing(false)}>取消</button><button className="primary" disabled={props.busy || !!submissionBlockers.length} onClick={() => void submit(selected)}>确认提交 {summary.count} 个任务</button></div>
-    </div>}
+      {error && <p className="error" role="alert"><AlertCircle size={15}/>{error}</p>}
+      </div>
+      <footer className="settings-actions"><button autoFocus disabled={submitting} onClick={() => setReviewing(false)}>取消</button><button className="primary" disabled={props.busy || submitting || !summary.count || !!submissionBlockers.length} onClick={() => void submit(selected)}>{submitting ? "正在提交…" : `确认提交 ${summary.count} 个任务`}</button></footer>
+    </dialog>
     {error && <p className="error"><AlertCircle size={15}/>{error}</p>}
     {!rows.length ? <div className="empty-state"><Film/><h3>还没有可生产的视频镜头</h3><p>请先在分镜工作区创建镜头，并准备所选生成模式需要的参考素材。</p></div> : !visible.length ? <div className="empty-state"><Film/><h3>当前筛选没有镜头</h3></div> : <div className="video-production-list">{visible.map((row) => {
       const data = row.videoNode?.data || {};

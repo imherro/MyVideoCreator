@@ -327,3 +327,14 @@
 .storyboard-grid-details dl{display:grid;grid-template-columns:32px minmax(0,1fr);gap:6px 9px;margin:9px 0;line-height:1.6}
 .storyboard-grid-details dt{color:#74868e}
 .storyboard-grid-details dd{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+
+/* Native modal top layer keeps batch confirmation visible at any scroll offset. */
+.video-submit-review-dialog{width:min(640px,calc(100vw - 32px));max-height:min(80vh,760px);margin:auto;padding:0;color:#dce0e2;box-sizing:border-box;overflow:hidden;box-shadow:0 20px 70px #0008}
+.video-submit-review-dialog[open]{display:flex;flex-direction:column}
+.video-submit-review-dialog::backdrop{background:rgb(0 0 0 / 62%)}
+.video-submit-review-dialog>div:first-child{flex-shrink:0;padding:20px 22px 14px;border-bottom:1px solid #4e4637}
+.video-submit-review-dialog .video-review-body{min-height:0;overflow:auto;overscroll-behavior:contain;padding:0 22px 18px}
+.video-submit-review-dialog .settings-actions{flex-shrink:0;margin:0;padding:14px 22px;border-top:1px solid #4e4637;background:#211f1b;flex-wrap:wrap}
+.video-submit-review-dialog li code{white-space:normal;overflow-wrap:anywhere}
+.video-submit-review-dialog .error{margin-top:12px;color:#efb0a3}
+@media(max-width:520px){.video-submit-review-dialog>div:first-child{padding:16px}.video-submit-review-dialog .video-review-body{padding:0 16px 14px}.video-submit-review-dialog .settings-actions{padding:12px 16px}}
