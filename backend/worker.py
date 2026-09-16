@@ -260,6 +260,13 @@ class Worker:
             except json.JSONDecodeError as exc:raise ValueError('改编策划结果不是严格 JSON：'+str(exc)) from exc
             result=apply_adaptation_generation(job,value)
             return {'text':s.dumps(result),'adaptation':result}
+        if kind=='text' and inp.get('episode_plan_generation'):
+            from .adaptation import EPISODE_PLAN_SCHEMA, EPISODE_PLAN_SYSTEM_PROMPT, apply_episode_plan_generation
+            raw=self._chat_text(job,p,inp.get('system_prompt') or EPISODE_PLAN_SYSTEM_PROMPT,inp['prompt'],inp.get('response_schema') or EPISODE_PLAN_SCHEMA,'生成当前集规划')
+            try:value=json.loads(raw.strip())
+            except json.JSONDecodeError as exc:raise ValueError('单集规划结果不是严格 JSON：'+str(exc)) from exc
+            result=apply_episode_plan_generation(job,value)
+            return {'text':s.dumps(result),'episodePlan':result['episodePlan']}
         if kind=='text' and inp.get('episode_script_generation'):
             from .adaptation import SCRIPT_SCHEMA, SCRIPT_SYSTEM_PROMPT, apply_episode_script_generation
             raw=self._chat_text(job,p,inp.get('system_prompt') or SCRIPT_SYSTEM_PROMPT,inp['prompt'],inp.get('response_schema') or SCRIPT_SCHEMA,'生成本集剧本')

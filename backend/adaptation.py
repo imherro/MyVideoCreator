@@ -313,11 +313,19 @@ def _script_snapshot(row):
     }
 
 
-def _stale_scripts(connection, production_id):
+def _stale_scripts(connection, production_id, episode_nos=None):
     from . import store as s
     now = time.time()
+    params = [production_id]
+    episode_filter = ''
+    if episode_nos is not None:
+        numbers = sorted({int(value) for value in episode_nos})
+        if not numbers:
+            return
+        episode_filter = ' AND p.episode_no IN (' + ','.join('?' for _ in numbers) + ')'
+        params.extend(numbers)
     rows = connection.execute('''SELECT sc.* FROM episode_scripts sc JOIN projects p ON p.id=sc.project_id
-        WHERE p.production_id=? AND sc.status IN ('review','approved')''',(production_id,)).fetchall()
+        WHERE p.production_id=? AND sc.status IN ('review','approved')''' + episode_filter, params).fetchall()
     for row in rows:
         connection.execute(
             'INSERT INTO episode_script_revisions VALUES(?,?,?,?,?)',
@@ -536,6 +544,18 @@ ADAPTATION_SCHEMA = {
     },
 }
 
+EPISODE_PLAN_SCHEMA = {
+    'type': 'object', 'additionalProperties': False,
+    'required': ['episodeNo','sourceChapterRefs','logline','coreConflict','emotionalBeat','hook','cliffhanger','paywallRole','targetDuration'],
+    'properties': {
+        'episodeNo': {'type': 'integer'},
+        'sourceChapterRefs': {'type': 'array', 'items': {'type': 'string'}},
+        **{key: {'type': 'string'} for key in ('logline','coreConflict','emotionalBeat','hook','cliffhanger')},
+        'paywallRole': {'type': 'string', 'enum': sorted(PAYWALL_ROLES)},
+        'targetDuration': {'type': 'number', 'minimum': 1, 'maximum': 3000},
+    },
+}
+
 
 SCRIPT_SCHEMA = {
     'type': 'object', 'additionalProperties': False,
@@ -552,6 +572,10 @@ SCRIPT_SCHEMA = {
 ADAPTATION_SYSTEM_PROMPT = (
     '你是短剧总编剧。只依据提供的原著事件创建可人工审核的故事骨架、改编策略、连续分集规划和剧情商业卡点。'
     '不得编造 sourceEventIds 或 sourceChapterRefs；分集编号必须连续，数量和时长严格服从 format。'
+)
+EPISODE_PLAN_SYSTEM_PROMPT = (
+    '你是中文短剧分集策划。只为指定的单集生成可人工审核的分集规划，严格依据作品级故事骨架、改编策略和指定原著事件。'
+    '不得修改其他集，不得编造 sourceChapterRefs；episodeNo 和 targetDuration 必须严格服从输入。'
 )
 SCRIPT_SYSTEM_PROMPT = (
     '你是中文短剧编剧。严格依据给定的已批准分集规划、原著章节和付费卡点，写本集可拍摄剧本。'
@@ -578,28 +602,62 @@ def validate_source_references(connection, production_id, chapter_ids):
         raise ValueError('分集规划引用了不存在或属于其他 Production 的原著章节')
 
 
+def adaptation_change_scope(current_context, submitted):
+    """Return whether shared planning changed and the exact episode plans affected."""
+    old = adaptation_bundle(current_context)
+    new = validate_adaptation_bundle(submitted)
+    old_format = old['adaptationPlan']['format']
+    new_format = new['adaptationPlan']['format']
+    shared_changed = (
+        {key: value for key, value in old['adaptationPlan'].items() if key not in ('status', 'format')}
+        != {key: value for key, value in new['adaptationPlan'].items() if key not in ('status', 'format')}
+        or {key: value for key, value in old_format.items() if key != 'episodeCount'}
+        != {key: value for key, value in new_format.items() if key != 'episodeCount'}
+        or old['monetizationPlan'] != new['monetizationPlan']
+        or new_format['episodeCount'] < old_format['episodeCount']
+    )
+    old_plans = {plan['episodeNo']: plan for plan in old['episodePlans']}
+    changed_episodes = {
+        plan['episodeNo'] for plan in new['episodePlans']
+        if {key: value for key, value in plan.items() if key != 'status'}
+        != {key: value for key, value in old_plans.get(plan['episodeNo'], {}).items() if key != 'status'}
+    }
+    changed_episodes.update(set(old_plans) - {plan['episodeNo'] for plan in new['episodePlans']})
+    return new, shared_changed, changed_episodes
+
+
 def prepare_manual_adaptation(current_context, submitted):
     """Manual edits invalidate approval; status-only promotion is ignored."""
     old = adaptation_bundle(current_context)
-    new = validate_adaptation_bundle(submitted)
-    old_adaptation_content = {key:value for key,value in old['adaptationPlan'].items() if key!='status'}
-    new_adaptation_content = {key:value for key,value in new['adaptationPlan'].items() if key!='status'}
+    new, shared_changed, changed_episodes = adaptation_change_scope(current_context, submitted)
     old_plans = {plan['episodeNo']:plan for plan in old['episodePlans']}
-    changed = (
-        old_adaptation_content != new_adaptation_content
-        or old['monetizationPlan'] != new['monetizationPlan']
-        or len(old['episodePlans']) != len(new['episodePlans'])
-    )
     for plan in new['episodePlans']:
         previous = old_plans.get(plan['episodeNo'])
-        previous_content = {key:value for key,value in previous.items() if key!='status'} if previous else None
-        current_content = {key:value for key,value in plan.items() if key!='status'}
-        if previous_content != current_content:
-            plan['status'] = 'draft'; changed = True
+        if plan['episodeNo'] in changed_episodes:
+            plan['status'] = 'draft'
         else:
             plan['status'] = previous['status']
-    new['adaptationPlan']['status'] = 'draft' if changed else old['adaptationPlan']['status']
-    return new, changed
+    changed = shared_changed or bool(changed_episodes)
+    # Appending or revising one episode does not revoke approval from the
+    # production-wide story bible or already completed sibling episodes.
+    new['adaptationPlan']['status'] = 'draft' if shared_changed else old['adaptationPlan']['status']
+    return new, changed, shared_changed, changed_episodes
+
+
+def protected_episode_nos(connection, production_id):
+    """Episodes with accepted video media are immutable from adaptation planning."""
+    protected = []
+    rows = connection.execute('''SELECT episode_no,document FROM projects p WHERE p.production_id=?
+        AND NOT EXISTS(SELECT 1 FROM deleted_items d WHERE d.kind='project' AND d.item_id=p.id)''',(production_id,)).fetchall()
+    for row in rows:
+        document = json.loads(row['document'])
+        if any(
+            isinstance(node, dict) and isinstance(node.get('data'), dict)
+            and node['data'].get('kind') == 'video' and node['data'].get('assetId')
+            for node in document.get('nodes', [])
+        ):
+            protected.append(int(row['episode_no']))
+    return sorted(set(protected))
 
 
 def validate_approval_ready(connection, production_id, bundle):
@@ -618,6 +676,16 @@ def validate_approval_ready(connection, production_id, bundle):
         all_refs.extend(plan['sourceChapterRefs'])
     validate_source_references(connection, production_id, all_refs)
     return value
+
+
+def validate_episode_plan_ready(connection, production_id, plan):
+    if not plan or not plan.get('sourceChapterRefs'):
+        raise ValueError('当前集缺少原著章节引用')
+    for key in ('logline', 'coreConflict', 'hook', 'cliffhanger'):
+        if not str(plan.get(key) or '').strip():
+            raise ValueError(f'当前集的 {key} 尚未完成')
+    validate_source_references(connection, production_id, plan['sourceChapterRefs'])
+    return plan
 
 
 def apply_adaptation_generation(job, generated):
@@ -643,6 +711,10 @@ def apply_adaptation_generation(job, generated):
         if not production:
             raise ValueError('改编策划任务的 Production 已不存在')
         context = normalize_production_context(json.loads(production['shared_context']))
+        protected = protected_episode_nos(connection, production_id)
+        if protected:
+            labels = ', '.join(f'EP{number:02d}' for number in protected)
+            raise ValueError(f'{labels} 已有成片视频，整部改编结果未写入')
         if adaptation_fingerprint(context) != marker.get('adaptationFingerprint'):
             raise ValueError('改编策划已在生成期间更新，旧结果未写入')
         sources = source_snapshot(connection, production_id)
@@ -657,6 +729,70 @@ def apply_adaptation_generation(job, generated):
         revision = _persist_production_context(connection, production, context)
     s.event(job['project_id'], {'type': 'production', 'revision': revision})
     return {**bundle, 'productionRevision': revision}
+
+
+def validate_generated_episode_plan(value, episode_no, target_duration):
+    expected = {'episodeNo','sourceChapterRefs','logline','coreConflict','emotionalBeat','hook','cliffhanger','paywallRole','targetDuration'}
+    if not isinstance(value, dict) or set(value) != expected:
+        raise ValueError('单集规划字段不完整或包含未知字段')
+    if isinstance(value['episodeNo'], bool) or value['episodeNo'] != episode_no:
+        raise ValueError('模型返回的分集编号与目标分集不一致')
+    refs = value['sourceChapterRefs']
+    if not isinstance(refs, list) or not refs or not all(isinstance(item, str) and item for item in refs):
+        raise ValueError('单集规划必须引用至少一个有效原著章节')
+    result = {
+        'episodeNo': episode_no,
+        'sourceChapterRefs': list(dict.fromkeys(refs)),
+        'paywallRole': value['paywallRole'],
+        'targetDuration': value['targetDuration'],
+        'status': 'review',
+    }
+    for key in ('logline','coreConflict','emotionalBeat','hook','cliffhanger'):
+        result[key] = _string(value[key], key, allow_empty=False)
+    if result['paywallRole'] not in PAYWALL_ROLES:
+        raise ValueError('单集规划付费角色无效')
+    if isinstance(result['targetDuration'], bool) or not isinstance(result['targetDuration'], (int, float)):
+        raise ValueError('单集规划目标时长无效')
+    if float(result['targetDuration']) != float(target_duration):
+        raise ValueError('模型返回的单集目标时长与任务提交规格不一致')
+    return result
+
+
+def apply_episode_plan_generation(job, generated):
+    from . import store as s
+    from .production_context import normalize_production_context
+    marker = job['input'].get('episode_plan_generation') or {}
+    production_id = marker.get('productionId')
+    episode_no = int(marker.get('episodeNo') or 0)
+    plan = validate_generated_episode_plan(generated, episode_no, marker.get('targetDuration'))
+    allowed_chapters = set(marker.get('sourceChapterIds') or [])
+    if not set(plan['sourceChapterRefs']) <= allowed_chapters:
+        raise ValueError('模型返回了任务快照中不存在的原著章节编号')
+    with s.db() as connection:
+        connection.execute('BEGIN IMMEDIATE')
+        active = connection.execute('SELECT status FROM jobs WHERE id=?',(job['id'],)).fetchone()
+        if not active or active['status'] != 'running':
+            raise ValueError('单集规划任务已失效，未写入生成结果')
+        production = connection.execute('SELECT * FROM productions WHERE id=?',(production_id,)).fetchone()
+        if not production:
+            raise ValueError('单集规划任务的 Production 已不存在')
+        context = normalize_production_context(json.loads(production['shared_context']))
+        if adaptation_fingerprint(context) != marker.get('adaptationFingerprint'):
+            raise ValueError('改编策划已在生成期间更新，旧单集结果未写入')
+        sources = source_snapshot(connection, production_id)
+        if source_fingerprint(sources) != marker.get('sourceFingerprint'):
+            raise ValueError('原著事件已在生成期间更新，旧单集结果未写入')
+        if episode_no in protected_episode_nos(connection, production_id):
+            raise ValueError(f'EP{episode_no:02d} 已有成片视频，单集规划受保护')
+        current = next((item for item in context['episodePlans'] if item['episodeNo'] == episode_no), None)
+        if not current:
+            raise ValueError(f'EP{episode_no:02d} 已不在当前分集规划中')
+        validate_source_references(connection, production_id, plan['sourceChapterRefs'])
+        context['episodePlans'] = [copy.deepcopy(plan) if item['episodeNo'] == episode_no else item for item in context['episodePlans']]
+        _stale_scripts(connection, production_id, [episode_no])
+        revision = _persist_production_context(connection, production, context)
+    s.event(job['project_id'], {'type': 'production', 'revision': revision})
+    return {'episodePlan': plan, 'productionRevision': revision}
 
 
 def ensure_episode_for_plan(connection, production_id, episode_no):

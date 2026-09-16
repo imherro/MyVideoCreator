@@ -1,5 +1,6 @@
 import copy
 import json
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -351,3 +352,92 @@ def test_source_edit_marks_approved_plan_and_derived_script_stale_without_ai_cal
             "SELECT COUNT(*) value FROM jobs WHERE project_id IN (SELECT id FROM projects WHERE production_id=?)",
             (production["id"],),
         ).fetchone()["value"] == before_jobs
+
+
+def test_appending_episode_preserves_completed_sibling_and_generates_only_new_plan(adaptation_client, monkeypatch):
+    client = adaptation_client
+    production, episode, chapter_one, adaptation = setup_production(client, count=1)
+    approved = save_and_approve(client, production, adaptation)
+
+    virtual = client.get(f'/api/productions/{production["id"]}/episode-scripts/1').json()
+    script = client.put(f'/api/productions/{production["id"]}/episode-scripts/1', json={
+        'revision': virtual['revision'], 'title': '第一集', 'synopsis': '第一章完成',
+        'body': '内景 夜\n阿青读完密信。', 'estimatedDuration': 60,
+        'sourceChapterRefs': [chapter_one['id']], 'storyGoal': '找到真相', 'paywallBeat': {},
+        'characters': ['阿青'], 'scenes': ['旧屋'], 'props': ['密信'],
+    }).json()
+    reviewed_script = client.post(
+        f'/api/productions/{production["id"]}/episode-scripts/1/review', json={'revision': script['revision']}
+    ).json()
+    client.post(
+        f'/api/productions/{production["id"]}/episode-scripts/1/approve', json={'revision': reviewed_script['revision']}
+    )
+
+    project = client.get(f'/api/projects/{episode["id"]}').json()
+    project['document']['nodes'].append({
+        'id': 'finished-video', 'type': 'media', 'position': {'x': 0, 'y': 0},
+        'data': {'kind': 'video', 'assetId': 'asset-finished-ep01'},
+    })
+    stored = client.put(f'/api/projects/{episode["id"]}', json={
+        'name': project['name'], 'revision': project['revision'],
+        'production_revision': project['production_revision'], 'document': project['document'],
+    })
+    assert stored.status_code == 200, stored.text
+
+    with s.db() as connection:
+        source_id = connection.execute('SELECT source_id FROM source_chapters WHERE id=?', (chapter_one['id'],)).fetchone()['source_id']
+    chapter_two = client.post(
+        f'/api/productions/{production["id"]}/sources/{source_id}/chapters',
+        json={'title': '第二章', 'content': '阿青进入城中，发现新的证人。'},
+    ).json()
+    current = client.get(f'/api/productions/{production["id"]}/adaptation').json()
+    assert current['protectedEpisodeNos'] == [1]
+    current['adaptationPlan']['format']['episodeCount'] = 2
+    current['episodePlans'].append({
+        'episodeNo': 2, 'sourceChapterRefs': [chapter_two['id']], 'logline': '', 'coreConflict': '',
+        'emotionalBeat': '', 'hook': '', 'cliffhanger': '', 'paywallRole': 'none',
+        'targetDuration': 60, 'status': 'draft',
+    })
+    appended = client.put(f'/api/productions/{production["id"]}/adaptation', json={
+        key: current[key] for key in ('revision', 'adaptationPlan', 'episodePlans', 'monetizationPlan')
+    })
+    assert appended.status_code == 200, appended.text
+    assert appended.json()['episodePlans'][0] == approved['episodePlans'][0]
+    assert appended.json()['episodePlans'][1]['status'] == 'draft'
+    assert client.get(f'/api/productions/{production["id"]}/episode-scripts/1').json()['status'] == 'approved'
+
+    whole = client.post(f'/api/productions/{production["id"]}/adaptation/generate', json={
+        'project_id': episode['id'], 'provider': 'local', 'model': '', 'submission_id': 'blocked-whole-regeneration',
+    })
+    assert whole.status_code == 409
+
+    now = time.time()
+    with s.db() as connection:
+        connection.execute('''INSERT INTO source_events VALUES(?,?,?,?,?,?,?,?,?,?,?,?)''', (
+            s.uid('source-event-'), production['id'], chapter_two['id'], 1, s.dumps(['阿青']),
+            '阿青进入城中并找到证人', 'high', '紧张', s.dumps({}), None, now, now,
+        ))
+    queued = client.post(f'/api/productions/{production["id"]}/adaptation/episodes/2/generate', json={
+        'project_id': episode['id'], 'provider': 'local', 'model': '', 'submission_id': 'generate-only-episode-two',
+    })
+    assert queued.status_code == 200, queued.text
+    job = queued.json()
+    assert job['scope'] == 'production'
+    assert job['input']['stage'] == 'adaptation_episode_generation'
+    assert job['input']['schema_version'] == 'episode-plan/v1'
+
+    generated = {
+        'episodeNo': 2, 'sourceChapterRefs': [chapter_two['id']],
+        'logline': '阿青进城寻找证人', 'coreConflict': '证人与追兵的冲突',
+        'emotionalBeat': '希望转为紧张', 'hook': '证人突然出现', 'cliffhanger': '追兵包围客栈',
+        'paywallRole': 'none', 'targetDuration': 60,
+    }
+    worker = Worker()
+    monkeypatch.setattr(worker, '_chat_text', lambda *_args, **_kwargs: json.dumps(generated, ensure_ascii=False))
+    s.job_update(job['id'], status='running')
+    result = worker.text({**job, 'status': 'running'}, {'url': 'http://unused', 'local': True})
+    assert result['episodePlan']['episodeNo'] == 2
+    after = client.get(f'/api/productions/{production["id"]}/adaptation').json()
+    assert after['episodePlans'][0] == approved['episodePlans'][0]
+    assert after['episodePlans'][1]['status'] == 'review'
+    assert client.get(f'/api/productions/{production["id"]}/episode-scripts/1').json()['status'] == 'approved'

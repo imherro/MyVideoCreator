@@ -1018,7 +1018,7 @@ def create_job_record(c,pid,body):
             first_frame(asset)
     owner=c.execute('SELECT production_id FROM projects WHERE id=?',(pid,)).fetchone()
     if not owner:raise HTTPException(404,'制作集不存在')
-    scope='production' if body.input.get('stage') in ('source_analysis','adaptation_generation') else 'episode'
+    scope='production' if body.input.get('stage') in ('source_analysis','adaptation_generation','adaptation_episode_generation') else 'episode'
     jid=s.uid('job-'); now=time.time()
     c.execute('''INSERT INTO jobs(id,submission_id,project_id,node_id,kind,status,input,created,updated,scope,production_id)
         VALUES(?,?,?,?,?,?,?,?,?,?,?)''',(jid,body.submission_id,pid,body.node_id,body.kind,'queued',s.dumps(body.input),now,now,scope,owner['production_id']))
@@ -1370,7 +1370,7 @@ def production_event_targets(connection,production_id):
 def read_adaptation(production_id:str):
     from .adaptation import (
         _persist_production_context,adaptation_bundle,configure_adaptation_format,
-        has_legacy_default_format,source_snapshot,
+        has_legacy_default_format,protected_episode_nos,source_snapshot,
     )
     value=production(production_id)
     revision=value['revision'];context=value['context'];targets=[]
@@ -1389,14 +1389,15 @@ def read_adaptation(production_id:str):
             revision=_persist_production_context(c,row,context)
             targets=production_event_targets(c,production_id)
         sources=source_snapshot(c,production_id)
+        protected=protected_episode_nos(c,production_id)
     for target in targets:s.event(target,{'type':'production','revision':revision})
-    return {**adaptation_bundle(context),'revision':revision,'sourceEventCount':len(sources)}
+    return {**adaptation_bundle(context),'revision':revision,'sourceEventCount':len(sources),'protectedEpisodeNos':protected}
 
 @app.put('/api/productions/{production_id}/adaptation')
 def save_adaptation(production_id:str,body:AdaptationSave):
     from .adaptation import (
         _persist_production_context,_stale_scripts,prepare_manual_adaptation,
-        validate_source_references,
+        protected_episode_nos,validate_source_references,
     )
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
@@ -1404,26 +1405,35 @@ def save_adaptation(production_id:str,body:AdaptationSave):
         if not row:raise HTTPException(404,'Production 不存在')
         if row['revision']!=body.revision:raise HTTPException(409,'改编策划已在其他页面更新，请重新加载。')
         context=normalize_production_context(json.loads(row['shared_context']))
-        bundle,changed=prepare_manual_adaptation(context,{
+        bundle,changed,shared_changed,changed_episodes=prepare_manual_adaptation(context,{
             'adaptationPlan':body.adaptationPlan,'episodePlans':body.episodePlans,
             'monetizationPlan':body.monetizationPlan,
         })
+        protected=protected_episode_nos(c,production_id)
+        affected_protected=set(protected).intersection(changed_episodes)
+        if affected_protected or (shared_changed and protected):
+            labels=', '.join(f'EP{number:02d}' for number in (sorted(affected_protected) or protected))
+            raise HTTPException(409,f'{labels} 已有成片视频并受保护；只能修改尚未完成的分集')
         validate_source_references(c,production_id,[chapter for plan in bundle['episodePlans'] for chapter in plan['sourceChapterRefs']])
         context.update(bundle)
-        if changed:_stale_scripts(c,production_id)
+        if changed:_stale_scripts(c,production_id,None if shared_changed else changed_episodes)
         revision=_persist_production_context(c,row,context)
         targets=production_event_targets(c,production_id)
     for pid in targets:s.event(pid,{'type':'production','revision':revision})
-    return {**bundle,'revision':revision}
+    return {**bundle,'revision':revision,'protectedEpisodeNos':protected}
 
 def transition_adaptation(production_id,expected_revision,target):
-    from .adaptation import _persist_production_context,adaptation_bundle,validate_adaptation_bundle,validate_approval_ready
+    from .adaptation import _persist_production_context,adaptation_bundle,protected_episode_nos,validate_adaptation_bundle,validate_approval_ready
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
         row=c.execute('SELECT * FROM productions WHERE id=?',(production_id,)).fetchone()
         if not row:raise HTTPException(404,'Production 不存在')
         if row['revision']!=expected_revision:raise HTTPException(409,'改编策划已在其他页面更新，请重新加载。')
         context=normalize_production_context(json.loads(row['shared_context']))
+        protected=protected_episode_nos(c,production_id)
+        if protected:
+            labels=', '.join(f'EP{number:02d}' for number in protected)
+            raise HTTPException(409,f'{labels} 已有成片视频；请只审核或批准当前新增分集')
         bundle=adaptation_bundle(context)
         if target=='review':
             validate_adaptation_bundle(bundle)
@@ -1438,7 +1448,7 @@ def transition_adaptation(production_id,expected_revision,target):
         revision=_persist_production_context(c,row,context)
         targets=production_event_targets(c,production_id)
     for pid in targets:s.event(pid,{'type':'production','revision':revision})
-    return {**bundle,'revision':revision}
+    return {**bundle,'revision':revision,'protectedEpisodeNos':protected}
 
 @app.post('/api/productions/{production_id}/adaptation/review')
 def review_adaptation(production_id:str,body:RevisionAction):
@@ -1448,14 +1458,55 @@ def review_adaptation(production_id:str,body:RevisionAction):
 def approve_adaptation(production_id:str,body:RevisionAction):
     return transition_adaptation(production_id,body.revision,'approved')
 
+def transition_episode_plan(production_id,episode_no,expected_revision,target):
+    from .adaptation import (
+        _persist_production_context,adaptation_bundle,protected_episode_nos,
+        validate_episode_plan_ready,
+    )
+    with s.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        row=c.execute('SELECT * FROM productions WHERE id=?',(production_id,)).fetchone()
+        if not row:raise HTTPException(404,'Production 不存在')
+        if row['revision']!=expected_revision:raise HTTPException(409,'改编策划已在其他页面更新，请重新加载。')
+        context=normalize_production_context(json.loads(row['shared_context']))
+        plan=next((item for item in context['episodePlans'] if item['episodeNo']==episode_no),None)
+        if not plan:raise HTTPException(404,f'EP{episode_no:02d} 不在当前分集规划中')
+        if episode_no in protected_episode_nos(c,production_id):
+            raise HTTPException(409,f'EP{episode_no:02d} 已有成片视频，分集规划已锁定')
+        if target=='review':
+            validate_episode_plan_ready(c,production_id,plan)
+            plan['status']='review'
+        else:
+            if plan['status']!='review':raise ValueError('请先将当前集规划提交审核，再批准')
+            validate_episode_plan_ready(c,production_id,plan)
+            plan['status']='approved'
+        revision=_persist_production_context(c,row,context)
+        protected=protected_episode_nos(c,production_id)
+        targets=production_event_targets(c,production_id)
+        bundle=adaptation_bundle(context)
+    for pid in targets:s.event(pid,{'type':'production','revision':revision})
+    return {**bundle,'revision':revision,'protectedEpisodeNos':protected}
+
+@app.post('/api/productions/{production_id}/adaptation/episodes/{episode_no}/review')
+def review_episode_plan(production_id:str,episode_no:int,body:RevisionAction):
+    return transition_episode_plan(production_id,episode_no,body.revision,'review')
+
+@app.post('/api/productions/{production_id}/adaptation/episodes/{episode_no}/approve')
+def approve_episode_plan(production_id:str,episode_no:int,body:RevisionAction):
+    return transition_episode_plan(production_id,episode_no,body.revision,'approved')
+
 @app.post('/api/productions/{production_id}/adaptation/generate')
 def generate_adaptation(production_id:str,body:TextGenerationCreate):
-    from .adaptation import adaptation_fingerprint,source_fingerprint,source_snapshot
+    from .adaptation import adaptation_fingerprint,protected_episode_nos,source_fingerprint,source_snapshot
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
         state=read_project_state(c,body.project_id)
         if not state or state['project']['production_id']!=production_id:
             raise ValueError('改编任务必须归属于当前 Production 的 Episode')
+        protected=protected_episode_nos(c,production_id)
+        if protected:
+            labels=', '.join(f'EP{number:02d}' for number in protected)
+            raise HTTPException(409,f'{labels} 已有成片视频，不能重新生成整个工作台；请仅生成新增分集')
         sources=source_snapshot(c,production_id)
         if not sources:raise ValueError('请先在原著资料库提取事件，再生成改编策划')
         context=state['production_context'];format_value=context['adaptationPlan']['format']
@@ -1471,6 +1522,43 @@ def generate_adaptation(production_id:str,body:TextGenerationCreate):
                 'sourceFingerprint':source_fingerprint(sources),'sourceEventIds':[item['id'] for item in sources],
                 'sourceChapterIds':list(dict.fromkeys(item['chapterId'] for item in sources)),
                 'format':format_value,
+            },
+        })
+        result=create_job_record(c,body.project_id,job_body)
+    s.event(body.project_id,{'type':'job','id':result['id']})
+    return result
+
+@app.post('/api/productions/{production_id}/adaptation/episodes/{episode_no}/generate')
+def generate_episode_plan(production_id:str,episode_no:int,body:TextGenerationCreate):
+    from .adaptation import adaptation_fingerprint,protected_episode_nos,source_fingerprint,source_snapshot
+    with s.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        state=read_project_state(c,body.project_id)
+        if not state or state['project']['production_id']!=production_id:
+            raise ValueError('单集规划任务必须归属于当前 Production 的 Episode')
+        if episode_no in protected_episode_nos(c,production_id):
+            raise HTTPException(409,f'EP{episode_no:02d} 已有成片视频，分集规划已锁定')
+        context=state['production_context']
+        plan=next((item for item in context['episodePlans'] if item['episodeNo']==episode_no),None)
+        if not plan:raise HTTPException(404,f'EP{episode_no:02d} 不在当前分集规划中')
+        if not plan['sourceChapterRefs']:raise ValueError('请先为当前集选择原著章节并保存')
+        all_sources=source_snapshot(c,production_id)
+        sources=[item for item in all_sources if item['chapterId'] in set(plan['sourceChapterRefs'])]
+        if not sources:raise ValueError('当前集引用的章节尚未提取事件，请先完成事件提取')
+        prompt=(f'请只生成 EP{episode_no:02d} 的分集规划，不得改动其他集。\n'
+            f'作品级故事骨架与策略：{s.dumps({key:context["adaptationPlan"][key] for key in ("storyCore","storyArc","adaptationStrategy")})}\n'
+            f'本集固定规格：{s.dumps({"episodeNo":episode_no,"targetDuration":plan["targetDuration"],"sourceChapterRefs":plan["sourceChapterRefs"]})}\n'
+            '本集原著事件：\n'+s.dumps(sources))
+        job_body=JobCreate(node_id=f'adaptation-episode:{production_id}:{episode_no}',kind='text',submission_id=body.submission_id,input={
+            'provider':body.provider,'model':body.model,
+            'stage':'adaptation_episode_generation','prompt':prompt,'max_tokens':4000,
+            'episode_plan_generation':{
+                'productionId':production_id,'episodeNo':episode_no,
+                'adaptationFingerprint':adaptation_fingerprint(context),
+                'sourceFingerprint':source_fingerprint(all_sources),
+                'sourceEventIds':[item['id'] for item in sources],
+                'sourceChapterIds':list(dict.fromkeys(item['chapterId'] for item in sources)),
+                'targetDuration':plan['targetDuration'],
             },
         })
         result=create_job_record(c,body.project_id,job_body)

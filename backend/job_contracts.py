@@ -23,6 +23,9 @@ def freeze_prompt_contract(kind: str, value: dict, *, origin: str = 'submission'
     elif stage == 'adaptation_generation':
         from .adaptation import ADAPTATION_SCHEMA, ADAPTATION_SYSTEM_PROMPT
         system_prompt, response_schema, schema_version = ADAPTATION_SYSTEM_PROMPT, ADAPTATION_SCHEMA, 'adaptation-plan/v1'
+    elif stage == 'adaptation_episode_generation':
+        from .adaptation import EPISODE_PLAN_SCHEMA, EPISODE_PLAN_SYSTEM_PROMPT
+        system_prompt, response_schema, schema_version = EPISODE_PLAN_SYSTEM_PROMPT, EPISODE_PLAN_SCHEMA, 'episode-plan/v1'
     elif stage == 'script_generation':
         from .adaptation import SCRIPT_SCHEMA, SCRIPT_SYSTEM_PROMPT
         system_prompt, response_schema, schema_version = SCRIPT_SYSTEM_PROMPT, SCRIPT_SCHEMA, 'episode-script/v1'

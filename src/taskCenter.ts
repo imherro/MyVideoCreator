@@ -54,7 +54,7 @@ export function deriveTaskCenterRows(
       const provider = providerMap.get(providerId);
       return {
         job,
-        scope: job.scope === "production" || ["source_analysis", "adaptation_generation"].includes(job.input?.stage)
+        scope: job.scope === "production" || ["source_analysis", "adaptation_generation", "adaptation_episode_generation"].includes(job.input?.stage)
           ? "production"
           : "episode",
         episode: episodeMap.get(job.project_id),
@@ -80,6 +80,10 @@ export function taskShotLabel(row: TaskCenterRow) {
     return title ? `原著事件提取 · ${title}` : "原著事件提取";
   }
   if (row.job.input?.stage === "adaptation_generation") return "整部作品改编策划";
+  if (row.job.input?.stage === "adaptation_episode_generation") {
+    const episodeNo = row.job.input?.episode_plan_generation?.episodeNo;
+    return `EP${String(episodeNo || 0).padStart(2, "0")} 单集规划`;
+  }
   if (!row.shot) return row.node?.data?.label || row.job.node_id || "未关联节点";
   const raw = row.shot.shot_id || row.shot.id || row.shot.uid;
   return `SHOT ${String(raw || "").replace(/^shot[-_ ]?/i, "") || "?"}`;

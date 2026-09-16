@@ -1066,7 +1066,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       .filter(
         (j) =>
           j.status === "succeeded" && j.result &&
-          !["source_analysis", "adaptation_generation", "script_generation"].includes(j.input?.stage) &&
+          !["source_analysis", "adaptation_generation", "adaptation_episode_generation", "script_generation"].includes(j.input?.stage) &&
           !doc.applied?.includes(j.id),
       )
       .sort((a, b) => a.created - b.created);
@@ -1116,12 +1116,12 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     const newlyCompleted = completed.filter((job) => !observedCompletedJobs.current.has(job.id));
     completed.forEach((job) => observedCompletedJobs.current.add(job.id));
     const workflowCompleted = newlyCompleted.filter((job) =>
-      ["source_analysis", "adaptation_generation", "script_generation"].includes(job.input?.stage),
+      ["source_analysis", "adaptation_generation", "adaptation_episode_generation", "script_generation"].includes(job.input?.stage),
     );
     if (workflowCompleted.length) {
       setWorkflowDataRevision((value) => ({
         source: value.source + Number(workflowCompleted.some((job) => job.input?.stage === "source_analysis")),
-        adaptation: value.adaptation + Number(workflowCompleted.some((job) => ["source_analysis", "adaptation_generation"].includes(job.input?.stage))),
+        adaptation: value.adaptation + Number(workflowCompleted.some((job) => ["source_analysis", "adaptation_generation", "adaptation_episode_generation"].includes(job.input?.stage))),
         script: value.script + Number(workflowCompleted.some((job) => job.input?.stage === "script_generation")),
       }));
       if (workflowCompleted.some((job) => job.input?.stage === "script_generation")) {

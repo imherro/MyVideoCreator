@@ -96,7 +96,7 @@ def init():
         for job in c.execute("SELECT id,input FROM jobs WHERE scope='episode'").fetchall():
             try: stage=json.loads(job['input']).get('stage')
             except (TypeError,ValueError): stage=None
-            if stage in ('source_analysis','adaptation_generation'):
+            if stage in ('source_analysis','adaptation_generation','adaptation_episode_generation'):
                 c.execute("UPDATE jobs SET scope='production' WHERE id=?",(job['id'],))
         c.execute('CREATE INDEX IF NOT EXISTS jobs_production_created ON jobs(production_id,created)')
         asset_columns={row['name'] for row in c.execute('PRAGMA table_info(assets)')}
