@@ -22,7 +22,7 @@ const categoryLabels: Record<string, string> = {
   music: "音乐",
   sfx: "音效",
   voice: "对白",
-  reference: "参考图",
+  reference: "参考图", motion_reference: "动作参考",
 };
 
 function humanizeLabel(value: unknown) {

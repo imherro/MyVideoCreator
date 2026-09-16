@@ -272,7 +272,7 @@ const titles: Any = {
   image: "图像",
   video: "视频",
   audio: "角色配音",
-  reference: "参考素材",
+  reference: "参考素材", motion_reference: "动作参考",
 };
 const icons: Any = {
   text: FileText,
@@ -298,7 +298,7 @@ const assetCategories: Any = {
   music: "音乐",
   sfx: "音效",
   voice: "人声",
-  reference: "参考",
+  reference: "参考", motion_reference: "动作参考",
   other: "其他",
 };
 const assetKinds: Any = { image: "图片", video: "视频", audio: "音频", subtitle: "字幕" };
@@ -1855,7 +1855,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     const projectId = current.current.project?.id;
     if (!projectId) throw new Error('请先选择项目');
     const form = new FormData(); form.append('file', file);
-    const asset = await api(`/projects/${projectId}/assets?category=reference`, {method:'POST',body:form});
+    const asset = await api(`/projects/${projectId}/assets?category=motion_reference`, {method:'POST',body:form});
     if (current.current.project?.id !== projectId) throw new Error('项目已切换，素材已上传至原项目，请在原项目绑定');
     setAssets(previous => [asset, ...previous.filter(item => item.id !== asset.id)]);
     return asset;
