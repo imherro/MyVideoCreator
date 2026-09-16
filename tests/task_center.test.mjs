@@ -93,3 +93,11 @@ test("production jobs are labelled and filtered independently from their storage
   assert.deepEqual(filterTaskCenterRows(rows, { episodeId: "production", kind: "", status: "" }).length, 1);
   assert.deepEqual(filterTaskCenterRows(rows, { episodeId: "ep-2", kind: "", status: "" }).length, 0);
 });
+
+import { activeSourceChapters } from '../src/taskCenter.ts';
+test('chapter extraction stays active across episodes and stops on terminal status', () => {
+  const job=(id,status,extra={})=>({id,kind:'text',node_id:'source-chapter:'+id,status,input:{stage:'source_analysis'},...extra});
+  const jobs=[job('a','queued',{project_id:'ep01'}),job('b','running',{project_id:'ep02'}),job('c','succeeded'),job('d','failed'),job('e','cancelled'),job('f','interrupted'),job('g','running',{input:{stage:'script_generation'}})];
+  assert.deepEqual([...activeSourceChapters(jobs)],['a','b']);
+  assert.equal(['other'].some(id=>activeSourceChapters(jobs).has(id)),false);
+});

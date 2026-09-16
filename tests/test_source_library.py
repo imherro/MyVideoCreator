@@ -365,3 +365,27 @@ def test_append_import_rejects_trashed_or_other_production_source(source_client)
     assert client.post(base+'/sources/import',json=body).status_code==404
     assert client.get(base+'/sources').json()==[]
     assert client.post(base+'/sources/import',json={'title':'新的原著','content':'新正文'}).status_code==200
+
+def test_extraction_reuses_active_chapter_jobs_across_episodes(source_client):
+    client=source_client
+    production,episode=new_production(client);base=f'/api/productions/{production["id"]}'
+    imported=client.post(base+'/sources/import',json={'title':'防重复','content':'第一章\n开头\n第二章\n后来'}).json()
+    chapters=client.get(base+'/chapters').json()
+    second=client.post(base+'/episodes',json={'title':'另一集'}).json()
+    body={'project_id':episode['id'],'chapter_ids':[chapters[0]['id']],'provider':'local','model':'','submission_id':'source-first-click'}
+    first=client.post(base+'/source-extractions',json=body).json()['jobs'][0]
+    for status in ('queued','running'):
+        with s.db() as c:c.execute('UPDATE jobs SET status=? WHERE id=?',(status,first['id']))
+        repeat=client.post(base+'/source-extractions',json={**body,'project_id':second['id'],'submission_id':'source-repeat-'+status})
+        assert repeat.status_code==200,repeat.text
+        assert repeat.json()['jobs'][0]['id']==first['id']
+        assert repeat.json()['reused_count']==1
+    mixed=client.post(base+'/source-extractions',json={**body,'chapter_ids':[c['id'] for c in chapters],'submission_id':'source-mixed-click'}).json()
+    assert mixed['count']==2 and mixed['reused_count']==1
+    assert mixed['jobs'][0]['id']==first['id'] and mixed['jobs'][1]['id']!=first['id']
+    for status in ('succeeded','failed','cancelled'):
+        with s.db() as c:c.execute('UPDATE jobs SET status=? WHERE id=?',(status,first['id']))
+        again=client.post(base+'/source-extractions',json={**body,'submission_id':'source-retry-'+status}).json()
+        assert again['reused_count']==0 and again['jobs'][0]['id']!=first['id']
+        first=again['jobs'][0]
+    with s.db() as c:c.execute("UPDATE jobs SET status='cancelled' WHERE production_id=?",(production['id'],))

@@ -2786,6 +2786,12 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           />
         ) : workflowStage === "source" ? (
           <SourceLibraryPage
+            jobs={productionJobs}
+            onJobsSubmitted={(submitted) => {
+              if (current.current.project?.production_id === project.production_id) {
+                setProductionJobs((known) => mergeTaskSnapshots(known, submitted));
+              }
+            }}
             productionId={project.production_id}
             projectId={project.id}
             providers={projectProviders(doc.modelPool || undefined, config.providers, "text", system.models)}

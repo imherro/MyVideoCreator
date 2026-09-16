@@ -1,17 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BookOpen, CheckSquare2, FilePlus2, Plus, RefreshCw, Save, Search, Sparkles, Square, Trash2, Upload, X } from "lucide-react";
+import { activeSourceChapters } from '../taskCenter.ts';
 
 type AnyValue = any;
 type CreateDialog = { mode: "source" | "chapter"; sourceId?: string; sourceName?: string };
 
 export function SourceLibraryPage({
-  productionId, projectId, providers, defaultTarget, refreshKey = 0, request, notify, report, onChanged,
+  productionId, projectId, providers, defaultTarget, refreshKey = 0, request, notify, report, onChanged, jobs, onJobsSubmitted,
 }: {
   productionId: string; projectId: string;
   providers: AnyValue[]; defaultTarget?: AnyValue; refreshKey?: number;
   request: (path: string, options?: RequestInit) => Promise<AnyValue>;
   notify: (message: string) => void; report: (error: unknown) => void;
   onChanged?: () => void;
+  jobs: AnyValue[];
+  onJobsSubmitted: (jobs: AnyValue[]) => void;
 }) {
   const [sources, setSources] = useState<AnyValue[]>([]);
   const [chapters, setChapters] = useState<AnyValue[]>([]);
@@ -44,6 +47,8 @@ export function SourceLibraryPage({
   const allowedTextModels: string[] = activeTextProvider?.enabled_models?.text || (activeTextProvider?.models?.text ? [activeTextProvider.models.text] : activeTextProvider?.model ? [activeTextProvider.model] : []);
   const chapter = chapters.find((item) => item.id === active);
   const activeSource = sources.find((item) => item.id === chapter?.source_id) || sources[0];
+  const extracting = activeSourceChapters(jobs);
+  const selectedExtractingCount = [...selected].filter(id => extracting.has(id)).length;
 
   async function load() {
     const sequence = ++loadSequence.current;
@@ -173,7 +178,7 @@ export function SourceLibraryPage({
     } finally { setBusy(false); }
   }
   async function extract() {
-    if (!selected.size) return;
+    if (busy || !ready || !selected.size || selectedExtractingCount > 0) return;
     const provider = textProviders.find((item) => item.id === providerId);
     const modelId = model || provider?.models?.text || provider?.model || "";
     if (!modelId && providerId !== "local") throw new Error("请填写文本模型 ID");
@@ -185,11 +190,12 @@ export function SourceLibraryPage({
         await persistChapter(chapter);
         savedBeforeExtraction = true;
       }
-      await request(`/productions/${productionId}/source-extractions`, { method: "POST", body: JSON.stringify({
+      const result = await request(`/productions/${productionId}/source-extractions`, { method: "POST", body: JSON.stringify({
         project_id: projectId, chapter_ids: [...selected], provider: providerId, model: modelId,
         submission_id: `source-${Date.now()}`,
       }) });
-      notify(`${savedBeforeExtraction ? "当前章节已自动保存；" : ""}已创建 ${selected.size} 个事件提取任务，可在任务中心查看`);
+      onJobsSubmitted(result.jobs);
+      notify(`${savedBeforeExtraction ? "当前章节已自动保存；" : ""}已提交 ${result.count} 个章节的事件提取${result.reused_count ? `（${result.reused_count} 个已有任务继续执行）` : ""}，可在任务中心查看`);
     } finally { setBusy(false); }
   }
 
@@ -223,7 +229,7 @@ export function SourceLibraryPage({
         <h3>AI 事件提取</h3><p>作品级分析 · 已选 {selected.size} 章。任务失败时保留已有事件。</p>
         <label>文本服务<select value={providerId} onChange={(event) => { setProviderId(event.target.value); const provider = textProviders.find((item) => item.id === event.target.value); setModel(provider?.enabled_models?.text?.[0] || provider?.models?.text || provider?.model || ""); }}>{textProviders.map((provider) => <option key={provider.id} value={provider.id}>{provider.local ? "本地" : "云端"} · {provider.name}</option>)}</select></label>
         <label>模型{providerId === "local" ? <input value={model} placeholder="留空使用本地默认模型" onChange={(event) => setModel(event.target.value)}/> : <select value={model} onChange={(event) => setModel(event.target.value)}>{!allowedTextModels.includes(model) && model && <option value={model} disabled>{model}（已停用）</option>}{allowedTextModels.map((modelId) => <option value={modelId} key={modelId}>{modelId}</option>)}</select>}</label>
-        <button disabled={busy || !selected.size} onClick={() => run(extract)}><Sparkles size={15}/>提取所选章节事件</button>
+        <button disabled={busy || !ready || !selected.size || selectedExtractingCount > 0} onClick={() => run(extract)} title={selectedExtractingCount ? '所选章节已有任务排队或运行中，完成后可再次提取' : undefined}><Sparkles size={15}/>{selectedExtractingCount ? `正在提取（${selectedExtractingCount} 章）` : '提取所选章节事件'}</button>
       </aside>
     </div>
     {dialog && <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="source-create-title"><div className="source-create-dialog">

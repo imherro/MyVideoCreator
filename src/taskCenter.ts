@@ -4,6 +4,12 @@ export function activeTaskCount(jobs: Value[]) {
   return new Set(jobs.filter((job) => ["queued", "running"].includes(job.status)).map((job) => job.id)).size;
 }
 
+export function activeSourceChapters(jobs: Value[]): Set<string> {
+  return new Set(jobs.filter(job => job.kind === 'text' && job.input?.stage === 'source_analysis'
+    && ['queued', 'running'].includes(job.status) && job.node_id?.startsWith('source-chapter:'))
+    .map(job => job.node_id.slice('source-chapter:'.length)));
+}
+
 export function activeScriptEpisodes(jobs: Value[], productionId: string) {
   const result = new Map<number, string>();
   for (const job of jobs) {

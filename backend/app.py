@@ -1500,7 +1500,7 @@ def extract_source_events(production_id:str,body:SourceExtractionCreate):
             AND NOT EXISTS(SELECT 1 FROM deleted_items x WHERE x.kind='source' AND x.item_id=d.id)
             AND NOT EXISTS(SELECT 1 FROM deleted_items x WHERE x.kind='chapter' AND x.item_id=c.id)''',[production_id,*body.chapter_ids]).fetchall()
         if len(chapters)!=len(body.chapter_ids):raise ValueError('所选章节不存在或不属于当前 Production')
-        chapter_map={row['id']:row for row in chapters};created=[]
+        chapter_map={row['id']:row for row in chapters};created=[];reused=0
         for chapter_id in body.chapter_ids:
             chapter=chapter_map[chapter_id]
             job_body=JobCreate(node_id='source-chapter:'+chapter_id,kind='text',
@@ -1509,9 +1509,17 @@ def extract_source_events(production_id:str,body:SourceExtractionCreate):
                     'stage':'source_analysis','prompt':f'章节标题：{chapter["title"]}\n\n原文：\n{chapter["content"]}',
                     'source_event_extraction':{'productionId':production_id,'chapterId':chapter_id,'chapterRevision':chapter['revision']},
                 })
-            created.append(create_job_record(c,body.project_id,job_body))
+            active=c.execute("""SELECT j.* FROM jobs j JOIN projects p ON p.id=j.project_id
+                WHERE p.production_id=? AND j.node_id=? AND j.kind='text'
+                AND json_extract(j.input,'$.stage')='source_analysis'
+                AND j.status IN ('queued','running') ORDER BY j.created DESC LIMIT 1""",
+                (production_id,job_body.node_id)).fetchone()
+            if active and active['submission_id']!=job_body.submission_id:
+                created.append(s.unpack(active));reused+=1
+            else:
+                created.append(create_job_record(c,body.project_id,job_body))
     for item in created:s.event(body.project_id,{'type':'job','id':item['id']})
-    return {'jobs':created,'count':len(created)}
+    return {'jobs':created,'count':len(created),'reused_count':reused}
 
 
 class AdaptationSave(BaseModel):
