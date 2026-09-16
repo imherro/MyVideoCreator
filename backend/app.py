@@ -505,6 +505,35 @@ def save_project(pid:str,body:ProjectSave):
         'updated':updated,
     }
 
+class VisualVersionRestore(BaseModel):
+    production_revision:int
+
+
+@app.post('/api/projects/{pid}/visual-versions/{version_id}/restore')
+def restore_deprecated_visual_version(pid:str,version_id:str,body:VisualVersionRestore):
+    from .film_bible.versioning import restore_visual_version
+    from .adaptation import _persist_production_context
+    with s.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        state=read_project_state(c,pid)
+        if not state: raise HTTPException(404,'项目不存在')
+        production=state['production']
+        if body.production_revision!=production['revision']:
+            raise HTTPException(409,'共享资产已更新，请刷新后再恢复')
+        history=(json.loads(row['shared_context']) for row in c.execute(
+            'SELECT shared_context FROM production_revisions WHERE production_id=? ORDER BY revision DESC',
+            (production['id'],),
+        ))
+        try:
+            context,status=restore_visual_version(state['production_context'],version_id,history)
+        except ValueError as exc:
+            raise HTTPException(400,str(exc)) from exc
+        revision=_persist_production_context(c,production,context)
+        targets=[row['id'] for row in c.execute('SELECT id FROM projects WHERE production_id=?',(production['id'],))]
+    for target in targets:s.event(target,{'type':'production','revision':revision})
+    return {'status':status,'production_revision':revision}
+
+
 @app.get('/api/projects/{pid}/revisions')
 def revisions(pid:str):
     project(pid)

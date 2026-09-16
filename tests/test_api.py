@@ -1041,3 +1041,30 @@ def test_batch_late_validation_failure_rolls_back_all_jobs(authenticated):
     result=c.post('/api/projects/'+p['id']+'/run',json={'submission_id':'atomic-batch-validation'})
     assert result.status_code==400
     assert c.get('/api/projects/'+p['id']+'/jobs').json()==[]
+
+
+def test_restore_deprecated_visual_api_shares_status_across_episodes(authenticated):
+    from backend.adaptation import _persist_production_context
+    from backend.production_context import read_project_state
+    from test_film_bible_versioning import fixture
+    c = authenticated
+    first = project(c)
+    second = c.post(f'/api/productions/{first["production_id"]}/episodes', json={}).json()
+    with s.db() as db:
+        state = read_project_state(db, first['id'])
+        context = state['production_context']
+        context['filmBible']['visual'] = fixture()['filmBible']['visual']
+        _persist_production_context(db, state['production'], context)
+    with s.db() as db:
+        state = read_project_state(db, first['id'])
+        context = state['production_context']
+        context['filmBible']['visual']['versions']['hero-v1']['status'] = 'deprecated'
+        revision = _persist_production_context(db, state['production'], context)
+    url = f'/api/projects/{first["id"]}/visual-versions/hero-v1/restore'
+    assert c.post(url, json={'production_revision': revision - 1}).status_code == 409
+    response = c.post(url, json={'production_revision': revision})
+    assert response.status_code == 200, response.text
+    assert response.json()['status'] == 'locked'
+    for pid in [first['id'], second['id']]:
+        visual = c.get(f'/api/projects/{pid}').json()['document']['filmBible']['visual']
+        assert visual['versions']['hero-v1'] == fixture()['filmBible']['visual']['versions']['hero-v1']

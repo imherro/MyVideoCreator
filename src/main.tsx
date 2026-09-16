@@ -954,9 +954,10 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       window.removeEventListener("online", retryOnNetworkRecovery);
     };
   }, [refresh]);
-  async function syncLatestProject(pid: string) {
+  async function syncLatestProject(pid: string, preserveNewEdits = false) {
     const latest = await api("/projects/" + pid);
     if (current.current.project?.id !== pid) return;
+    if (preserveNewEdits && dirty.current) { await refresh(pid); return; }
     const projectedDocument = deriveManagedGraph(
       migrateLinkedNodePrompts(latest.document),
     );
@@ -2437,6 +2438,22 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     onStatus: (versionId, status) => {
       try { update(() => setVisualVersionStatus(doc, versionId, status)); }
       catch (reason) { report(reason); }
+    },
+    onRestoreVersion: async (versionId) => {
+      const pid = current.current.project?.id;
+      if (!pid) return;
+      await save();
+      if (dirty.current) throw new Error("请先解决保存失败，再恢复版本");
+      if (current.current.project?.id !== pid) return;
+      await api(`/projects/${pid}/visual-versions/${versionId}/restore`, send("POST", {
+        production_revision: productionRevision.current,
+      }));
+      // Keep edits made while the restore request was in flight; normal refresh
+      // reconciles the production revision instead of replacing the whole draft.
+      if (current.current.project?.id !== pid) return;
+      if (!dirty.current) await syncLatestProject(pid, true);
+      else await refresh(pid);
+      setNotice("已恢复弃用前状态，原参考图和分镜绑定保持不变");
     },
     onSetImageOverride: (cardId, override) => {
       try {
