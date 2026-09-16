@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { presentEditorAssets } from "../src/editor/projectAssets.ts";
+import { filterEditorAssetsByEpisode, presentEditorAssets } from "../src/editor/projectAssets.ts";
 
 test("editor asset labels recover shot identity and versions from generated metadata", () => {
   const assets = [
@@ -23,4 +23,36 @@ test("editor asset labels keep uploaded filenames and expose generated task labe
   ], []);
   assert.equal(presented[0].title, "门店环境.jpg");
   assert.equal(presented[1].title, "镜头 06 · 分镜图");
+});
+
+test("editor library shows only the chosen episode, with other episodes opt-in", () => {
+  const assets = [
+    { id: "ep01-video", project_id: "ep01", kind: "video" },
+    { id: "ep02-image", project_id: "ep02", kind: "image" },
+    { id: "ep03-video", project_id: "ep03", kind: "video" },
+    { id: "ep03-audio", project_id: "ep03", kind: "audio" },
+    { id: "legacy-ep03", origin_project_id: "ep03", kind: "image" },
+    { id: "unknown", kind: "video" },
+  ];
+  assert.deepEqual(filterEditorAssetsByEpisode(assets, "ep03").map((item) => item.id), ["ep03-video", "ep03-audio", "legacy-ep03"]);
+  assert.deepEqual(filterEditorAssetsByEpisode(assets, "ep02").map((item) => item.id), ["ep02-image"]);
+  assert.deepEqual(filterEditorAssetsByEpisode(assets, "ep04"), []);
+  assert.deepEqual(filterEditorAssetsByEpisode(assets, "all"), assets);
+  assert.equal(assets.length, 6, "library filtering must not remove assets needed by the timeline");
+});
+
+test("cross-episode assets do not borrow current shot descriptions or version numbers", () => {
+  const assets = [
+    { id: "ep02", project_id: "ep02", origin_episode_no: 2, name: "生成结果.mp4", kind: "video", url: "/ep02", created: 1, metadata: { node_id: "video-1", input: { label: "shot-001 · 第二集" } } },
+    { id: "ep03", project_id: "ep03", origin_episode_no: 3, name: "生成结果.mp4", kind: "video", url: "/ep03", created: 2, metadata: { node_id: "video-1", input: { label: "shot-001 · 第三集" } } },
+  ];
+  const shots = [{ id: "shot-001", title: "第三集镜头内容", pipeline: { videoNodeId: "video-1" } }];
+  const result = presentEditorAssets(assets, shots, "ep03");
+  assert.match(result[0].title, /第二集/);
+  assert.doesNotMatch(result[0].subtitle, /第三集镜头内容/);
+  assert.equal(result[1].subtitle, "第三集镜头内容");
+  assert.match(result[0].details, /EP02/);
+  assert.match(result[1].details, /EP03/);
+  assert.doesNotMatch(result[0].details, /V1/);
+  assert.doesNotMatch(result[1].details, /V2/);
 });

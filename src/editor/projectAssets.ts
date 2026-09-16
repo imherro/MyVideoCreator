@@ -39,6 +39,18 @@ function nodeIdOf(asset: EditorAsset) {
   return String(asset.metadata?.node_id || "");
 }
 
+export function editorAssetProjectId(asset: EditorAsset) {
+  return asset.project_id || asset.origin_project_id || "";
+}
+
+export function filterEditorAssetsByEpisode(assets: EditorAsset[], scope: string) {
+  return scope === "all" ? assets : assets.filter((asset) => editorAssetProjectId(asset) === scope);
+}
+
+function versionGroup(asset: EditorAsset) {
+  return `${editorAssetProjectId(asset)}:${nodeIdOf(asset)}:${asset.kind}`;
+}
+
 function shotNodeIds(shot: Record<string, any>) {
   return new Set([
     shot.imageNode,
@@ -51,13 +63,14 @@ function shotNodeIds(shot: Record<string, any>) {
 export function presentEditorAssets(
   assets: EditorAsset[],
   shots: Record<string, any>[],
+  currentProjectId?: string,
 ): EditorAssetPresentation[] {
   const versions = new Map<string, Map<string, number>>();
   const grouped = new Map<string, EditorAsset[]>();
   for (const asset of assets) {
     const nodeId = nodeIdOf(asset);
     if (!nodeId) continue;
-    const key = `${nodeId}:${asset.kind}`;
+    const key = versionGroup(asset);
     grouped.set(key, [...(grouped.get(key) || []), asset]);
   }
   for (const [key, items] of grouped) {
@@ -71,7 +84,8 @@ export function presentEditorAssets(
   return assets.map((asset) => {
     const input = asset.metadata?.input || {};
     const nodeId = nodeIdOf(asset);
-    const shotIndex = nodeId ? shots.findIndex((shot) => shotNodeIds(shot).has(nodeId)) : -1;
+    const belongsToCurrent = !currentProjectId || editorAssetProjectId(asset) === currentProjectId;
+    const shotIndex = nodeId && belongsToCurrent ? shots.findIndex((shot) => shotNodeIds(shot).has(nodeId)) : -1;
     const shot = shotIndex >= 0 ? shots[shotIndex] : undefined;
     const shotNumber = shot
       ? Number(String(shot.id || shot.uid || "").match(/(\d+)/)?.[1] || shotIndex + 1)
@@ -87,9 +101,10 @@ export function presentEditorAssets(
     const plannedDuration = Number(
       shot?.duration ?? input.shot_duration ?? input.parameters?.duration,
     );
-    const rank = nodeId ? versions.get(`${nodeId}:${asset.kind}`)?.get(asset.id) : undefined;
-    const versionCount = nodeId ? grouped.get(`${nodeId}:${asset.kind}`)?.length || 0 : 0;
+    const rank = nodeId ? versions.get(versionGroup(asset))?.get(asset.id) : undefined;
+    const versionCount = nodeId ? grouped.get(versionGroup(asset))?.length || 0 : 0;
     const details = [
+      asset.origin_episode_no ? `EP${String(asset.origin_episode_no).padStart(2, "0")}` : undefined,
       Number.isFinite(duration) && duration > 0 ? `素材 ${duration.toFixed(1)} 秒` : undefined,
       asset.kind === "video" && Number.isFinite(plannedDuration) && plannedDuration > 0 && Math.abs(plannedDuration - duration) > 0.05
         ? `镜头 ${plannedDuration.toFixed(1)} 秒`

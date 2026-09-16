@@ -2980,6 +2980,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           <Suspense fallback={<div className="loading">加载剪辑工作区…</div>}>
             <EditorWorkspace
               projectId={project.id}
+              episodes={currentEpisodes}
               productionName={currentProduction?.name || project.name}
               episodeLabel={episodeLabel(project)}
               editor={doc.editor}

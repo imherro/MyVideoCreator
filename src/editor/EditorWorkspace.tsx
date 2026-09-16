@@ -12,6 +12,7 @@ import {
 import { attachAssetReferences, editorResolution, readEditorTimeline } from "./editorDocument";
 import type { EditorAsset, EditorDocument } from "./editorDocument";
 import { ProjectAssetPanel } from "./ProjectAssetPanel";
+import type { EpisodeSummary } from "../app/production";
 import { EditorInspector } from "./EditorInspector";
 import { EditorToolbar } from "./EditorToolbar";
 import { EditorShortcuts } from "./EditorShortcuts";
@@ -27,6 +28,7 @@ import "./editorWorkspace.css";
 
 type EditorWorkspaceProps = {
   projectId: string;
+  episodes: EpisodeSummary[];
   productionName: string;
   episodeLabel: string;
   editor?: EditorDocument;
@@ -126,6 +128,8 @@ function TimelineDurationFloor({ projectDuration }: { projectDuration: number })
 }
 
 function EditorSurface({
+  projectId,
+  episodes,
   productionName,
   episodeLabel,
   initialTimeline,
@@ -138,6 +142,8 @@ function EditorSurface({
   onChange,
   onExport,
 }: {
+  projectId: string;
+  episodes: EpisodeSummary[];
   productionName: string;
   episodeLabel: string;
   initialTimeline: ProjectJSON;
@@ -297,7 +303,7 @@ function EditorSurface({
       </div>
       <div className="mvc-editor-surface" ref={surfaceRef} onDragOverCapture={handleDragOver} onDropCapture={handleDrop}>
         <VideoEditor
-          leftPanel={<ProjectAssetPanel assets={assets} shots={shots} onMessage={showMessage} />}
+          leftPanel={<ProjectAssetPanel currentProjectId={projectId} episodes={episodes} assets={assets} shots={shots} onMessage={showMessage} />}
           rightPanel={<EditorInspector assets={assets} />}
           editorConfig={{
             canvasMode: true,
@@ -313,6 +319,7 @@ function EditorSurface({
 
 export function EditorWorkspace({
   projectId,
+  episodes,
   productionName,
   episodeLabel,
   editor,
@@ -344,6 +351,8 @@ export function EditorWorkspace({
           analytics={{ enabled: false }}
         >
           <EditorSurface
+            projectId={projectId}
+            episodes={episodes}
             initialTimeline={initialTimeline}
             productionName={productionName}
             episodeLabel={episodeLabel}

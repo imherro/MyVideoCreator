@@ -9,6 +9,9 @@ export type EditorAsset = {
   metadata: Record<string, any>;
   category?: string;
   source?: string;
+  project_id?: string;
+  origin_project_id?: string;
+  origin_episode_no?: number;
 };
 
 export type EditorDocument = {
