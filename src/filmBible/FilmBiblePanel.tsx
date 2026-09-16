@@ -72,6 +72,7 @@ export function FilmBiblePanel({
   onLockVoice,
   onGenerateCharacterDialogue,
   onRegenerateDialogue,
+  compactSingleSelection = false,
 }: {
   visual: VisualBible;
   shots: Array<Record<string, any>>;
@@ -111,8 +112,9 @@ export function FilmBiblePanel({
   onLockVoice: (cardId: string, locked: boolean) => void;
   onGenerateCharacterDialogue: (cardId: string) => Promise<number>;
   onRegenerateDialogue: (cardId: string, dialogueId: string) => Promise<void>;
+  compactSingleSelection?: boolean;
 }) {
-  const versions = useMemo(
+  const allVersions = useMemo(
     () =>
       Object.values(visual.versions).filter(
         (version) => !visual.cards[version.cardId]?.deletedAt,
@@ -126,7 +128,14 @@ export function FilmBiblePanel({
     [visual],
   );
   const [selectedId, setSelectedId] = useState(
-    focusVersionId || versions[0]?.id || "",
+    focusVersionId || allVersions[0]?.id || "",
+  );
+  const activeCardId = visual.versions[focusVersionId || selectedId]?.cardId || allVersions[0]?.cardId;
+  const versions = useMemo(
+    () => compactSingleSelection
+      ? allVersions.filter((version) => version.cardId === activeCardId)
+      : allVersions,
+    [activeCardId, allVersions, compactSingleSelection],
   );
   const [shotUid, setShotUid] = useState(
     String(shots[0]?.uid || shots[0]?.id || ""),
@@ -152,6 +161,9 @@ export function FilmBiblePanel({
   );
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [voiceError, setVoiceError] = useState("");
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const [referenceOpen, setReferenceOpen] = useState(true);
+  const [bindingOpen, setBindingOpen] = useState(false);
   const dialogueRows = useMemo(
     () => projectCharacterDialogueRows({
       shots,
@@ -186,6 +198,11 @@ export function FilmBiblePanel({
     setVoiceDraft(storedVoice || defaultVoiceProfile(card.id, speechProviders[0]?.id || ""));
     setVoiceError("");
   }, [card?.id, storedVoice, speechProviders[0]?.id]);
+  useEffect(() => {
+    setVoiceOpen(false);
+    setReferenceOpen(true);
+    setBindingOpen(false);
+  }, [card?.id]);
   if (!versions.length)
     return (
       <div className="empty-state film-bible-empty">
@@ -255,7 +272,7 @@ export function FilmBiblePanel({
   };
   return (
     <div className="film-bible-panel">
-      <div className="film-bible-list" role="list" aria-label="视觉版本">
+      {!compactSingleSelection && <div className="film-bible-list" role="list" aria-label="视觉版本">
         {versions.map((version) => {
           const item = visual.cards[version.cardId];
           return (
@@ -270,8 +287,8 @@ export function FilmBiblePanel({
             </button>
           );
         })}
-      </div>
-      <div className="film-bible-editor">
+      </div>}
+      <div className={`film-bible-editor ${compactSingleSelection ? "compact" : ""}`}>
         <div className="film-bible-toolbar">
           <span className={`visual-status ${selected.status}`}>
             {visualStatusLabels[selected.status]}
@@ -392,8 +409,11 @@ export function FilmBiblePanel({
           </>
         )}
         {card.kind === "character" && <>
-          <hr />
-          <div className="film-bible-section-title"><b>角色固定音色</b><small>跨镜头统一对白声纹</small></div>
+          <button type="button" className="film-bible-section-toggle" aria-expanded={voiceOpen} onClick={() => setVoiceOpen((value) => !value)}>
+            <span><Volume2 size={15}/><b>角色固定声音</b><small>{storedVoice ? `V${storedVoice.version} · ${storedVoice.status === "locked" ? "已锁定" : "草稿"}` : "未设置"}</small></span>
+            <span>{voiceOpen ? "收起" : "设置声音"}</span>
+          </button>
+          {voiceOpen && <div className="film-bible-collapsible-body">
           {!speechProviders.length ? <p className="warning-text">尚未配置豆包语音。请到“设置 → 模型服务”添加豆包语音并填写独立 Speech API Key。</p> : <>
             <label>语音服务<select value={voiceDraft.providerId} disabled={voiceDraft.status === "locked"} onChange={(event)=>setVoiceDraft({...voiceDraft,providerId:event.target.value})}>{speechProviders.map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
             <label>预置音色<select value={catalogVoice(voiceDraft.voiceType)?.id || CUSTOM_VOICE_ID} disabled={voiceDraft.status === "locked"} onChange={(event)=>setVoiceDraft({...voiceDraft,voiceType:event.target.value === CUSTOM_VOICE_ID ? "" : event.target.value})}>{[...new Set(DOUBAO_TTS2_VOICES.map((item)=>item.category))].map((category)=><optgroup key={category} label={category}>{DOUBAO_TTS2_VOICES.filter((item)=>item.category===category).map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</optgroup>)}<option value={CUSTOM_VOICE_ID}>自定义 / 声音复刻 ID…</option></select></label>
@@ -433,9 +453,13 @@ export function FilmBiblePanel({
             })}</div>}
             {voiceError && <p className="error">{voiceError}</p>}
           </>}
+          </div>}
         </>}
-        <hr />
-        <h3>主参考图</h3>
+        <button type="button" className="film-bible-section-toggle" aria-expanded={referenceOpen} onClick={() => setReferenceOpen((value) => !value)}>
+          <span><ImagePlus size={15}/><b>主参考图</b><small>{reference ? selected.status === "locked" ? "已锁定" : "待确认" : "未生成"}</small></span>
+          <span>{referenceOpen ? "收起" : "展开"}</span>
+        </button>
+        {referenceOpen && <div className="film-bible-collapsible-body">
         <div className="reference-policy">
           <label>
             图片模型策略
@@ -590,8 +614,12 @@ export function FilmBiblePanel({
             <LockKeyhole size={14} /> 此参考图已确认锁定，可安全用于后续分镜一致性约束。
           </p>
         )}
-        <hr />
-        <h3>分镜绑定</h3>
+        </div>}
+        <button type="button" className="film-bible-section-toggle" aria-expanded={bindingOpen} onClick={() => setBindingOpen((value) => !value)}>
+          <span><Link2 size={15}/><b>分镜绑定</b><small>{impacted.length ? `${impacted.length} 镜待升级` : shots.length ? `${shots.length} 个分镜可管理` : "暂无分镜"}</small></span>
+          <span>{bindingOpen ? "收起" : "管理绑定"}</span>
+        </button>
+        {bindingOpen && <div className="film-bible-collapsible-body">
         {selected.id === card.currentVersionId && currentVersion?.status === "locked" && impacted.length > 0 && (
           <div className="version-impact">
             <b>{impacted.length} 个分镜仍使用旧版本</b>
@@ -641,6 +669,7 @@ export function FilmBiblePanel({
             <small>绑定会自动投影为视觉资产到分镜图的受管连线。</small>
           </>
         )}
+        </div>}
       </div>
     </div>
   );

@@ -6,6 +6,7 @@ function fixture(){
   const nodes=[
     {id:'video-2',type:'media',position:{x:0,y:0},data:{kind:'video',assetId:'clip-2'}},
     {id:'visual-hero',type:'visualAsset',position:{x:0,y:0},data:{kind:'visual_asset',managed:true,visualVersionId:'hero-v1'}},
+    {id:'visual-hero-state',type:'visualAsset',position:{x:0,y:0},data:{kind:'visual_asset',managed:true,visualVersionId:'hero-state-v1'}},
     {id:'image-1',type:'media',position:{x:0,y:0},data:{kind:'image',assetId:'frame-1'}},
     {id:'script',type:'media',position:{x:0,y:0},data:{kind:'text',text:'剧本'}},
     {id:'image-2',type:'media',position:{x:0,y:0},data:{kind:'image',assetId:'frame-2'}},
@@ -13,7 +14,7 @@ function fixture(){
     {id:'visual-scene',type:'visualAsset',position:{x:0,y:0},data:{kind:'visual_asset',managed:true,visualVersionId:'scene-v1'}},
     {id:'video-1',type:'media',position:{x:0,y:0},data:{kind:'video',assetId:'clip-1'}},
   ];
-  return {nodes,filmBible:{visual:{cards:{hero:{id:'hero',kind:'character'},scene:{id:'scene',kind:'scene'}},versions:{'hero-v1':{id:'hero-v1',cardId:'hero'},'scene-v1':{id:'scene-v1',cardId:'scene'}}}},edges:[{id:'a',source:'script',target:'storyboard'},{id:'b',source:'storyboard',target:'image-1'},{id:'c',source:'image-1',target:'video-1'}],shots:[
+  return {nodes,filmBible:{visual:{cards:{hero:{id:'hero',kind:'character'},heroState:{id:'heroState',kind:'character_state',parentCardId:'hero'},scene:{id:'scene',kind:'scene'}},versions:{'hero-v1':{id:'hero-v1',cardId:'hero'},'hero-state-v1':{id:'hero-state-v1',cardId:'heroState',parentVersionId:'hero-v1'},'scene-v1':{id:'scene-v1',cardId:'scene'}}}},edges:[{id:'a',source:'script',target:'storyboard'},{id:'b',source:'storyboard',target:'image-1'},{id:'c',source:'image-1',target:'video-1'}],shots:[
     {id:'shot-2',uid:'s2',order:2,imageNode:'image-2',videoNode:'video-2'},
     {id:'shot-1',uid:'s1',order:1,imageNode:'image-1',videoNode:'video-1'},
   ]};
@@ -25,6 +26,9 @@ test('auto layout separates dependency lanes and orders shot image/video rows',(
   const at=id=>result.nodes.find(node=>node.id===id).position;
   assert.ok(at('script').x<at('storyboard').x);
   assert.ok(at('storyboard').x<at('visual-hero').x);
+  assert.ok(at('visual-hero').x+260<at('visual-hero-state').x);
+  assert.equal(at('visual-hero-state').y,at('visual-hero').y);
+  assert.ok(at('visual-hero-state').x+230<at('visual-scene').x);
   assert.ok(at('visual-hero').x<at('image-1').x);
   assert.ok(at('image-1').x<at('video-1').x);
   assert.ok(at('image-1').x-(at('visual-hero').x+260)>=200);

@@ -47,13 +47,6 @@ export function ArtDepartmentPage({
       .sort((left, right) => `${left.kind}:${left.name}`.localeCompare(`${right.kind}:${right.name}`)),
     [panelProps.visual.cards, filter, scope, requiredCardIds],
   );
-  const scopedVisual = useMemo(() => {
-    const cardIds = new Set(cards.map((card) => card.id));
-    return {
-      cards: Object.fromEntries(Object.entries(panelProps.visual.cards).filter(([id]) => cardIds.has(id))),
-      versions: Object.fromEntries(Object.entries(panelProps.visual.versions).filter(([, version]) => cardIds.has(version.cardId))),
-    };
-  }, [cards, panelProps.visual.cards, panelProps.visual.versions]);
   useEffect(() => {
     if (panelProps.focusVersionId) setActiveVersionId(panelProps.focusVersionId);
   }, [panelProps.focusVersionId]);
@@ -85,17 +78,20 @@ export function ArtDepartmentPage({
           <b>{Object.values(panelProps.visual.versions).filter((item) => item.status === "locked").length}</b><span>已锁定版本</span>
         </div>
       </header>
-      <nav className="art-scope-switch" aria-label="资产范围">
-        <button className={scope === "episode" ? "active" : ""} onClick={() => setScope("episode")}>本集需要 <small>{requiredCardIds.size}</small></button>
-        <button className={scope === "production" ? "active" : ""} onClick={() => setScope("production")}>全部作品资产 <small>{Object.values(panelProps.visual.cards).filter((card) => !card.deletedAt).length}</small></button>
-      </nav>
-      <nav className="art-filters" aria-label="视觉资产类型">
-        {filters.map((item) => (
-          <button key={item.id} className={filter === item.id ? "active" : ""} onClick={() => setFilter(item.id)}>
-            {item.label}<small>{item.id === "all" ? Object.values(panelProps.visual.cards).filter((card) => !card.deletedAt).length : Object.values(panelProps.visual.cards).filter((card) => !card.deletedAt && card.kind === item.id).length}</small>
-          </button>
-        ))}
-      </nav>
+      <div className="art-filterbar">
+        <nav className="art-scope-switch" aria-label="资产范围">
+          <button className={scope === "episode" ? "active" : ""} onClick={() => setScope("episode")}>本集需要 <small>{requiredCardIds.size}</small></button>
+          <button className={scope === "production" ? "active" : ""} onClick={() => setScope("production")}>全部作品资产 <small>{Object.values(panelProps.visual.cards).filter((card) => !card.deletedAt).length}</small></button>
+        </nav>
+        <span className="art-filter-divider" aria-hidden="true" />
+        <nav className="art-filters" aria-label="视觉资产类型">
+          {filters.map((item) => (
+            <button key={item.id} className={filter === item.id ? "active" : ""} onClick={() => setFilter(item.id)}>
+              {item.label}<small>{item.id === "all" ? Object.values(panelProps.visual.cards).filter((card) => !card.deletedAt).length : Object.values(panelProps.visual.cards).filter((card) => !card.deletedAt && card.kind === item.id).length}</small>
+            </button>
+          ))}
+        </nav>
+      </div>
       {!cards.length ? (
         <div className="empty-state art-empty"><Boxes /><h3>{scope === "episode" ? "本集暂无需要确认的资产" : "此分类还没有资产卡"}</h3><p>{scope === "episode" ? "先完成分镜规划和资产绑定，或切换到“全部作品资产”查看。" : "从剧本生成分镜时会提取共享视觉资产；进入本页不会自动调用模型。"}</p></div>
       ) : (
@@ -157,7 +153,7 @@ export function ArtDepartmentPage({
       {!!cards.length && (
         <div className="art-department-detail">
           <div className="art-detail-heading"><div><span className="eyebrow">CANONICAL VERSION</span><h3>版本详情与参考图</h3></div><p>下方操作直接修改 Production Film Bible。</p></div>
-          <FilmBiblePanel {...panelProps} visual={scopedVisual} focusVersionId={activeVersionId || panelProps.focusVersionId} onFocusVersion={select} />
+          <FilmBiblePanel {...panelProps} compactSingleSelection visual={panelProps.visual} focusVersionId={activeVersionId || panelProps.focusVersionId} onFocusVersion={select} />
         </div>
       )}
     </section>

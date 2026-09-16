@@ -12,7 +12,7 @@ export function isManagedVisualNode(node: Record<string, any>) {
 }
 
 export function isManagedVisualEdge(edge: Record<string, any>) {
-  return edge?.data?.managed === true && edge?.data?.origin === "visual_binding";
+  return edge?.data?.managed === true && ["visual_binding", "visual_lineage"].includes(edge?.data?.origin);
 }
 
 export function visualVersionIdFromNode(node: Record<string, any>) {
@@ -146,12 +146,28 @@ export function deriveManagedGraph<T extends FilmBibleDocument>(document: T): T 
       ];
     });
   });
+  const lineageEdges = versions.flatMap((version) => {
+    const card = visual.cards[version.cardId];
+    if (!card || card.deletedAt || !["character_state", "scene_state"].includes(card.kind)) return [];
+    const parentVersionId = version.parentVersionId || visual.cards[card.parentCardId || ""]?.currentVersionId;
+    const source = parentVersionId ? nodeIdByVersion.get(parentVersionId) : undefined;
+    const target = nodeIdByVersion.get(version.id);
+    if (!source || !target) return [];
+    return [{
+      id: `visual-lineage:${parentVersionId}:${version.id}`,
+      source,
+      target,
+      type: "smoothstep",
+      data: { managed: true, origin: "visual_lineage", kind: card.kind },
+    }];
+  });
   const nodes = [
     ...document.nodes.filter((node) => !isManagedVisualNode(node)),
     ...managedNodes,
   ];
   const edges = [
     ...document.edges.filter((edge) => !isManagedVisualEdge(edge)),
+    ...lineageEdges,
     ...managedEdges,
   ];
   if (same(nodes, document.nodes) && same(edges, document.edges)) return document;

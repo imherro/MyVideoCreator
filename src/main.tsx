@@ -2222,9 +2222,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     }) || [];
   const renderedEdges =
     doc?.edges.map((edge, edgeIndex) => {
-      const managed =
-        edge.data?.managed === true && edge.data?.origin === "visual_binding";
-      const stroke = managed ? "#d4a963" : "#718991";
+      const managed = edge.data?.managed === true;
+      const lineage = edge.data?.origin === "visual_lineage";
+      const stroke = lineage ? "#77a5bb" : managed ? "#ddb66f" : "#78939d";
       const focusedNode = hoveredNode || selected;
       const related =
         !focusedNode || edge.source === focusedNode || edge.target === focusedNode;
@@ -2240,25 +2240,26 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             : 0.25 + (edgeIndex % 3) * 0.025,
         },
         animated: edge.animated !== false && related,
-        className: `${edge.className || ""} mvc-flow-edge${managed ? " mvc-flow-edge-managed" : ""}`.trim(),
+        className: `${edge.className || ""} mvc-flow-edge${managed ? " mvc-flow-edge-managed" : ""}${lineage ? " mvc-flow-edge-lineage" : ""}`.trim(),
         zIndex: 0,
         markerEnd:
           edge.markerEnd || {
             type: MarkerType.ArrowClosed,
             color: stroke,
-            width: 13,
-            height: 13,
+            width: 14,
+            height: 14,
           },
         style: {
           stroke,
-          strokeWidth: focusedNode && related ? 2.6 : managed ? 1.65 : 1.5,
+          strokeWidth: focusedNode && related ? 2.65 : lineage ? 1.75 : managed ? 1.85 : 1.7,
+          strokeDasharray: lineage ? "7 7" : undefined,
           opacity: focusedNode
             ? related
               ? 0.96
-              : 0.055
+              : 0.19
             : managed
-              ? 0.32
-              : 0.38,
+              ? 0.54
+              : 0.5,
           ...edge.style,
         },
       };
@@ -2627,7 +2628,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         onChange={activateGlobalPanel}
       />
       <main className="work-area">
-        <div className="viewbar">
+        <div className={`viewbar ${workflowStage === "storyboard" ? "storyboard-viewbar" : ""}`}>
           {workflowStage === "storyboard" ? (
             <div className="segmented" aria-label="分镜视图">
               <button className={view === "shots" ? "active" : ""} onClick={() => setView("shots")}>

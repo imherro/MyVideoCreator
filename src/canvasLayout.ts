@@ -3,17 +3,18 @@ type Value = Record<string, any>;
 const X = {
   text: 40,
   storyboard: 440,
-  visualCharacter: 780,
-  visualScene: 1040,
-  visualProp: 1300,
-  visualState: 1500,
-  image: 2050,
-  video: 2520,
+  visualCharacter: 820,
+  visualCharacterState: 1160,
+  visualScene: 1500,
+  visualSceneState: 1840,
+  visualProp: 2180,
+  image: 2780,
+  video: 3260,
   other: 440,
 };
 const TOP = 80;
-const MEDIA_GAP = 330;
-const VISUAL_GAP = 310;
+const MEDIA_GAP = 380;
+const VISUAL_GAP = 360;
 
 function shotIdentity(shot: Value) {
   return String(shot.uid || shot.id || "");
@@ -32,7 +33,8 @@ function nodeLane(node: Value, document?: Value) {
   if (node.type === "visualAsset" || node.data?.kind === "visual_asset") {
     const version = document?.filmBible?.visual?.versions?.[node.data?.visualVersionId];
     const card = version ? document?.filmBible?.visual?.cards?.[version.cardId] : undefined;
-    if (["character_state", "scene_state"].includes(card?.kind)) return "visualState";
+    if (card?.kind === "character_state") return "visualCharacterState";
+    if (card?.kind === "scene_state") return "visualSceneState";
     if (card?.kind === "scene") return "visualScene";
     if (card?.kind === "prop") return "visualProp";
     return "visualCharacter";
@@ -50,7 +52,7 @@ function nodeLane(node: Value, document?: Value) {
  * Deterministic left-to-right layout for the creation graph.
  * Project data, node ids, edge ids and generation state are never changed.
  */
-export function autoLayoutCanvas<T extends { nodes: Value[]; edges: Value[]; shots?: Value[] }>(
+export function autoLayoutCanvas<T extends { nodes: Value[]; edges: Value[]; shots?: Value[]; filmBible?: Value }>(
   document: T,
 ): T {
   const positions = new Map<string, { x: number; y: number }>();
@@ -68,15 +70,16 @@ export function autoLayoutCanvas<T extends { nodes: Value[]; edges: Value[]; sho
     text: 0,
     storyboard: 0,
     visualCharacter: 0,
+    visualCharacterState: 0,
     visualScene: 0,
+    visualSceneState: 0,
     visualProp: 0,
-    visualState: 0,
     image: shots.length,
     video: shots.length,
     other: 0,
   };
   const ordered = [...document.nodes].sort((left, right) => {
-    const laneOrder = ["text", "storyboard", "visualCharacter", "visualScene", "visualProp", "visualState", "image", "video", "other"];
+    const laneOrder = ["text", "storyboard", "visualCharacter", "visualCharacterState", "visualScene", "visualSceneState", "visualProp", "image", "video", "other"];
     return (
       laneOrder.indexOf(nodeLane(left, document)) - laneOrder.indexOf(nodeLane(right, document)) ||
       String(left.data?.visualVersionId || left.id).localeCompare(
@@ -89,7 +92,14 @@ export function autoLayoutCanvas<T extends { nodes: Value[]; edges: Value[]; sho
     const lane = nodeLane(node, document);
     const index = laneCounts[lane]++;
     const gap = lane.startsWith("visual") ? VISUAL_GAP : MEDIA_GAP;
-    positions.set(node.id, { x: X[lane as keyof typeof X], y: TOP + index * gap });
+    let y = TOP + index * gap;
+    if (lane === "visualCharacterState" || lane === "visualSceneState") {
+      const version = document?.filmBible?.visual?.versions?.[node.data?.visualVersionId];
+      const parentNode = ordered.find((candidate) => candidate.data?.visualVersionId === version?.parentVersionId);
+      const parentPosition = parentNode ? positions.get(parentNode.id) : undefined;
+      if (parentPosition) y = Math.max(y, parentPosition.y);
+    }
+    positions.set(node.id, { x: X[lane as keyof typeof X], y });
   }
 
   const nodes = document.nodes.map((node) => ({

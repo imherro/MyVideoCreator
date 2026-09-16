@@ -42,10 +42,11 @@ test('binding a state version replaces its parent entity edge instead of duplica
  doc.filmBible.visual.cards.c5={id:'c5',kind:'scene_state',name:'雨夜天台',parentCardId:'c3',currentVersionId:'v5',status:'active',source:{type:'script_extraction'}};
  doc.filmBible.visual.versions.v5={id:'v5',cardId:'c5',version:1,parentVersionId:'v3',status:'draft',spec:{description:'雨夜状态',attributes:[]},invariants:[],references:[],createdAt:2,provenance:{}};
  doc=deriveManagedGraph(bindVisualVersion(doc,'shot-stable','v5'));
- const managed=doc.edges.filter(isManagedVisualEdge);
+ const managed=doc.edges.filter(edge=>isManagedVisualEdge(edge)&&edge.data.origin==='visual_binding');
  assert.equal(managed.length,4);
  assert.ok(managed.some(edge=>edge.source==='visual-version:v5'&&edge.data.kind==='scene'));
  assert.ok(!managed.some(edge=>edge.source==='visual-version:v3'));
+ assert.ok(doc.edges.some(edge=>edge.data?.origin==='visual_lineage'&&edge.source==='visual-version:v3'&&edge.target==='visual-version:v5'));
  assert.equal(doc.shots[0].assetBindings.scene.versionId,'v5');
 });
 

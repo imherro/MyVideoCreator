@@ -42,14 +42,17 @@ export function VisualAssetNode({
     return <div className="visual-node missing">视觉版本已丢失</div>;
   const reference = primaryReference(version);
   const referenceAsset = assets.find((item) => item.id === reference?.assetId);
+  const parentCard = card.parentCardId ? visual.cards[card.parentCardId] : undefined;
   return (
     <div className={`visual-node visual-node-${card.kind} ${selected ? "selected" : ""}`}>
+      <Handle type="target" position={Position.Left} />
       <div className="visual-node-heading">
         <BookImage size={15} />
         <span>{visualKindLabels[card.kind]}</span>
         {version.status === "locked" && <LockKeyhole size={13} />}
       </div>
       <strong>{card.name}</strong>
+      {parentCard && <small className="visual-node-parent">源自：{parentCard.name}</small>}
       {referenceAsset && (
         <img
           className="visual-node-reference"
