@@ -81,11 +81,13 @@ def test_verify_reads_account_and_public_model_catalog(monkeypatch):
 
 
 def test_text_reuses_runninghub_openai_stream(monkeypatch):
-    item = stored_job('text', provider())
+    configured=provider();configured['api_key']=' \t rh-secret \r\n'
+    item = stored_job('text', configured)
     original = httpx.Client
 
     def handle(request):
         assert str(request.url).startswith('https://llm.runninghub.ai/v1/chat/completions')
+        assert request.headers['authorization']=='Bearer rh-secret'
         assert json.loads(request.read())['model'] == 'bytedance/doubao-seed-2.1-pro'
         return httpx.Response(200, content=b'data: {"choices":[{"delta":{"content":"OK"}}]}\n\ndata: [DONE]\n\n')
 

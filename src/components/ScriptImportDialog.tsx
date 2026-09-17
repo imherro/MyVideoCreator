@@ -1,10 +1,12 @@
 import {useEffect,useRef,useState} from 'react';
 import {Sparkles,Upload,X,Minimize2,LoaderCircle,FileText} from 'lucide-react';
 import {rememberImport,forgetImport} from './ImportResumeNotice';
+import {systemModelTargets,targetKey,targetLabel} from '../modelAccess';
 
 type Value=Record<string,any>;
-export function ScriptImportDialog({file,resumeId,sourceTarget,productionId,projectId,defaultTarget,request,onJobsSubmitted,onClose,onImported,onSourceImport}:{
+export function ScriptImportDialog({file,resumeId,sourceTarget,productionId,projectId,providers=[],defaultTarget,request,onJobsSubmitted,onClose,onImported,onSourceImport}:{
   file?:File;resumeId?:string;sourceTarget?:{sourceId?:string;sourceName?:string};productionId:string;projectId:string;defaultTarget?:Value;
+  providers?:Value[];
   request:(path:string,options?:RequestInit)=>Promise<any>;onJobsSubmitted:(jobs:any[])=>void;
   onClose:()=>void;onImported:(result:any)=>Promise<void>;onSourceImport?:(draftId:string,episodeNos:number[],originalOnly?:boolean)=>Promise<void>;
 }){
@@ -12,6 +14,11 @@ export function ScriptImportDialog({file,resumeId,sourceTarget,productionId,proj
   const [busy,setBusy]=useState(true),[error,setError]=useState('');
   const [destination,setDestination]=useState<'source'|'script'>(onSourceImport?'source':'script');
   const [minimized,setMinimized]=useState(false);
+  const targets=systemModelTargets(providers,'text');
+  if(defaultTarget?.providerId==='local'&&!targets.some(item=>item.providerId==='local'&&item.modelId===defaultTarget.modelId))
+    targets.unshift({providerId:'local',modelId:defaultTarget.modelId||''});
+  const [modelKey,setModelKey]=useState(()=>defaultTarget?.providerId?targetKey({providerId:defaultTarget.providerId,modelId:defaultTarget.modelId||''}):'');
+  const selectedTarget=targets.find(item=>targetKey(item)===modelKey);
   const resumeMode=onSourceImport?'source':'script';
   const alive=useRef(true),selectionKey=useRef('');
   const base=`/productions/${productionId}/script-imports`;
@@ -25,7 +32,8 @@ export function ScriptImportDialog({file,resumeId,sourceTarget,productionId,proj
     if(key!==selectionKey.current){setSelected(value.manifest.episodes.filter(canSelect).map((ep:Value)=>ep.episodeNo));selectionKey.current=key;}
   }
   async function submitAnalysis(id:string){
-    const result=await request(`${base}/${id}/analyze`,{method:'POST',body:JSON.stringify({project_id:projectId,submission_id:crypto.randomUUID()})});
+    if(!selectedTarget)throw new Error('请选择本次分析使用的文本模型');
+    const result=await request(`${base}/${id}/analyze`,{method:'POST',body:JSON.stringify({project_id:projectId,submission_id:crypto.randomUUID(),provider_id:selectedTarget.providerId,model_id:selectedTarget.modelId})});
     onJobsSubmitted(result.jobs);
     const value=await request(`${base}/${id}`);
     if(alive.current)accept(value);
@@ -43,9 +51,7 @@ export function ScriptImportDialog({file,resumeId,sourceTarget,productionId,proj
       }
       if(cancelled||!alive.current)return;
       accept(value);
-      // Only unstructured documents need automatic AI segmentation. Existing
-      // headings remain available immediately without an unnecessary AI call.
-      if(!resumeId&&!value.manifest.episodes.length&&!value.job&&defaultTarget?.providerId)await submitAnalysis(value.id);
+      // Upload only extracts text. AI analysis starts after the user confirms a model.
     })().catch(e=>{if(alive.current)setError(e.message);}).finally(()=>{if(alive.current)setBusy(false);});
     return()=>{cancelled=true;alive.current=false;};
   },[file,resumeId,productionId]);
@@ -76,10 +82,14 @@ export function ScriptImportDialog({file,resumeId,sourceTarget,productionId,proj
       {error&&<p className="error">{error}</p>}
       {!draft&&<p>{busy?'正在提取文档正文并识别章节 / 分集…':'文件未能读取，请关闭后重新选择。'}</p>}
       {draft&&<>
-        <div className="script-import-summary"><div><b>{draft.manifest.title}</b><p>发现 {rows.length} 集{draft.manifest.declaredEpisodes?` · 原稿声明 ${draft.manifest.declaredEpisodes} 集`:''} · {pending?'AI 正在判断分集':draft.manifest.method==='ai'?'AI 已识别与检查':'标题识别预览（尚未调用 AI）'}</p></div>
-          <button disabled={busy||pending||!defaultTarget?.providerId} onClick={()=>void run(analyze)}><Sparkles size={15}/>{pending?'AI 识别中…':draft.manifest.method==='ai'?'重新 AI 检查':'AI 智能识别与检查'}</button></div>
+        <div className="script-import-summary"><div><b>{draft.manifest.title}</b><p>发现 {rows.length} 集{draft.manifest.declaredEpisodes?` · 原稿声明 ${draft.manifest.declaredEpisodes} 集`:''} · {pending?'AI 正在判断分集':draft.manifest.method==='ai'?'AI 已识别与检查':'标题识别预览（尚未调用 AI）'}</p></div></div>
+        <div className="script-import-model-choice">
+          <label>本次分析的文本模型<select aria-label="本次分析的文本模型" value={selectedTarget?modelKey:''} disabled={busy||pending} onChange={event=>setModelKey(event.target.value)}><option value="">请选择文本模型</option>{targets.map(target=><option key={targetKey(target)} value={targetKey(target)}>{targetLabel(target,providers)}{target.providerId===defaultTarget?.providerId&&target.modelId===defaultTarget?.modelId?'（项目默认）':''}</option>)}</select></label>
+          <button disabled={busy||pending||!selectedTarget} onClick={()=>void run(analyze)}><Sparkles size={15}/>{pending?'AI 分析中…':draft.manifest.method==='ai'?'使用所选模型重新分析':'确认模型并开始 AI 分析'}</button>
+          <small>可更换本次分析模型，不会修改项目默认值。点击开始后才调用 AI。{!targets.length?' 请先在项目设置中启用文本模型。':''}</small>
+        </div>
         {onSourceImport&&<div className="script-import-select script-import-destination"><label><input type="radio" name="import-destination" checked={destination==='source'} disabled={busy||pending} onChange={()=>{setDestination('source');setSelected(rows.map((ep:Value)=>ep.episodeNo));}}/>导入原著资料库</label><label><input type="radio" name="import-destination" checked={destination==='script'} disabled={busy||pending} onChange={()=>{setDestination('script');setSelected(rows.filter((ep:Value)=>!ep.conflict).map((ep:Value)=>ep.episodeNo));}}/>直接建立分集剧本</label></div>}
-        <small>使用项目默认文本模型：{defaultTarget?.modelId || '请先配置默认文本模型'}。无章节标题时自动按单集目标时长判断是否拆分；AI 只返回分界和检查结果，正文从文件提取文本中截取。</small>
+        <small>{!rows.length?'未发现章节标题，可选择模型进行智能分集，也可按原文结构导入。':'可直接导入标题识别结果，或选择模型检查分集。'}AI 只返回分界和检查结果，正文从文件提取文本中截取。</small>
         {pending&&<p className="notice">{draft.job.phase || '任务已提交，完成后自动刷新预览'}<a href={`/?task=${draft.job.id}`} target="_blank" rel="noreferrer">任务详情</a></p>}
         {draft.job?.error&&<p className="error">AI 识别未完成：{draft.job.error}。原文和已有标题识别结果仍保留。</p>}
         {!!draft.missingEpisodes.length&&<p className="notice">未提供正文：{draft.missingEpisodes.map((n:number)=>`EP${String(n).padStart(2,'0')}`).join('、')}。不会自动补写或建立空集。</p>}

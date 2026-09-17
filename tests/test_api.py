@@ -634,10 +634,16 @@ def test_asset_library_semantic_categories(authenticated):
 def test_cross_origin_and_secret_masking(authenticated):
     c=authenticated
     assert c.post('/api/projects',json={'name':'bad'},headers={'Origin':'https://other.example'}).status_code==403
-    settings={'providers':[{'id':'cloud','name':'测试服务','type':'openai','url':'https://example.com/v1','api_key':'do-not-expose','local':False,'kind':'text'}]}
+    settings={'providers':[{'id':'cloud','name':'测试服务','type':'openai','url':'https://example.com/v1','api_key':' \tdo-not-expose\r\n','local':False,'kind':'text'}]}
     assert c.put('/api/settings',json=settings).status_code==200
     assert 'do-not-expose' not in c.get('/api/settings').text
     assert c.get('/api/settings').json()['providers'][0]['api_key_set'] is True
+    assert s.get_setting('providers',[])[0]['api_key']=='do-not-expose'
+    settings['providers'][0]['api_key']='do-not\nexpose'
+    response=c.put('/api/settings',json=settings)
+    assert response.status_code==400
+    assert 'do-not' not in response.text
+    assert s.get_setting('providers',[])[0]['api_key']=='do-not-expose'
 
 def test_volcengine_ark_unified_settings_and_connection(authenticated,monkeypatch):
     import httpx
@@ -934,7 +940,7 @@ def test_graph_storyboard_defaults_to_two_pass_film_bible(authenticated):
     assert result.status_code==200,result.text
     jobs=c.get('/api/projects/'+p['id']+'/jobs').json()
     assert jobs[0]['input']['film_bible'] is True
-    assert jobs[0]['input']['target_duration']==15
+    assert jobs[0]['input']['target_duration']==120
     assert jobs[0]['input']['schema_version']=='film-bible-storyboard/v2'
     assert [stage['id'] for stage in jobs[0]['input']['prompt_stages']]==['visual_bible','bound_storyboard']
     assert all(stage['system_prompt'] for stage in jobs[0]['input']['prompt_stages'])
@@ -963,7 +969,7 @@ def test_single_storyboard_reads_connected_script_without_own_prompt(authenticat
     assert '这个创作要求不应代替正文' not in frozen['prompt']
     assert frozen['canvas_script_sources'][0]['nodeId']=='script'
     assert frozen['schema_version']=='film-bible-storyboard/v2'
-    assert frozen['target_duration']==15
+    assert frozen['target_duration']==120
     assert c.post('/api/projects/'+p['id']+'/jobs',json=body).json()['id']==job['id']
     persist_script('第二版正文')
     assert c.get('/api/jobs/'+job['id']).json()['input']['canvas_script_sources'][0]['text']=='机器人推开门，发现一束花。'
@@ -1021,7 +1027,7 @@ def test_graph_scheduler_consumes_upstream_text(authenticated,monkeypatch):
     result=c.post('/api/projects/'+p['id']+'/run',json={'submission_id':'graph-run-test-001'}).json()
     assert result['count']==2
     queued=c.get('/api/projects/'+p['id']+'/jobs').json()
-    assert all(job['input']['target_duration']==15 for job in queued)
+    assert all(job['input']['target_duration']==120 for job in queued)
     received=[]
     def text(self,job,provider):
         received.append(job['input']['prompt'])

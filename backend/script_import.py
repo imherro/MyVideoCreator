@@ -113,7 +113,7 @@ def public_draft(connection, row):
     job=connection.execute('SELECT id,status,error,phase FROM jobs WHERE id=?',(row['analysis_job_id'],)).fetchone() if row['analysis_job_id'] else None
     prefix=extract(content,1,episodes[0]['startLine']-1,logical) if episodes else ''
     return {'id':row['id'],'filename':row['filename'],'status':row['status'],'manifest':{**manifest,'episodes':episodes},
-            'sharedText':prefix,'missingEpisodes':missing,'job':dict(job) if job else None,
+            'sharedText':prefix,'missingEpisodes':missing,'job':s.unpack(job),
             'result':json.loads(row['result']) if row['result'] else None}
 
 

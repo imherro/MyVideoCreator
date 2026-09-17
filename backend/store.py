@@ -236,6 +236,9 @@ def unpack(row):
     if row is None:
         return None
     data = dict(row)
+    if data.get('error'):
+        from .provider_auth import safe_provider_error
+        data['error'] = safe_provider_error(data['error'])
     for key in ('document','input','result','metadata','payload','telemetry'):
         if key in data and data[key] is not None:
             data[key] = json.loads(data[key])
@@ -244,6 +247,9 @@ def unpack(row):
 def job_update(job_id, **fields):
     allowed = {'status','result','provider_job_id','error','phase','progress','telemetry'}
     assert fields.keys() <= allowed
+    if fields.get('error'):
+        from .provider_auth import safe_provider_error
+        fields['error'] = safe_provider_error(fields['error'])
     if 'result' in fields:
         fields['result'] = dumps(fields['result'])
     if 'telemetry' in fields:fields['telemetry']=dumps(fields['telemetry'])

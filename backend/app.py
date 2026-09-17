@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from . import store as s, runtime
 from .prompts import TEMPLATES
+from .provider_auth import bearer_headers,clean_api_key,safe_provider_error
 from .generation_policy import default_ark_policy, validate_generation_policy, validate_model_pool, validate_policy_in_pool
 from .project_schema import empty_film_bible, migrate_document, new_document
 from .production_context import (
@@ -74,7 +75,7 @@ async def auth(request: Request, call_next):
 
 @app.exception_handler(ValueError)
 async def value_error(request, exc):
-    return Response(s.dumps({'detail':str(exc)}),400,media_type='application/json')
+    return Response(s.dumps({'detail':safe_provider_error(exc)}),400,media_type='application/json')
 
 @app.get('/api/health')
 def health():
@@ -854,6 +855,7 @@ async def update_settings(request:Request):
             # field with api_key_set=true.  Both mean "keep the saved key".
             if 'api_key' not in p or (not p.get('api_key') and masked_key_set):
                 p['api_key']=old.get(p['id'],{}).get('api_key','')
+            p['api_key']=clean_api_key(p.get('api_key'))
         s.set_setting('providers',body['providers'])
     for key in ('model_directories','llama_context','llama_gpu_layers','ffmpeg'):
         if key in body: s.set_setting(key,body[key])
@@ -874,7 +876,7 @@ def provider_models(provider_id:str,kind:str|None=None):
     import httpx
     provider=next((p for p in s.get_setting('providers',[]) if p['id']==provider_id),None)
     if not provider: raise ValueError('模型服务不存在')
-    headers={'Authorization':'Bearer '+provider['api_key']} if provider.get('api_key') else {}
+    headers=bearer_headers(provider)
     url=provider['url'].rstrip('/')
     if provider['type']=='volcengine_ark':
         from .providers.volcengine_ark import list_models
@@ -1412,6 +1414,8 @@ class ScriptImportPreview(BaseModel):
 class ScriptImportAnalyze(BaseModel):
     project_id:str
     submission_id:str=Field(min_length=8,max_length=100)
+    provider_id:str|None=None
+    model_id:str|None=None
 
 class ScriptImportConfirm(BaseModel):
     episode_nos:list[int]=Field(min_length=1,max_length=500)
@@ -1452,6 +1456,14 @@ def analyze_script_import(production_id:str,import_id:str,body:ScriptImportAnaly
         active=c.execute("SELECT * FROM jobs WHERE id=? AND status IN ('queued','running')",(row['analysis_job_id'],)).fetchone()
         if active:return {'jobs':[s.unpack(active)]}
         target=(state['document'].get('generationPolicy') or {}).get('text') or {}
+        if body.provider_id is not None or body.model_id is not None:
+            if not body.provider_id or body.model_id is None:raise ValueError('请选择本次分析的文本服务与模型')
+            target={'providerId':body.provider_id,'modelId':body.model_id.strip()}
+            if body.provider_id!='local':
+                from .generation_policy import enabled_models
+                provider=next((p for p in s.get_setting('providers',[]) if p.get('id')==body.provider_id),None)
+                if not provider or target['modelId'] not in enabled_models(provider,'text'):
+                    raise ValueError('所选文本模型未在系统模型库启用，请重新选择')
         if not target.get('providerId'):raise ValueError('请先在项目设置中选择默认文本模型')
         result=create_job_record(c,body.project_id,JobCreate(node_id='script-import:'+import_id,kind='text',submission_id=body.submission_id,input={
             'provider':target['providerId'],'model':target.get('modelId',''),'stage':'script_import_analysis',

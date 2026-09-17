@@ -15,6 +15,7 @@ from .media import ffmpeg_executable,probe
 from .process_lock import ProcessLock
 from .editor_renderer import EditorRenderCompiler
 from .providers.common import RecoverableProviderError,assets_for,checked,download_result,register
+from .provider_auth import bearer_headers,clean_api_key,safe_provider_error
 
 class Worker:
     def __init__(self, concurrency=4):
@@ -104,13 +105,15 @@ class Worker:
                 else:
                     s.job_update(job['id'],status='cancelled',phase='已取消')
             except RecoverableProviderError as exc:
-                s.job_update(job['id'],status='interrupted',error=str(exc)[:1200],phase='供应商暂时不可用，保留上游任务编号；可恢复查询')
+                s.job_update(job['id'],status='interrupted',error=safe_provider_error(exc)[:1200],phase='供应商暂时不可用，保留上游任务编号；可恢复查询')
             except Exception as exc:
-                message=str(exc)
+                message=safe_provider_error(exc)
                 if isinstance(exc,(httpx.ConnectError,httpx.ConnectTimeout)):
                     message='无法连接模型服务，请确认服务已启动、地址正确。'
                 if 'out of memory' in message.lower(): message='显存不足。请降低分辨率、时长或换用更小模型。'
-                if self.halt.is_set() or isinstance(exc,httpx.TransportError):
+                if isinstance(exc,httpx.LocalProtocolError):
+                    s.job_update(job['id'],status='failed',error=message[:1200],phase='请求配置错误，请修正后重新提交')
+                elif self.halt.is_set() or isinstance(exc,httpx.TransportError):
                     s.job_update(job['id'],status='interrupted',error=message[:1200],phase='连接中断，保留输入与上游任务编号；可恢复查询')
                 else:
                     s.job_update(job['id'],status='failed',error=message[:1200],phase='生成失败')
@@ -179,6 +182,7 @@ class Worker:
         else:
             provider=json.loads(snapshot['provider']) if snapshot else None
             if not provider: raise ValueError('模型服务配置不存在')
+        provider={**provider,'api_key':clean_api_key(provider.get('api_key'))}
         if provider['type']=='replicate':
             from .replicate_api import execute
             return execute(self,job,provider)
@@ -219,7 +223,7 @@ class Worker:
 
     def _chat_text(self,job,p,system_prompt,user_prompt,schema=None,phase='生成文本'):
         inp=job['input']
-        headers={'Authorization':'Bearer '+p['api_key']} if p.get('api_key') else {}
+        headers=bearer_headers(p)
         if schema and not (inp.get('provider','local')=='local' or p.get('structured')):
             user_prompt+='\n\n必须严格输出以下 JSON Schema 对应的单个 JSON 值，不要输出 Markdown 或解释：\n'+json.dumps(schema,ensure_ascii=False)
         body={'model':inp.get('model') or p.get('model','local'),'messages':[{'role':'system','content':system_prompt},{'role':'user','content':user_prompt}], 'temperature':0.6,'max_tokens':min(int(inp.get('max_tokens',4096)),12000),'stream':True}
@@ -351,7 +355,7 @@ class Worker:
 
     def image(self,job,p):
         if assets_for(job): raise ValueError('此图像服务当前为文生图接口，图生图请选择 ComfyUI 或 Maestro。')
-        inp=job['input']; headers={'Authorization':'Bearer '+p['api_key']} if p.get('api_key') else {}
+        inp=job['input']; headers=bearer_headers(p)
         self.progress(job,'云端生成图像')
         with httpx.Client(timeout=600,trust_env=not p.get('local',False)) as client:
             result=checked(client.post(p['url'].rstrip('/')+'/images/generations',headers=headers,json={'model':inp.get('model') or p.get('model'),'prompt':inp['prompt'],'n':1,'size':inp.get('size','1024x1024')}))
@@ -519,7 +523,7 @@ class Worker:
         """Configurable async JSON video gateway. Explicit routes avoid false universal compatibility."""
         inp=job['input']; url=p['url'].rstrip('/')
         if inp.get('end_asset_id'):raise ValueError('当前视频网关未配置尾帧协议，请清除尾帧或使用内置引擎')
-        headers={'Authorization':'Bearer '+p['api_key']} if p.get('api_key') else {}
+        headers=bearer_headers(p)
         body={**p.get('request_defaults',{}),**inp.get('parameters',{}),'model':inp.get('model') or p.get('model'),'prompt':inp['prompt']}
         if assets_for(job): raise ValueError('此视频网关尚未配置媒体上传协议，请使用文生视频或本地参考图适配器')
         with httpx.Client(timeout=120,headers=headers,trust_env=not p.get('local',False)) as client:

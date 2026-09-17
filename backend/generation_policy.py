@@ -28,8 +28,11 @@ def default_model_pool(providers):
     return result
 
 def default_new_project_model_pool(providers):
-    """New projects include every model enabled in the system library."""
-    return default_model_pool(providers)
+    """New projects select enabled cloud models; local models remain opt-in."""
+    return default_model_pool([
+        provider for provider in providers
+        if not provider.get('local') and provider.get('id') != 'local' and provider.get('type') != 'maestro'
+    ])
 
 def validate_model_pool(pool,providers,allow_missing=False):
     if pool is None:return None

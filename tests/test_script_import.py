@@ -122,3 +122,34 @@ def test_ai_job_contract_and_guarded_result(client):
     assert len(client.get(f'/api/productions/{p["production_id"]}/episodes').json())==1 # AI never imports
     with s.db() as c:c.execute("UPDATE jobs SET status='cancelled' WHERE id=?",(job['id'],))
     with pytest.raises(ValueError,match='失效'):apply_analysis(job,value)
+
+
+def test_import_model_override_is_frozen_and_does_not_change_project_default(client):
+    previous=s.get_setting('providers',[])
+    providers=[{'id':'import-models','name':'Import models','type':'openai','kind':'text','model':'default-text',
+                'enabled_models':{'text':['default-text','analysis-text','outside-pool']}}]
+    s.set_setting('providers',providers)
+    try:
+        target={'providerId':'import-models','modelId':'default-text'}
+        p=client.post('/api/projects',json={
+            'name':'导入模型选择测试','generation_policy':{'text':target,'image':None,'video':None},
+            'model_pool':{'text':[target,{'providerId':'import-models','modelId':'analysis-text'}],'image':[],'video':[],'audio':[]},
+        }).json()
+        d=preview(client,p)
+        assert d['job'] is None
+        path=f'/api/productions/{p["production_id"]}/script-imports/{d["id"]}/analyze'
+        body={'project_id':p['id'],'submission_id':'import-selected-model-test','provider_id':'import-models'}
+        for model in ['disabled-model','outside-pool']:
+            response=client.post(path,json={**body,'model_id':model})
+            assert response.status_code==400,response.text
+        response=client.post(path,json={**body,'model_id':'analysis-text'})
+        assert response.status_code==200,response.text
+        job=response.json()['jobs'][0]
+        assert job['input']['provider']=='import-models'
+        assert job['input']['model']=='analysis-text'
+        assert client.get('/api/projects/'+p['id']).json()['document']['generationPolicy']['text']==target
+        duplicate=client.post(path,json={**body,'submission_id':'import-model-duplicate','model_id':'default-text'})
+        assert duplicate.json()['jobs'][0]['id']==job['id']
+        assert duplicate.json()['jobs'][0]['input']['model']=='analysis-text'
+    finally:
+        s.set_setting('providers',previous)

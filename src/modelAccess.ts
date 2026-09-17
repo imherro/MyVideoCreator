@@ -59,9 +59,11 @@ export function defaultProjectModelPool(providers: Value[], localModels: Value[]
   ) as ProjectModelPool;
 }
 
-/** New projects start with all models enabled in the system library. */
-export function defaultNewProjectModelPool(providers: Value[], localModels: Value[] = []): ProjectModelPool {
-  return defaultProjectModelPool(providers, localModels);
+/** New projects select enabled cloud models; local models remain opt-in. */
+export function defaultNewProjectModelPool(providers: Value[]): ProjectModelPool {
+  return defaultProjectModelPool(providers.filter(provider =>
+    !provider.local && provider.id !== "local" && provider.type !== "maestro",
+  ));
 }
 
 export function effectiveProjectTargets(
