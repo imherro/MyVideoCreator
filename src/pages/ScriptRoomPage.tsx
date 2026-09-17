@@ -3,6 +3,7 @@ import { ArrowRight, RefreshCw, Save, Sparkles } from "lucide-react";
 import { STATUS_LABELS, normalizeEpisodeSelection, scriptReady, splitList, episodePlanningReady } from "../adaptation";
 import { activeScriptEpisodes, mergeTaskSnapshots } from "../taskCenter";
 import {ScriptImportDialog} from '../components/ScriptImportDialog';
+import {ImportResumeNotice} from '../components/ImportResumeNotice';
 
 type Value = Record<string, any>;
 
@@ -29,6 +30,7 @@ export function ScriptRoomPage({
   const [busy, setBusy] = useState(false);
   const importInput=useRef<HTMLInputElement>(null);
   const [importFilePreview,setImportFilePreview]=useState<File|null>(null);
+  const [importResumeId,setImportResumeId]=useState<string|undefined>();
   const [submittedJobs, setSubmittedJobs] = useState<Value[]>([]);
   const unsavedDrafts = useRef(new Map<number, Value>());
   const loadedProduction = useRef<string | null>(null);
@@ -138,8 +140,9 @@ export function ScriptRoomPage({
     notify("本集剧本任务已提交，完成后自动显示正文");
   }
   return <section className="script-room-page workflow-domain-page">
-    <input hidden ref={importInput} type="file" accept=".txt,.md,.markdown,.docx,.doc,.wps,.pdf,.rtf,.odt" onChange={e=>{const file=e.target.files?.[0];if(file)setImportFilePreview(file);e.target.value='';}}/>
-    {importFilePreview&&<ScriptImportDialog key={productionId} file={importFilePreview} productionId={productionId} projectId={projectId} defaultTarget={defaultTarget} request={request} onJobsSubmitted={onJobsSubmitted} onClose={()=>setImportFilePreview(null)} onImported={async result=>{unsavedDrafts.current.clear();await onScriptsImported(result);await loadList(result.episodes[0]?.episodeNo);}}/>}
+    <input hidden ref={importInput} type="file" accept=".txt,.md,.markdown,.docx,.doc,.wps,.pdf,.rtf,.odt" onChange={e=>{const file=e.target.files?.[0];if(file){setImportResumeId(undefined);setImportFilePreview(file);}e.target.value='';}}/>
+    {!importFilePreview&&!importResumeId&&<ImportResumeNotice productionId={productionId} mode="script" jobs={jobs} request={request} onResume={record=>setImportResumeId(record.id)}/>}
+    {(importFilePreview||importResumeId)&&<ScriptImportDialog key={productionId} file={importFilePreview||undefined} resumeId={importResumeId} productionId={productionId} projectId={projectId} defaultTarget={defaultTarget} request={request} onJobsSubmitted={onJobsSubmitted} onClose={()=>{setImportFilePreview(null);setImportResumeId(undefined);}} onImported={async result=>{unsavedDrafts.current.clear();await onScriptsImported(result);await loadList(result.episodes[0]?.episodeNo);}}/>}
     <header className="domain-header"><div><span className="eyebrow">SCRIPT ROOM</span><h1>剧本室</h1><p>直接编写或粘贴本集剧本，也可使用 AI 辅助创作；保存后与画布同步。</p></div><div className="settings-actions">
       <button disabled={busy} onClick={()=>run(async()=>{if(draft)await save(false);importInput.current?.click();})}>智能导入文档</button>
       <button disabled={busy} onClick={() => run(() => loadList(active))}><RefreshCw size={15} />刷新</button>

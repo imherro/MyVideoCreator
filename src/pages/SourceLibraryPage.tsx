@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { BookOpen, CheckSquare2, FilePlus2, Plus, RefreshCw, Save, Search, Sparkles, Square, Trash2, Upload, X } from "lucide-react";
 import { activeSourceChapters } from '../taskCenter.ts';
 import {ScriptImportDialog} from '../components/ScriptImportDialog';
+import {ImportResumeNotice} from '../components/ImportResumeNotice';
 
 type AnyValue = any;
 type CreateDialog = { mode: "source" | "chapter"; sourceId?: string; sourceName?: string };
@@ -32,6 +33,7 @@ export function SourceLibraryPage({
   const [dirtyChapters, setDirtyChapters] = useState<Set<string>>(new Set());
   const fileRef = useRef<HTMLInputElement>(null);
   const [importFilePreview,setImportFilePreview]=useState<File|null>(null);
+  const [importResumeId,setImportResumeId]=useState<string|undefined>();
   const importTarget = useRef<{productionId: string; sourceId?: string; sourceName?: string} | null>(null);
   const moreRef = useRef<HTMLDetailsElement>(null);
   const loadSequence = useRef(0);
@@ -211,8 +213,9 @@ export function SourceLibraryPage({
         {ready && sources.length > 0 && <details className="source-more-menu" ref={moreRef}><summary>更多</summary><div><button disabled={busy} onClick={() => openCreateSource(true)}><FilePlus2 size={15}/>添加另一部原著</button><button disabled={busy} onClick={() => chooseImport(true)}><Upload size={15}/>导入为另一部原著</button></div></details>}
       </div>
     </header>
-    <input ref={fileRef} hidden type="file" accept=".txt,.md,.markdown,.docx,.doc,.wps,.pdf,.rtf,.odt" onChange={(event) => { const file = event.target.files?.[0]; if (file) run(async()=>{setBusy(true);try{for(const edited of chapters.filter(item=>dirtyChapters.has(item.id)))await persistChapter(edited);setImportFilePreview(file);}finally{setBusy(false);}}); event.target.value = ""; }}/>
-    {importFilePreview&&<ScriptImportDialog key={productionId} file={importFilePreview} productionId={productionId} projectId={projectId} defaultTarget={defaultTarget} request={request} onJobsSubmitted={onJobsSubmitted} onClose={()=>setImportFilePreview(null)} onImported={onScriptsImported} onSourceImport={importFile}/>}
+    <input ref={fileRef} hidden type="file" accept=".txt,.md,.markdown,.docx,.doc,.wps,.pdf,.rtf,.odt" onChange={(event) => { const file = event.target.files?.[0]; if (file) run(async()=>{setBusy(true);try{for(const edited of chapters.filter(item=>dirtyChapters.has(item.id)))await persistChapter(edited);setImportResumeId(undefined);setImportFilePreview(file);}finally{setBusy(false);}}); event.target.value = ""; }}/>
+    {!importFilePreview&&!importResumeId&&<ImportResumeNotice productionId={productionId} mode="source" jobs={jobs} request={request} onResume={record=>{importTarget.current={productionId,...record.target};setImportResumeId(record.id);}}/>}
+    {(importFilePreview||importResumeId)&&<ScriptImportDialog key={productionId} file={importFilePreview||undefined} resumeId={importResumeId} sourceTarget={importTarget.current||undefined} productionId={productionId} projectId={projectId} defaultTarget={defaultTarget} request={request} onJobsSubmitted={onJobsSubmitted} onClose={()=>{setImportFilePreview(null);setImportResumeId(undefined);}} onImported={onScriptsImported} onSourceImport={importFile}/>}
     <div className="source-library-grid">
       <aside>
         <label className="source-search"><Search size={14}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索章节"/></label>
