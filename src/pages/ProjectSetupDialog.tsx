@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { BookOpen, Film, LoaderCircle, Settings2, X } from "lucide-react";
+import { BookOpen, ChevronRight, Film, LoaderCircle, Settings2, X } from "lucide-react";
 import { GenerationPolicyPanel } from "../GenerationPolicyPanel";
 import { VisualStylePicker } from "../VisualStylePicker";
 import { CreationModePicker } from "../components/CreationModePicker";
@@ -27,6 +27,12 @@ export function ProjectSetupDialog({
   const [draft, setDraft] = useState(() => defaultProjectSetupDraft(providers, localModels));
   const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const modelSummary = ([['text','文本'],['image','图像'],['video','视频']] as const).map(([kind,label])=>{
+    const target=draft.generationPolicy[kind];
+    const provider=providers.find(item=>item.id===target?.providerId);
+    return `${label} · ${provider?.name || (target?.providerId ? '已选择' : '未配置')}`;
+  }).join(' / ');
+  const bibleSummary=Object.values(draft.bible).some(value=>value?.trim())?'已填写创作约束':'可选，后续可在项目设置中补充';
   const patch = (value: Partial<ProjectSetupDraft>) => setDraft((current) => ({ ...current, ...value }));
   const patchBible = (key: keyof ProjectSetupDraft["bible"], value: string) =>
     setDraft((current) => ({ ...current, bible: { ...current.bible, [key]: value } }));
@@ -51,6 +57,9 @@ export function ProjectSetupDialog({
             <h3><Film size={17}/> ① 基本信息</h3>
             <CreationModePicker value={draft.creationMode} onChange={creationMode=>patch({creationMode})} disabled={busy}/>
             <label>作品名称 *<input autoFocus maxLength={100} value={draft.name} onChange={(event)=>patch({name:event.target.value})} placeholder="例如：花信未迟"/></label>
+            <details className="setup-disclosure setup-specs">
+            <summary><span><b>画面与视频规格</b><small>{draft.style} · {draft.ratio} · {draft.videoResolution} · 单集 {draft.duration || 0} 秒 · {draft.episodeCount || 0} 集</small></span><ChevronRight size={17}/></summary>
+            <div className="setup-disclosure-body">
             <VisualStylePicker value={draft.style} onChange={(style)=>patch({style})}/>
             <div className="two-fields">
               <label>画幅 *<select value={draft.ratio} onChange={(event)=>patch({ratio:event.target.value as ProjectSetupDraft["ratio"]})}><option>16:9</option><option>9:16</option><option>1:1</option></select></label>
@@ -64,14 +73,21 @@ export function ProjectSetupDialog({
               <label>总集数 *<input type="number" min={1} max={500} value={draft.episodeCount} onChange={(event)=>patch({episodeCount:Number(event.target.value)})}/><small>原著章节数不等于成片集数，可按改编节奏设置。</small></label>
               <label>发布平台 *<select value={draft.platform} onChange={(event)=>patch({platform:event.target.value})}>{PLATFORM_OPTIONS.map((value)=><option value={value} key={value}>{value}</option>)}</select><small>用于 AI 判断节奏、钩子和付费卡点。</small></label>
             </div>
-            <label>创作简介<textarea value={draft.brief} onChange={(event)=>patch({brief:event.target.value})} placeholder="故事主题、人物关系或本集目标"/></label>
+            </div>
+            </details>
           </section>
           <section>
-            <h3><Settings2 size={17}/> ② 默认模型</h3>
+            <details className="setup-disclosure">
+            <summary><span><b><Settings2 size={17}/> ② 默认模型</b><small>{modelSummary}</small></span><ChevronRight size={17}/></summary>
+            <div className="setup-disclosure-body">
             <GenerationPolicyPanel value={draft.generationPolicy} modelPool={draft.modelPool} providers={providers} localModels={localModels} onChange={(generationPolicy)=>patch({generationPolicy})} onModelPoolChange={(modelPool)=>patch({modelPool})}/>
+            </div>
+            </details>
           </section>
           <section>
-            <h3><BookOpen size={17}/> ③ Project Bible</h3>
+            <details className="setup-disclosure">
+            <summary><span><b><BookOpen size={17}/> ③ Project Bible</b><small>{bibleSummary}</small></span><ChevronRight size={17}/></summary>
+            <div className="setup-disclosure-body">
             <p className="muted">先写最小创作约束即可。这里不会生成角色、场景、图片或任务。</p>
             <div className="two-fields">
               <label>世界 / 时代<input value={draft.bible.worldEra} onChange={(event)=>patchBible("worldEra",event.target.value)}/></label>
@@ -81,6 +97,8 @@ export function ProjectSetupDialog({
             </div>
             <label>角色 / 场景一致性<textarea value={draft.bible.characterSceneConsistency} onChange={(event)=>patchBible("characterSceneConsistency",event.target.value)}/></label>
             <label>避免项（每行一项）<textarea value={draft.bible.avoidItems} onChange={(event)=>patchBible("avoidItems",event.target.value)}/></label>
+            </div>
+            </details>
           </section>
         </div>
         <footer>
