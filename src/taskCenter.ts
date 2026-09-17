@@ -102,6 +102,7 @@ export function filterTaskCenterRows(rows: TaskCenterRow[], filters: TaskCenterF
 }
 
 export function taskShotLabel(row: TaskCenterRow) {
+  if (row.job.input?.stage === "script_import_analysis") return `剧本智能导入 · ${row.job.input?.script_import_analysis?.filename || "结构识别"}`;
   if (row.job.input?.stage === "source_analysis") {
     const title = String(row.job.input?.prompt || "").match(/^章节标题：([^\n]+)/)?.[1]?.trim();
     return title ? `原著事件提取 · ${title}` : "原著事件提取";

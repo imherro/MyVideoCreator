@@ -17,7 +17,10 @@ def freeze_prompt_contract(kind: str, value: dict, *, origin: str = 'submission'
     response_schema = None
     schema_version = None
 
-    if stage == 'source_analysis':
+    if stage == 'script_import_analysis':
+        from .script_import import SYSTEM_PROMPT, SCHEMA
+        system_prompt, response_schema, schema_version = SYSTEM_PROMPT, SCHEMA, 'script-import/v1'
+    elif stage == 'source_analysis':
         from .source_library import EVENT_SCHEMA, SYSTEM_PROMPT
         system_prompt, response_schema, schema_version = SYSTEM_PROMPT, EVENT_SCHEMA, 'source-events/v1'
     elif stage == 'adaptation_generation':
@@ -42,7 +45,7 @@ def freeze_prompt_contract(kind: str, value: dict, *, origin: str = 'submission'
             {
                 'id': 'visual_bible', 'label': '阶段 1 · 提取视觉资产卡',
                 'system_prompt': VISUAL_EXTRACTOR_PROMPT,
-                'user_prompt': visual_user_prompt(result.get('prompt', ''),(result.get('storyboard_visual_context') or {}).get('visual')),
+                'user_prompt': visual_user_prompt(result.get('prompt', '')+('\n\n作品共享设定（仅用于本集出场人物与场景的一致性，不增加其他集剧情）：\n'+result['storyboard_visual_context']['imported_story'] if (result.get('storyboard_visual_context') or {}).get('imported_story') else ''),(result.get('storyboard_visual_context') or {}).get('visual')),
                 'response_schema': VISUAL_BIBLE_SCHEMA,
                 'schema_version': 'visual-bible/v2' if result.get('storyboard_visual_context') else 'visual-bible/v1',
             },

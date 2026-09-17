@@ -6,6 +6,7 @@ import { setProjectVisualStyle } from "./filmBible/versioning.ts";
 type Value = Record<string, any>;
 
 export type ProjectBibleFields = {
+  summary?: string;
   worldEra: string;
   visualTone: string;
   colorLighting: string;
@@ -152,6 +153,7 @@ export function projectSetupPayload(draft: ProjectSetupDraft) {
 export function bibleFields(document: Value): ProjectBibleFields {
   const bible = document.filmBible || {};
   return {
+    summary: String(bible.story?.summary || ""),
     worldEra: String(bible.story?.worldEra || ""),
     visualTone: String(bible.style?.visualTone || ""),
     colorLighting: String(bible.style?.colorLighting || ""),
@@ -168,7 +170,7 @@ export function mergeBibleFields<T extends Value>(document: T, fields: ProjectBi
     ...document,
     filmBible: {
       ...current,
-      story: { ...(current.story || {}), worldEra: fields.worldEra },
+      story: { ...(current.story || {}), worldEra: fields.worldEra, summary: fields.summary ?? current.story?.summary ?? "" },
       style: {
         ...(current.style || {}),
         visualTone: fields.visualTone,

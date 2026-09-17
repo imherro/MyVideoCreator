@@ -1013,6 +1013,7 @@ def create_job_record(c,pid,body):
                 'version':'production-visual-reuse/v1','production_id':state['project']['production_id'],
                 'production_revision':state['production']['revision'],
                 'visual':(state['document'].get('filmBible') or {}).get('visual') or {'cards':{},'versions':{}},
+                'imported_story':((state['document'].get('filmBible') or {}).get('story') or {}).get('summary',''),
             }}
     if body.kind == 'image':
         spec = _image_spec(c, pid, body.input)
@@ -1146,7 +1147,7 @@ def create_job_record(c,pid,body):
             first_frame(asset)
     owner=c.execute('SELECT production_id FROM projects WHERE id=?',(pid,)).fetchone()
     if not owner:raise HTTPException(404,'制作集不存在')
-    scope='production' if body.input.get('stage') in ('source_analysis','adaptation_generation','adaptation_episode_generation') else 'episode'
+    scope='production' if body.input.get('stage') in ('source_analysis','adaptation_generation','adaptation_episode_generation','script_import_analysis') else 'episode'
     jid=s.uid('job-'); now=time.time()
     c.execute('''INSERT INTO jobs(id,submission_id,project_id,node_id,kind,status,input,created,updated,scope,production_id)
         VALUES(?,?,?,?,?,?,?,?,?,?,?)''',(jid,body.submission_id,pid,body.node_id,body.kind,'queued',s.dumps(body.input),now,now,scope,owner['production_id']))
@@ -1369,6 +1370,62 @@ def import_source_document(production_id:str,body:SourceImport):
         count=c.execute('''SELECT COUNT(*) value FROM source_chapters sc WHERE source_id=?
             AND NOT EXISTS(SELECT 1 FROM deleted_items d WHERE d.kind='chapter' AND d.item_id=sc.id)''',(source_id,)).fetchone()['value']
     return {**source_document_row(production_id,source_id),'chapter_count':count,'imported_count':len(chapters),'first_chapter_id':first_chapter_id}
+
+
+class ScriptImportPreview(BaseModel):
+    filename:str=Field(min_length=1,max_length=250)
+    content:str=Field(min_length=1,max_length=120000)
+
+class ScriptImportAnalyze(BaseModel):
+    project_id:str
+    submission_id:str=Field(min_length=8,max_length=100)
+
+class ScriptImportConfirm(BaseModel):
+    episode_nos:list[int]=Field(min_length=1,max_length=500)
+    include_shared:bool=True
+
+@app.post('/api/productions/{production_id}/script-imports')
+def preview_script_import(production_id:str,body:ScriptImportPreview):
+    from .script_import import create_draft
+    production(production_id)
+    with s.db() as c:return create_draft(c,production_id,body.filename,body.content)
+
+@app.get('/api/productions/{production_id}/script-imports/{import_id}')
+def read_script_import(production_id:str,import_id:str):
+    from .script_import import get_draft,public_draft
+    production(production_id)
+    with s.db() as c:return public_draft(c,get_draft(c,production_id,import_id))
+
+@app.post('/api/productions/{production_id}/script-imports/{import_id}/analyze')
+def analyze_script_import(production_id:str,import_id:str,body:ScriptImportAnalyze):
+    from .script_import import get_draft,analysis_prompt
+    with s.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        row=get_draft(c,production_id,import_id)
+        if row['status']!='preview':raise ValueError('此文件已经导入')
+        state=read_project_state(c,body.project_id)
+        if not state or state['project']['production_id']!=production_id:raise ValueError('制作集不属于当前作品')
+        active=c.execute("SELECT * FROM jobs WHERE id=? AND status IN ('queued','running')",(row['analysis_job_id'],)).fetchone()
+        if active:return {'jobs':[s.unpack(active)]}
+        target=(state['document'].get('generationPolicy') or {}).get('text') or {}
+        if not target.get('providerId'):raise ValueError('请先在项目设置中选择默认文本模型')
+        result=create_job_record(c,body.project_id,JobCreate(node_id='script-import:'+import_id,kind='text',submission_id=body.submission_id,input={
+            'provider':target['providerId'],'model':target.get('modelId',''),'stage':'script_import_analysis',
+            'prompt':analysis_prompt(row),'max_tokens':16000,
+            'script_import_analysis':{'productionId':production_id,'importId':import_id,'filename':row['filename']},
+        }))
+        c.execute('UPDATE script_imports SET analysis_job_id=? WHERE id=?',(result['id'],import_id))
+    s.event(body.project_id,{'type':'job','id':result['id']})
+    return {'jobs':[result]}
+
+@app.post('/api/productions/{production_id}/script-imports/{import_id}/confirm')
+def commit_script_import(production_id:str,import_id:str,body:ScriptImportConfirm):
+    from .script_import import confirm_import
+    with s.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        result=confirm_import(c,production_id,import_id,body.episode_nos,body.include_shared)
+    for episode in result['episodes']:s.event(episode['projectId'],{'type':'script','imported':True})
+    return result
 
 @app.post('/api/productions/{production_id}/sources/{source_id}/chapters/import')
 def import_source_chapters(production_id:str,source_id:str,body:SourceImport):
@@ -1848,6 +1905,12 @@ def save_episode_script(production_id:str,episode_no:int,body:ScriptSave):
         payload=body.model_dump(exclude={'revision','canvasNodeId'})
         validate_source_references(c,production_id,payload['sourceChapterRefs'])
         saved=save_script_row(c,row,payload,status='draft')
+        imported_metadata=json.loads(row['metadata'])
+        if imported_metadata.get('origin')=='script_import' and payload['body'].strip()!=row['body'].strip():
+            imported_metadata['incomplete']=False
+            imported_metadata['revisedAfterImport']=True
+            c.execute('UPDATE episode_scripts SET metadata=? WHERE project_id=?',(s.dumps(imported_metadata),project_row['id']))
+            saved=script_row(c,project_row['id'])
         if body.canvasNodeId:
             document=json.loads(project_row['document'])
             source_node=next((node for node in document.get('nodes',[]) if node.get('id')==body.canvasNodeId),None)

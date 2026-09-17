@@ -34,6 +34,19 @@ def split_chapters(content: str):
     text = content.replace('\r\n', '\n').strip()
     if not text:
         raise ValueError('原著内容不能为空')
+    # Episode headings take precedence over Markdown scene/character subheadings.
+    from .script_import import HEADING
+    positions=[];offset=0
+    for line in text.splitlines(keepends=True):
+        if HEADING.match(line.strip()):positions.append((offset,offset+len(line.rstrip('\n'))))
+        offset+=len(line)
+    if positions:
+        chapters=[]
+        if text[:positions[0][0]].strip():chapters.append(('共享设定',text[:positions[0][0]].strip()))
+        for index,(start,end) in enumerate(positions):
+            next_start=positions[index+1][0] if index+1<len(positions) else len(text)
+            chapters.append((text[start:end].lstrip('#').strip(),text[end:next_start].strip()))
+        return chapters
     matches = list(IMPORT_HEADING.finditer(text))
     if not matches:
         return [('正文', text)]

@@ -274,6 +274,12 @@ class Worker:
             except json.JSONDecodeError as exc:raise ValueError('逐集剧本结果不是严格 JSON：'+str(exc)) from exc
             result=apply_episode_script_generation(job,value)
             return {'text':result['script']['body'],'script':result['script']}
+        if kind=='text' and inp.get('script_import_analysis'):
+            from .script_import import SYSTEM_PROMPT, SCHEMA, apply_analysis
+            raw=self._chat_text(job,p,inp.get('system_prompt') or SYSTEM_PROMPT,inp['prompt'],inp.get('response_schema') or SCHEMA,'识别剧本结构与完整性')
+            try:value=json.loads(raw.strip())
+            except json.JSONDecodeError as exc:raise ValueError('剧本识别结果不是严格 JSON，请重试；原文保持不变') from exc
+            return {'text':raw,'scriptImport':apply_analysis(job,value)}
         if kind=='text' and inp.get('source_event_extraction'):
             from .source_library import EVENT_SCHEMA, SYSTEM_PROMPT, replace_events, validate_events
             raw=self._chat_text(job,p,inp.get('system_prompt') or SYSTEM_PROMPT,inp['prompt'],inp.get('response_schema') or EVENT_SCHEMA,'提取原著事件')
@@ -306,8 +312,10 @@ class Worker:
                     entry['status']=status
                     if error:entry['validation_error']=error[:1200]
                     publish_trace()
+            story=(inp.get('storyboard_visual_context') or {}).get('imported_story')
+            script=inp['prompt']+('\n\n作品共享设定（仅用于本集出场人物与场景的一致性，不增加其他集剧情）：\n'+story if story else '')
             return extract_storyboard(
-                inp['prompt'],inp.get('target_duration'),inp.get('provider','local'),
+                script,inp.get('target_duration'),inp.get('provider','local'),
                 inp.get('model') or p.get('model','local'),
                 request_stage,inp.get('prompt_stages'),report_stage,
                 existing_visual=(inp.get('storyboard_visual_context') or {}).get('visual'),

@@ -1407,6 +1407,17 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     const legacy = kind === "director" && !doc?.nodes.some(n=>n.data.compositionType === "director") ? (doc as Any)?.director : undefined;
     return newNode("reference", "", compositionData(kind, legacy));
   }
+  async function finishScriptImport(result: Any) {
+    await refreshProductionHierarchy();
+    const first=result.episodes[0];
+    if(first){
+      setPlanningEpisodeFocus(known=>({...known,[project!.production_id]:first.episodeNo}));
+      await openProject(first.projectId);
+    }
+    setWorkflowDataRevision(value=>({...value,script:value.script+1,source:value.source+1}));
+    activateWorkflowStage("script");
+    setNotice(`已导入 ${result.count} 集剧本，可选择分集继续编辑和分镜规划`);
+  }
   function patchComposition(nodeId: string, patch: Any) {
     update(document=>patchCompositionNode(document,nodeId,patch));
   }
@@ -2868,6 +2879,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           />
         ) : workflowStage === "source" ? (
           <SourceLibraryPage
+            key={project.production_id}
+            onScriptsImported={finishScriptImport}
             jobs={productionJobs}
             onJobsSubmitted={(submitted) => {
               if (current.current.project?.production_id === project.production_id) {
@@ -2907,6 +2920,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           />
         ) : workflowStage === "script" ? (
           <ScriptRoomPage
+            projectId={project.id}
+            onScriptsImported={finishScriptImport}
             onAddEpisode={()=>{if(currentProduction)setEpisodeSetupProduction(currentProduction);}}
             key={project.production_id}
             productionId={project.production_id}
@@ -4153,6 +4168,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   <div className="project-bible-heading"><div><span className="eyebrow">PROJECT BIBLE</span><h3>创作约束</h3></div><button className="quiet" onClick={()=>setPanel("filmBible")}><BookOpen size={15}/>打开塑角造景 {Object.keys(visualBibleOf(doc).cards).length || ""}<ChevronRight size={14}/></button></div>
                   <p className="muted">这里只修改文字约束，不会覆盖已有 VisualCard、VisualVersion 或锁定参考图。</p>
                   <label>世界 / 时代<input value={projectBibleFields.worldEra} onChange={(event)=>update((document)=>mergeBibleFields(document,{...bibleFields(document),worldEra:event.target.value}))}/></label>
+                  {projectBibleFields.summary && <label>导入的故事与人物共享设定<textarea rows={8} value={projectBibleFields.summary} onChange={event=>update(document=>mergeBibleFields(document,{...bibleFields(document),summary:event.target.value}))}/></label>}
                   <div className="two-fields">
                     <label>视觉基调<input value={projectBibleFields.visualTone} onChange={(event)=>update((document)=>mergeBibleFields(document,{...bibleFields(document),visualTone:event.target.value}))}/></label>
                     <label>色彩 / 光线<input value={projectBibleFields.colorLighting} onChange={(event)=>update((document)=>mergeBibleFields(document,{...bibleFields(document),colorLighting:event.target.value}))}/></label>

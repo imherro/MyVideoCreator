@@ -58,6 +58,7 @@ def init():
         CREATE INDEX IF NOT EXISTS jobs_project_created ON jobs(project_id,created);
         CREATE INDEX IF NOT EXISTS jobs_status_created ON jobs(status,created);
         CREATE TABLE IF NOT EXISTS job_private(job_id TEXT PRIMARY KEY REFERENCES jobs(id),provider TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS script_imports(id TEXT PRIMARY KEY,production_id TEXT NOT NULL REFERENCES productions(id),filename TEXT NOT NULL,content TEXT NOT NULL,content_hash TEXT NOT NULL,manifest TEXT NOT NULL,analysis_job_id TEXT,status TEXT NOT NULL,result TEXT,created REAL NOT NULL,updated REAL NOT NULL,revision INTEGER NOT NULL DEFAULT 1);
         CREATE INDEX IF NOT EXISTS assets_project_created ON assets(project_id,created);
         CREATE INDEX IF NOT EXISTS revisions_project_revision ON revisions(project_id,revision);
         CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT,project_id TEXT,payload TEXT NOT NULL,created REAL NOT NULL);

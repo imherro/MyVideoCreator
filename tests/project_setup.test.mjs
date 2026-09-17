@@ -49,13 +49,16 @@ test('new projects default to Ark text and image plus HC Seedance 2.5',()=>{
 });
 
 test('Bible settings merge preserves visual versions, style version, and unknown keys',()=>{
-  const document={filmBible:{visual:{cards:{hero:{id:'hero'}},versions:{v1:{id:'v1',status:'locked'}}},styleVersion:7,custom:{keep:true},story:{old:'keep'},style:{old:'keep'},continuity:{old:'keep'}}};
+  const document={filmBible:{visual:{cards:{hero:{id:'hero'}},versions:{v1:{id:'v1',status:'locked'}}},styleVersion:7,custom:{keep:true},story:{old:'keep',summary:'原著共享人物设定'},style:{old:'keep'},continuity:{old:'keep'}}};
   const fields={...bibleFields(document),worldEra:'当代',visualTone:'克制'};
   const next=mergeBibleFields(document,fields);
   assert.equal(next.filmBible.visual,document.filmBible.visual);
   assert.equal(next.filmBible.styleVersion,7);
   assert.deepEqual(next.filmBible.custom,{keep:true});
   assert.equal(next.filmBible.story.old,'keep');
+  assert.equal(next.filmBible.story.summary,'原著共享人物设定');
+  assert.equal(mergeBibleFields(document,{...fields,summary:undefined}).filmBible.story.summary,'原著共享人物设定');
+  assert.equal(mergeBibleFields(document,{...fields,summary:''}).filmBible.story.summary,'');
   assert.equal(next.filmBible.style.old,'keep');
 });
 

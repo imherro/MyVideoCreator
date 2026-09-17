@@ -2,13 +2,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, RefreshCw, Save, Sparkles } from "lucide-react";
 import { STATUS_LABELS, normalizeEpisodeSelection, scriptReady, splitList, episodePlanningReady } from "../adaptation";
 import { activeScriptEpisodes, mergeTaskSnapshots } from "../taskCenter";
+import {ScriptImportDialog} from '../components/ScriptImportDialog';
 
 type Value = Record<string, any>;
 
 export function ScriptRoomPage({
-  productionId, currentEpisodeNo, onFocusEpisode, onAddEpisode, providers, defaultTarget, refreshKey = 0, jobs, onJobsSubmitted, request, notify, report, onChanged, onSelectEpisode, onEnterEpisode,
+  productionId, projectId, onScriptsImported, currentEpisodeNo, onFocusEpisode, onAddEpisode, providers, defaultTarget, refreshKey = 0, jobs, onJobsSubmitted, request, notify, report, onChanged, onSelectEpisode, onEnterEpisode,
 }: {
   onAddEpisode: () => void;
+  projectId:string;onScriptsImported:(result:Value)=>Promise<void>;
   productionId: string; currentEpisodeNo: number; providers: Value[]; defaultTarget?: Value; refreshKey?: number;
   jobs: Value[]; onJobsSubmitted: (jobs: Value[]) => void;
   request: (path: string, options?: RequestInit) => Promise<any>;
@@ -25,6 +27,8 @@ export function ScriptRoomPage({
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [instruction, setInstruction] = useState("");
   const [busy, setBusy] = useState(false);
+  const importInput=useRef<HTMLInputElement>(null);
+  const [importFilePreview,setImportFilePreview]=useState<File|null>(null);
   const [submittedJobs, setSubmittedJobs] = useState<Value[]>([]);
   const unsavedDrafts = useRef(new Map<number, Value>());
   const loadedProduction = useRef<string | null>(null);
@@ -134,7 +138,10 @@ export function ScriptRoomPage({
     notify("本集剧本任务已提交，完成后自动显示正文");
   }
   return <section className="script-room-page workflow-domain-page">
+    <input hidden ref={importInput} type="file" accept=".txt,.md,.markdown" onChange={e=>{const file=e.target.files?.[0];if(file)setImportFilePreview(file);e.target.value='';}}/>
+    {importFilePreview&&<ScriptImportDialog key={productionId} file={importFilePreview} productionId={productionId} projectId={projectId} defaultTarget={defaultTarget} request={request} onJobsSubmitted={onJobsSubmitted} onClose={()=>setImportFilePreview(null)} onImported={async result=>{unsavedDrafts.current.clear();await onScriptsImported(result);await loadList(result.episodes[0]?.episodeNo);}}/>}
     <header className="domain-header"><div><span className="eyebrow">SCRIPT ROOM</span><h1>剧本室</h1><p>直接编写或粘贴本集剧本，也可使用 AI 辅助创作；保存后与画布同步。</p></div><div className="settings-actions">
+      <button disabled={busy} onClick={()=>run(async()=>{if(draft)await save(false);importInput.current?.click();})}>智能导入 TXT / MD</button>
       <button disabled={busy} onClick={() => run(() => loadList(active))}><RefreshCw size={15} />刷新</button>
       <button disabled={busy || !draft} onClick={() => run(async () => { await save(); })}><Save size={15} />{unsavedDrafts.current.has(active) ? "保存（未保存）" : "保存"}</button>
       <button className="primary" disabled={busy || activeGenerating || !String(draft?.body || "").trim()} onClick={() => run(enterStoryboard)}>进入分镜规划<ArrowRight size={15}/></button>
@@ -142,9 +149,10 @@ export function ScriptRoomPage({
     <div className="script-room-layout">
       <aside className="script-episode-list"><header><b>分集</b><button className="quiet" disabled={busy} onClick={()=>run(async()=>{if(draft) await save(false);onAddEpisode();})}>新增一集</button></header>{items.map((value) => <div className={active === value.episodeNo ? "active" : ""} key={value.episodeNo}>
         <input type="checkbox" disabled={!episodePlanningReady(value.plan) || (runningEpisodes.has(value.episodeNo) && !selected.has(value.episodeNo))} checked={selected.has(value.episodeNo)} onChange={(e) => setSelected((current) => { const next = new Set(current); e.target.checked ? next.add(value.episodeNo) : next.delete(value.episodeNo); return next; })} />
-        <button onClick={() => run(async () => { if(draft) await save(false); await onSelectEpisode(value.episodeNo); await selectEpisode(value.episodeNo); })}><b>EP{String(value.episodeNo).padStart(2, "0")}</b><span>{value.episodeTitle}</span><small className={value.script?.status || value.plan?.status || "draft"}>{runningEpisodes.has(value.episodeNo) ? (runningEpisodes.get(value.episodeNo) === "queued" ? "排队中" : "生成中") : (value.script?.body?.trim() ? STATUS_LABELS[value.script.status] : "待编写")}</small></button>
+        <button onClick={() => run(async () => { if(draft) await save(false); await onSelectEpisode(value.episodeNo); await selectEpisode(value.episodeNo); })}><b>EP{String(value.episodeNo).padStart(2, "0")}</b><span>{value.episodeTitle}</span><small className={value.script?.status || value.plan?.status || "draft"}>{runningEpisodes.has(value.episodeNo) ? (runningEpisodes.get(value.episodeNo) === "queued" ? "排队中" : "生成中") : (value.script?.metadata?.incomplete ? "内容待补全" : value.script?.body?.trim() ? STATUS_LABELS[value.script.status] : "待编写")}</small></button>
       </div>)}</aside>
       <main>{draft ? <>
+        {draft.metadata?.incomplete&&<div className="notice">导入的本集正文疑似不完整，请补全后再进入分镜规划。{draft.metadata.importWarnings?.join('；')}</div>}
         {draft.metadata?.origin === "canvas" && <div className="notice"><b>来自画布快速创作</b><span>这里保存的是同一份正式剧本；修改后画布投影会同步更新。</span></div>}
         <div className="script-summary-strip"><span className={`workflow-status ${activeGenerating ? "running" : draft.status}`}>{activeGenerating ? (runningEpisodes.get(active) === "queued" ? "排队中" : "生成中") : (draft.body?.trim() ? STATUS_LABELS[draft.status] : "未完成")}</span><span>目标 {draft.estimatedDuration} 秒</span>{plan?.paywallRole && plan.paywallRole !== "none" && <span>{plan.paywallRole}</span>}<span>{draft.project_id ? "本集" : "首次保存时建立本集"}</span></div>
         <div className="domain-fields"><label>本集标题<input value={draft.title} onChange={event=>patch({title:event.target.value})}/></label><label>目标时长（秒）<input type="number" min={1} max={3000} value={draft.estimatedDuration} onChange={event=>patch({estimatedDuration:Number(event.target.value)})}/></label></div>
