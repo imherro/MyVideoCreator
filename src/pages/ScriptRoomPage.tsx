@@ -138,10 +138,10 @@ export function ScriptRoomPage({
     notify("本集剧本任务已提交，完成后自动显示正文");
   }
   return <section className="script-room-page workflow-domain-page">
-    <input hidden ref={importInput} type="file" accept=".txt,.md,.markdown" onChange={e=>{const file=e.target.files?.[0];if(file)setImportFilePreview(file);e.target.value='';}}/>
+    <input hidden ref={importInput} type="file" accept=".txt,.md,.markdown,.docx,.doc,.wps,.pdf,.rtf,.odt" onChange={e=>{const file=e.target.files?.[0];if(file)setImportFilePreview(file);e.target.value='';}}/>
     {importFilePreview&&<ScriptImportDialog key={productionId} file={importFilePreview} productionId={productionId} projectId={projectId} defaultTarget={defaultTarget} request={request} onJobsSubmitted={onJobsSubmitted} onClose={()=>setImportFilePreview(null)} onImported={async result=>{unsavedDrafts.current.clear();await onScriptsImported(result);await loadList(result.episodes[0]?.episodeNo);}}/>}
     <header className="domain-header"><div><span className="eyebrow">SCRIPT ROOM</span><h1>剧本室</h1><p>直接编写或粘贴本集剧本，也可使用 AI 辅助创作；保存后与画布同步。</p></div><div className="settings-actions">
-      <button disabled={busy} onClick={()=>run(async()=>{if(draft)await save(false);importInput.current?.click();})}>智能导入 TXT / MD</button>
+      <button disabled={busy} onClick={()=>run(async()=>{if(draft)await save(false);importInput.current?.click();})}>智能导入文档</button>
       <button disabled={busy} onClick={() => run(() => loadList(active))}><RefreshCw size={15} />刷新</button>
       <button disabled={busy || !draft} onClick={() => run(async () => { await save(); })}><Save size={15} />{unsavedDrafts.current.has(active) ? "保存（未保存）" : "保存"}</button>
       <button className="primary" disabled={busy || activeGenerating || !String(draft?.body || "").trim()} onClick={() => run(enterStoryboard)}>进入分镜规划<ArrowRight size={15}/></button>

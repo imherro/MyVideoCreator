@@ -1429,6 +1429,17 @@ def read_script_import(production_id:str,import_id:str):
     production(production_id)
     with s.db() as c:return public_draft(c,get_draft(c,production_id,import_id))
 
+@app.post('/api/productions/{production_id}/script-imports/upload')
+def upload_script_import(production_id:str,file:UploadFile=File(...)):
+    from .document_text import extract_document, MAX_BYTES
+    from .script_import import create_draft
+    production(production_id)
+    filename=(file.filename or 'document.txt').replace('\\','/').rsplit('/',1)[-1][:250]
+    content=extract_document(filename,file.file.read(MAX_BYTES+1))
+    with s.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        return create_draft(c,production_id,filename,content)
+
 @app.post('/api/productions/{production_id}/script-imports/{import_id}/analyze')
 def analyze_script_import(production_id:str,import_id:str,body:ScriptImportAnalyze):
     from .script_import import get_draft,analysis_prompt
@@ -1444,8 +1455,8 @@ def analyze_script_import(production_id:str,import_id:str,body:ScriptImportAnaly
         if not target.get('providerId'):raise ValueError('请先在项目设置中选择默认文本模型')
         result=create_job_record(c,body.project_id,JobCreate(node_id='script-import:'+import_id,kind='text',submission_id=body.submission_id,input={
             'provider':target['providerId'],'model':target.get('modelId',''),'stage':'script_import_analysis',
-            'prompt':analysis_prompt(row),'max_tokens':16000,
-            'script_import_analysis':{'productionId':production_id,'importId':import_id,'filename':row['filename']},
+            'prompt':analysis_prompt(row,state['document'].get('duration') or 60),'max_tokens':16000,
+            'script_import_analysis':{'productionId':production_id,'importId':import_id,'filename':row['filename'],'targetDurationSeconds':state['document'].get('duration') or 60},
         }))
         c.execute('UPDATE script_imports SET analysis_job_id=? WHERE id=?',(result['id'],import_id))
     s.event(body.project_id,{'type':'job','id':result['id']})
@@ -1459,6 +1470,22 @@ def commit_script_import(production_id:str,import_id:str,body:ScriptImportConfir
         result=confirm_import(c,production_id,import_id,body.episode_nos,body.include_shared)
     for episode in result['episodes']:s.event(episode['projectId'],{'type':'script','imported':True})
     return result
+
+class SourceImportConfirm(BaseModel):
+    source_id:str|None=None
+    episode_nos:list[int]=Field(default_factory=list,max_length=500)
+    original_only:bool=False
+
+@app.post('/api/productions/{production_id}/script-imports/{import_id}/confirm-source')
+def commit_source_import(production_id:str,import_id:str,body:SourceImportConfirm):
+    from .script_import import confirm_source_import
+    with s.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        result=confirm_source_import(c,production_id,import_id,body.source_id,body.episode_nos,body.original_only)
+        targets=production_event_targets(c,production_id)
+    for target in targets:s.event(target,{'type':'source_imported','id':result['sourceId']})
+    return result
+
 
 @app.post('/api/productions/{production_id}/sources/{source_id}/chapters/import')
 def import_source_chapters(production_id:str,source_id:str,body:SourceImport):

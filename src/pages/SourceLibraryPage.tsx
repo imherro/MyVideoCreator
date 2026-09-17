@@ -118,24 +118,20 @@ export function SourceLibraryPage({
     if (moreRef.current) moreRef.current.open = false;
     fileRef.current?.click();
   }
-  async function importFile(file: File) {
+  async function importFile(draftId:string,episodeNos:number[],originalOnly=false) {
     const target = importTarget.current;
     if (!target || target.productionId !== productionId) throw new Error('作品已切换，请重新选择导入文件');
     setBusy(true);
     try {
       for (const edited of chapters.filter(item => dirtyChapters.has(item.id))) await persistChapter(edited);
-      const importPath = target.sourceId ? `/productions/${productionId}/sources/${target.sourceId}/chapters/import` : `/productions/${productionId}/sources/import`;
-      const imported = await request(importPath, { method: "POST", body: JSON.stringify({
-        title: file.name.replace(/\.(txt|md|markdown)$/i, ""),
-        type: /\.md|\.markdown$/i.test(file.name) ? "markdown" : "txt",
-        content: await file.text(), metadata: { filename: file.name }, source_id: target.sourceId,
-      }) });
+      const imported=await request(`/productions/${productionId}/script-imports/${draftId}/confirm-source`,{method:'POST',body:JSON.stringify({source_id:target.sourceId,episode_nos:episodeNos,original_only:originalOnly})});
       await load();
       onChanged?.();
       setActive(imported.first_chapter_id || "");
-      notify(target.sourceId ? `已向“${target.sourceName}”追加 ${imported.imported_count} 章，原有章节保持不变` : `已导入原著“${imported.title}”`);
+      notify(target.sourceId ? `已向“${target.sourceName}”追加 ${imported.imported_count} 章，原有章节保持不变` : `已导入 ${imported.imported_count} 个原著章节`);
     } finally { setBusy(false); }
   }
+
   async function persistChapter(target: AnyValue) {
     const saved = await request(`/productions/${productionId}/chapters/${target.id}`, {
       method: "PUT", body: JSON.stringify({ title: target.title, content: target.content, revision: target.revision }),
@@ -208,15 +204,15 @@ export function SourceLibraryPage({
       <div><span className="eyebrow">PRODUCTION SOURCE LIBRARY</span><h1>整部作品原著库</h1><p>Production 共享资料 · 章节与分集的对应关系在改编策划和单集剧本中设置。</p></div>
       <div className="settings-actions">
         <button onClick={() => run(load)} disabled={busy}><RefreshCw size={15}/>刷新</button>
-        <button onClick={() => chooseImport()} disabled={busy || !ready} title={activeSource ? `追加到“${activeSource.title}”，不会覆盖原有章节` : "导入 TXT / Markdown"}><Upload size={15}/>{activeSource ? "导入章节到当前原著" : "导入 TXT / Markdown"}</button>
+        <button onClick={() => chooseImport()} disabled={busy || !ready} title={activeSource ? `追加到“${activeSource.title}”，不会覆盖原有章节` : "导入文档（TXT / Word / PDF 等）"}><Upload size={15}/>{activeSource ? "导入章节到当前原著" : "导入文档"}</button>
         <span title={sources.length ? "已有原著，请使用新增章节" : undefined}><button onClick={() => openCreateSource()} disabled={busy || !ready || sources.length > 0}><FilePlus2 size={15}/>新建原著</button></span>
         <button className={sources.length ? "primary" : undefined} onClick={openCreateChapter} disabled={busy || !ready || !sources.length}><Plus size={15}/>新增章节</button>
         <button className="danger-button" onClick={() => run(deleteActiveSource)} disabled={busy || !activeSource} title="移入回收站，可恢复"><Trash2 size={15}/>移除当前原著</button>
         {ready && sources.length > 0 && <details className="source-more-menu" ref={moreRef}><summary>更多</summary><div><button disabled={busy} onClick={() => openCreateSource(true)}><FilePlus2 size={15}/>添加另一部原著</button><button disabled={busy} onClick={() => chooseImport(true)}><Upload size={15}/>导入为另一部原著</button></div></details>}
       </div>
     </header>
-    <input ref={fileRef} hidden type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" onChange={(event) => { const file = event.target.files?.[0]; if (file) run(async()=>{setBusy(true);try{for(const edited of chapters.filter(item=>dirtyChapters.has(item.id)))await persistChapter(edited);setImportFilePreview(file);}finally{setBusy(false);}}); event.target.value = ""; }}/>
-    {importFilePreview&&<ScriptImportDialog key={productionId} file={importFilePreview} productionId={productionId} projectId={projectId} defaultTarget={defaultTarget} request={request} onJobsSubmitted={onJobsSubmitted} onClose={()=>setImportFilePreview(null)} onImported={onScriptsImported} onSourceImport={()=>importFile(importFilePreview)}/>}
+    <input ref={fileRef} hidden type="file" accept=".txt,.md,.markdown,.docx,.doc,.wps,.pdf,.rtf,.odt" onChange={(event) => { const file = event.target.files?.[0]; if (file) run(async()=>{setBusy(true);try{for(const edited of chapters.filter(item=>dirtyChapters.has(item.id)))await persistChapter(edited);setImportFilePreview(file);}finally{setBusy(false);}}); event.target.value = ""; }}/>
+    {importFilePreview&&<ScriptImportDialog key={productionId} file={importFilePreview} productionId={productionId} projectId={projectId} defaultTarget={defaultTarget} request={request} onJobsSubmitted={onJobsSubmitted} onClose={()=>setImportFilePreview(null)} onImported={onScriptsImported} onSourceImport={importFile}/>}
     <div className="source-library-grid">
       <aside>
         <label className="source-search"><Search size={14}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索章节"/></label>

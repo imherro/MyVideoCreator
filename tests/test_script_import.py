@@ -108,7 +108,7 @@ def test_ai_job_contract_and_guarded_result(client):
     assert job.status_code==200,job.text
     job=job.json()['jobs'][0]
     assert job['scope']=='production'
-    assert job['input']['schema_version']=='script-import/v1'
+    assert job['input']['schema_version']=='script-import/v2'
     assert '不改写' in job['input']['system_prompt']
     assert client.post(path+'/analyze',json={'project_id':p['id'],'submission_id':'script-import-analysis-duplicate'}).json()['jobs'][0]['id']==job['id']
     assert client.post(path+'/confirm',json={'episode_nos':[1]}).status_code==400

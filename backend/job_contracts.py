@@ -19,7 +19,7 @@ def freeze_prompt_contract(kind: str, value: dict, *, origin: str = 'submission'
 
     if stage == 'script_import_analysis':
         from .script_import import SYSTEM_PROMPT, SCHEMA
-        system_prompt, response_schema, schema_version = SYSTEM_PROMPT, SCHEMA, 'script-import/v1'
+        system_prompt, response_schema, schema_version = SYSTEM_PROMPT, SCHEMA, 'script-import/v2'
     elif stage == 'source_analysis':
         from .source_library import EVENT_SCHEMA, SYSTEM_PROMPT
         system_prompt, response_schema, schema_version = SYSTEM_PROMPT, EVENT_SCHEMA, 'source-events/v1'
