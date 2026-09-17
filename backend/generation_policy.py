@@ -28,17 +28,8 @@ def default_model_pool(providers):
     return result
 
 def default_new_project_model_pool(providers):
-    """Reviewed new-project defaults; other configured models remain opt-in."""
-    allowed_types = {'volcengine_ark', 'hc_atom'}
-    providers_by_id = {provider.get('id'): provider for provider in providers}
-    result = default_model_pool(providers)
-    for kind in MODEL_POOL_KINDS:
-        result[kind] = [
-            target for target in result[kind]
-            if providers_by_id.get(target['providerId'], {}).get('type') in allowed_types
-            or (kind == 'audio' and providers_by_id.get(target['providerId'], {}).get('type') == 'volcengine_speech')
-        ]
-    return result
+    """New projects include every model enabled in the system library."""
+    return default_model_pool(providers)
 
 def validate_model_pool(pool,providers,allow_missing=False):
     if pool is None:return None

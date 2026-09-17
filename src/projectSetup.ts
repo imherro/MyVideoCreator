@@ -62,7 +62,7 @@ export function defaultGenerationPolicy(providers: Value[]): GenerationPolicy {
   ) as GenerationPolicy;
 }
 
-export function defaultProjectSetupDraft(providers: Value[], _localModels: Value[] = []): ProjectSetupDraft {
+export function defaultProjectSetupDraft(providers: Value[], localModels: Value[] = []): ProjectSetupDraft {
   return {
     creationMode: "direct",
     name: "",
@@ -80,7 +80,7 @@ export function defaultProjectSetupDraft(providers: Value[], _localModels: Value
     platform: "通用短视频",
     brief: "",
     generationPolicy: defaultGenerationPolicy(providers),
-    modelPool: defaultNewProjectModelPool(providers),
+    modelPool: defaultNewProjectModelPool(providers, localModels),
     bible: {
       worldEra: "",
       visualTone: "",

@@ -332,7 +332,7 @@ def normalized_project_name(name:str)->str:
 def project_create_document(body:ProjectCreate):
     providers=s.get_setting('providers',[])
     # Legacy API callers can keep inheriting the system pool. The browser sends
-    # the reviewed cloud-only pool explicitly for every newly created project.
+    # the selected system model pool explicitly for every newly created project.
     document=new_document(default_ark_policy(providers),None)
     if body.creation_mode not in ('direct','adaptation'):raise ValueError('创作起点无效')
     document['creationMode']=body.creation_mode

@@ -46,7 +46,9 @@ test('new projects default to Ark text and image plus HC Seedance 2.5',()=>{
     image:{providerId:'ark',modelId:'doubao-seedream-5-0-pro-260628'},
     video:{providerId:'hc',modelId:'doubao-seedance-2.5'},
   });
-  assert.equal(Object.values(draft.modelPool).flat().some(item=>['local','local-image','rh'].includes(item.providerId)),false);
+  assert.deepEqual(draft.modelPool.text.map(item=>item.providerId),['local','rh','ark','hc']);
+  assert.deepEqual(draft.modelPool.image.map(item=>item.providerId),['local-image','rh','ark','hc']);
+  assert.deepEqual(projectSetupPayload(draft).model_pool,draft.modelPool);
 });
 
 test('Bible settings merge preserves visual versions, style version, and unknown keys',()=>{

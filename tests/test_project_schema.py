@@ -50,7 +50,7 @@ def test_new_document_can_receive_ark_defaults():
     assert document['schemaVersion']==CURRENT_SCHEMA_VERSION
     assert document['generationPolicy']['video']=={'providerId':'ark','modelId':'v'}
 
-def test_new_project_defaults_use_ark_text_image_and_hc_video_only():
+def test_new_project_pool_includes_all_enabled_models_without_changing_preferred_defaults():
     providers=[
         {'id':'local-image','type':'maestro','kind':'image','model':'flux','local':True},
         {'id':'rh','type':'runninghub','models':{'text':'rh-t','image':'rh-i','video':'rh-v'}},
@@ -64,7 +64,8 @@ def test_new_project_defaults_use_ark_text_image_and_hc_video_only():
         'video':{'providerId':'hc','modelId':'doubao-seedance-2.5'},
     }
     pool=default_new_project_model_pool(providers)
-    assert not any(target['providerId'] in ('local-image','rh') for targets in pool.values() for target in targets)
+    assert [target['providerId'] for target in pool['image']]==['local-image','rh','ark','hc']
+    assert [target['providerId'] for target in pool['video']]==['rh','ark','hc']
     assert pool['audio']==[{'providerId':'speech','modelId':'seed-tts-2.0'}]
 
 def test_model_pool_limits_projects_to_system_enabled_models():
@@ -73,6 +74,7 @@ def test_model_pool_limits_projects_to_system_enabled_models():
     pool=default_model_pool(providers)
     assert [target['modelId'] for target in pool['text']]==['t','t-fast']
     assert pool['video']==[]
+    assert default_new_project_model_pool(providers)==pool
     assert pool['audio']==[{'providerId':'speech','modelId':'seed-tts-2.0'}]
     with pytest.raises(ValueError,match='未在系统模型库启用'):
         validate_model_pool({**pool,'image':[{'providerId':'ark','modelId':'other'}]},providers)

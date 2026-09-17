@@ -28,14 +28,15 @@ test('system pool includes enabled cloud and local models by kind',()=>{
   assert.deepEqual(pool.audio,[{providerId:'speech',modelId:'seed-tts-2.0'}]);
 });
 
-test('new project defaults select Ark and HC models but leave Local and RunningHub opt-in',()=>{
+test('new project defaults include all enabled system models and respect disabled kinds',()=>{
   const allProviders=[...providers,
     {id:'hc',name:'HC',type:'hc_atom',models:{text:'hc-text',image:'hc-image',video:'doubao-seedance-2.5'}},
     {id:'rh',name:'RunningHub',type:'runninghub',models:{text:'rh-text',image:'rh-image',video:'rh-video'}},
   ];
-  const pool=defaultNewProjectModelPool(allProviders);
-  assert.deepEqual(pool.text.map(item=>item.providerId),['ark','ark','hc']);
-  assert.deepEqual(pool.video,[{providerId:'hc',modelId:'doubao-seedance-2.5'}]);
+  const pool=defaultNewProjectModelPool(allProviders,[{id:'qwen-local'}]);
+  assert.deepEqual(pool.text.map(item=>item.providerId),['local','ark','ark','hc','rh']);
+  assert.deepEqual(pool.image.map(item=>item.providerId),['ark','hc','rh']);
+  assert.deepEqual(pool.video,[{providerId:'hc',modelId:'doubao-seedance-2.5'},{providerId:'rh',modelId:'rh-video'}]);
   assert.deepEqual(pool.audio,[{providerId:'speech',modelId:'seed-tts-2.0'}]);
-  assert.equal(Object.values(pool).flat().some(item=>item.providerId==='local'||item.providerId==='rh'),false);
+  assert.equal(pool.video.some(item=>item.providerId==='ark'),false);
 });
