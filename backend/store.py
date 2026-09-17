@@ -42,6 +42,8 @@ def init():
     with db() as c:
         c.execute('PRAGMA journal_mode=WAL')
         c.executescript('''
+        CREATE TABLE IF NOT EXISTS assistant_messages(id TEXT PRIMARY KEY,scope TEXT NOT NULL,role TEXT NOT NULL,content TEXT NOT NULL,status TEXT NOT NULL,context TEXT NOT NULL,actions TEXT NOT NULL,created REAL NOT NULL);
+        CREATE INDEX IF NOT EXISTS assistant_scope_created ON assistant_messages(scope,created);
         CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY,expires REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS productions(id TEXT PRIMARY KEY,name TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 1,shared_context TEXT,created REAL NOT NULL,updated REAL NOT NULL);
@@ -182,6 +184,7 @@ def init():
         c.execute('CREATE INDEX IF NOT EXISTS source_chapters_source_order ON source_chapters(source_id,sort_order)')
         c.execute('CREATE INDEX IF NOT EXISTS source_events_production_chapter ON source_events(production_id,chapter_id,event_order)')
         c.execute('CREATE INDEX IF NOT EXISTS episode_scripts_status ON episode_scripts(status,updated)')
+        c.execute("UPDATE assistant_messages SET status='interrupted' WHERE status='running'")
         c.execute('CREATE INDEX IF NOT EXISTS episode_script_revisions_parent ON episode_script_revisions(project_id,revision)')
         from .job_contracts import freeze_prompt_contract
         for job in c.execute('SELECT id,kind,input FROM jobs').fetchall():

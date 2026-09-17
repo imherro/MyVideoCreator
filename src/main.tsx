@@ -1,3 +1,5 @@
+import { AssistantPanel } from "./components/AssistantPanel";
+import type { AssistantAction } from "./assistantChat";
 import { TrashConfirmDialog } from "./components/TrashConfirmDialog";
 import { voiceCardId } from "./filmBible/voiceResolution.ts";
 import { planShotTimeline } from "./shotTimeline";
@@ -2349,6 +2351,31 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         },
       };
     }) || [];
+  async function assistantNavigate(action: AssistantAction) {
+    if (action.projectId && action.projectId !== project?.id) await openProject(action.projectId);
+    if (action.kind === "stage" && ["overview","source","adaptation","script","storyboard","art","images","video","editor","canvas"].includes(action.stage || "")) {
+      activateWorkflowStage(action.stage as WorkflowStage); setPanel(null);
+    } else if (action.kind === "panel" && ["settings","projectInfo"].includes(action.panel || "")) {
+      if(action.panel === "projectInfo")setProjectSettingsTab("production");
+      setPanel(action.panel!);
+    } else if(action.kind === "node" && action.nodeId) {
+      const target=current.current.doc?.nodes.find((item:Any)=>item.id===action.nodeId);
+      if(!target)throw new Error("此节点已不存在，请重新提问以刷新状态。");
+      activateWorkflowStage("canvas");setSelected(action.nodeId);setPanel(null);
+      setTimeout(()=>fitView({nodes:[{id:action.nodeId!}],padding:0.8}),100);
+    }
+  }
+  const workflowGuide = deriveWorkflowGuide({
+    adaptation: workflowContext.adaptation,
+    scripts: workflowContext.scripts,
+    currentProject: project,
+    document: doc,
+    jobs: mergeTaskSnapshots(jobs, productionJobs.filter((job) =>
+      ["source_analysis", "adaptation_generation", "adaptation_episode_generation", "script_generation"].includes(job.input?.stage))),
+  });
+  const assistantUI=<AssistantPanel open={panel==="assistant"} onClose={()=>setPanel(null)} projectId={project?.id} productionId={project?.production_id}
+    context={{production:productions.find(item=>item.id===project?.production_id)?.name || project?.name,episode:project?.episode_no,page:({overview:"概览",source:"原著",adaptation:"改编策划",script:"剧本",storyboard:"分镜规划",art:"塑角造景",images:"分镜图",video:"视频",editor:"剪辑",canvas:"高级画布"})[workflowStage],selectedNode:selected?{label:doc?.nodes.find(item=>item.id===selected)?.data?.label as string}:undefined}}
+    stage={workflowStage} nodeId={selected} unsaved={dirty.current} pageGuide={JSON.stringify(workflowGuide.stages[workflowStage] || {})} onAction={assistantNavigate}/>;
   if (!doc || !project)
     return (
       <div className={booted ? "empty-workspace" : "loading"}>
@@ -2360,8 +2387,12 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           <button className="primary" onClick={openProjectSetup}><Plus size={17}/>创建第一部作品</button>
           <button onClick={()=>{loadTrash().then(()=>setPanel("trash")).catch(report);}}><Trash2 size={16}/>回收站</button>
           {panel==="trash"&&<section className="empty-trash-list"><h3>回收站</h3>{[...(trashItems.productions||[]).map((item:Any)=>({...item,trashKind:"production"})),...trashItems.projects.map((item:Any)=>({...item,trashKind:"project"}))].map((item:Any)=><div className="trash-row" key={item.id}><b>{item.name}</b><button onClick={()=>restoreTrashItem(item.trashKind,item).catch(report)}>恢复{item.trashKind==="production"?"整部作品":"制作集"}</button></div>)}{!trashItems.productions?.length&&!trashItems.projects.length&&<p className="muted">没有可恢复的作品或制作集</p>}</section>}
+          <button onClick={()=>setPanel(panel==="assistant"?null:"assistant")}>AI助手</button>
           {error && <div className="error">{error}</div>}
         </>}
+        {panel==="assistant"&&<div className="assistant-scrim" onClick={()=>setPanel(null)}/>}
+        {assistantUI}
+        {panel==="settings"&&<div className="modal-overlay"><div className="project-setup-dialog"><header><h2>设置</h2><button onClick={()=>setPanel(null)}>关闭</button></header><div className="project-setup-content"><SettingsPanel config={config} system={system} onSave={async value=>{setConfig(await api("/settings",send("PUT",value)));setSystem(await api("/system"));}} onRefresh={async()=>setSystem(await api("/system"))} onError={report} onLogout={async()=>{await api("/auth/logout",send("POST"));onLogout();}}/></div></div></div>}
         {projectSetupOpen && <ProjectSetupDialog
           key={projectSetupKey}
           providers={config.providers}
@@ -2387,14 +2418,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     productions.find((item) => item.id === project.production_id) || null;
   const currentEpisodes = episodesForProduction(projects, project.production_id);
   const currentWorkflowScope = workflowStageScope(workflowStage);
-  const workflowGuide = deriveWorkflowGuide({
-    adaptation: workflowContext.adaptation,
-    scripts: workflowContext.scripts,
-    currentProject: project,
-    document: doc,
-    jobs: mergeTaskSnapshots(jobs, productionJobs.filter((job) =>
-      ["source_analysis", "adaptation_generation", "adaptation_episode_generation", "script_generation"].includes(job.input?.stage))),
-  });
   const projectBibleFields = bibleFields(doc);
   const filmBiblePanelProps: React.ComponentProps<typeof FilmBiblePanel> = {
     visual: visualBibleOf(doc),
@@ -3984,8 +4007,10 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           {data.kind === "storyboard" && <small className="canvas-run-input-hint">{selectedRunInput.reason || (selectedRunInput.scriptCount ? `已连接 ${selectedRunInput.scriptCount} 份剧本，将使用上游正文生成分镜。` : "将按创作描述生成分镜。")}</small>}
         </aside>
       )}
-      {panel && <div className="side-panel-scrim" onClick={() => setPanel(null)} aria-hidden="true" />}
-      {panel && (
+      {panel==="assistant"&&<div className="assistant-scrim" onClick={()=>setPanel(null)}/> }
+      {assistantUI}
+      {panel && panel!=="assistant" && <div className="side-panel-scrim" onClick={() => setPanel(null)} aria-hidden="true" />}
+      {panel && panel!=="assistant" && (
         <div
           className={
             "side-panel " +

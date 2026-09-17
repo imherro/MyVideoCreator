@@ -2398,5 +2398,8 @@ async def events(request:Request,after:int|None=None):
             await asyncio.sleep(2)
     return StreamingResponse(stream(),media_type='text/event-stream',headers={'X-Accel-Buffering':'no'})
 
+from .assistant import router as assistant_router
+app.include_router(assistant_router)
+
 if (s.ROOT/'dist').is_dir():
     app.mount('/',StaticFiles(directory=s.ROOT/'dist',html=True),name='web')

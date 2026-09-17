@@ -2,17 +2,19 @@ import {
   BriefcaseBusiness,
   Clock3,
   Images,
+  MessageCircle,
   Settings,
   Trash2,
 } from "lucide-react";
 
-export type GlobalPanel = "projects" | "assets" | "jobs" | "trash" | "settings";
+export type GlobalPanel = "projects" | "assets" | "jobs" | "trash" | "settings" | "assistant";
 
 const items = [
   { id: "projects", label: "项目", icon: BriefcaseBusiness },
   { id: "assets", label: "资产中心", icon: Images },
   { id: "jobs", label: "任务", icon: Clock3 },
   { id: "trash", label: "回收站", icon: Trash2 },
+  { id: "assistant", label: "AI助手", icon: MessageCircle },
   { id: "settings", label: "设置", icon: Settings },
 ] as const;
 
