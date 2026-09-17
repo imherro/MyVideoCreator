@@ -33,7 +33,7 @@
 .global-nav button{position:relative;width:78px;min-height:58px;flex-direction:column;gap:5px;padding:8px 4px;font-size:11px}
 .global-nav button span{display:block;line-height:1.1;white-space:nowrap}
 .global-nav button b{position:absolute;right:8px;top:6px;min-width:17px;padding:1px 4px;border-radius:9px;background:#594a34;color:#f2cc8b;font-size:9px}
-.global-nav button:nth-last-child(2){margin-top:auto}
+.global-nav button[data-panel="trash"]{margin-top:auto}
 .side-panel{left:94px}
 .workflow-stage-nav{height:66px;flex:0 0 auto;display:flex;align-items:stretch;gap:2px;padding:8px 20px 0;border-bottom:1px solid #2c3235;background:#14181a;overflow-x:auto;overflow-y:hidden}
 .workflow-stage-nav button{position:relative;min-width:82px;flex:1;max-width:138px;display:flex;flex-direction:column;align-items:flex-start;gap:2px;border:0;border-radius:7px 7px 0 0;padding:8px 11px;background:transparent;color:#818a8e;text-align:left;white-space:nowrap}

@@ -32,6 +32,7 @@ export function GlobalNav({
       {items.map(({ id, label, icon: Icon }) => (
         <button
           key={id}
+          data-panel={id}
           className={active === id ? "active" : ""}
           title={label}
           aria-label={id === "jobs" ? `${label} ${taskCount}` : label}
