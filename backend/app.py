@@ -2318,7 +2318,10 @@ def production_job_statuses(production_id:str):
         rows=c.execute('''WITH visible_jobs AS (
             SELECT j.id,j.project_id,j.node_id,j.kind,j.status,j.created,j.updated,
                 json_extract(j.input,'$.stage') stage,
-                json_extract(j.input,'$.episode_script_generation.episodeNo') script_episode_no
+                json_extract(j.input,'$.episode_script_generation.episodeNo') script_episode_no,
+                json_extract(j.input,'$.script_import_analysis.productionId') import_production_id,
+                json_extract(j.input,'$.script_import_analysis.importId') import_id,
+                json_extract(j.input,'$.script_import_analysis.filename') import_filename
             FROM jobs j JOIN projects p ON p.id=j.project_id
             WHERE p.production_id=? AND NOT EXISTS(
                 SELECT 1 FROM deleted_items d WHERE d.kind='project' AND d.item_id=p.id)
@@ -2331,6 +2334,12 @@ def production_job_statuses(production_id:str):
         item['input']={'stage':row['stage']}
         if row['script_episode_no'] is not None:
             item['input']['episode_script_generation']={'productionId':production_id,'episodeNo':row['script_episode_no']}
+        if row['import_id'] is not None:
+            item['input']['script_import_analysis']={
+                'productionId':row['import_production_id'] or production_id,
+                'importId':row['import_id'],
+                'filename':row['import_filename'] or '导入文档',
+            }
         result.append(item)
     return result
 

@@ -31,6 +31,14 @@ export function ImportResumeNotice({productionId,mode,jobs,request,onResume}:{
         if(stopped)return;
         if(draft.status!=='preview'){forgetImport(productionId,mode,selected.id);setPreview(null);return;}
         setPreview({record:selected,draft});
+        try{
+          const pendingOpen=JSON.parse(sessionStorage.getItem('anying-open-import')||'null');
+          if(pendingOpen?.productionId===productionId&&pendingOpen?.importId===selected.id){
+            sessionStorage.removeItem('anying-open-import');
+            onResume(selected);
+            return;
+          }
+        }catch{}
         if(['queued','running'].includes(draft.job?.status))timer=setTimeout(load,3000);
       }catch{if(!stopped)timer=setTimeout(load,6000);}
     }

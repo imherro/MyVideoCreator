@@ -3,6 +3,7 @@ import {Sparkles,Upload,X,Minimize2,LoaderCircle,FileText} from 'lucide-react';
 import {rememberImport,forgetImport} from './ImportResumeNotice';
 import {systemModelTargets,targetKey,targetLabel} from '../modelAccess';
 import {requestId} from '../requestId';
+import {requestImportNotificationPermission} from '../importNotifications';
 
 type Value=Record<string,any>;
 export function ScriptImportDialog({file,resumeId,sourceTarget,productionId,projectId,providers=[],defaultTarget,request,onJobsSubmitted,onClose,onImported,onSourceImport}:{
@@ -58,6 +59,17 @@ export function ScriptImportDialog({file,resumeId,sourceTarget,productionId,proj
   },[file,resumeId,productionId]);
   useEffect(()=>{if(pending)setMinimized(true);},[pending]);
   useEffect(()=>{
+    const open=(event:Event)=>{
+      const detail=(event as CustomEvent).detail;
+      if(detail?.productionId===productionId&&detail?.importId===(draft?.id||resumeId)){
+        setMinimized(false);
+        try{sessionStorage.removeItem('anying-open-import');}catch{}
+      }
+    };
+    window.addEventListener('anying:open-import',open);
+    return()=>window.removeEventListener('anying:open-import',open);
+  },[productionId,draft?.id,resumeId]);
+  useEffect(()=>{
     if(!pending||!draft)return;
     let stopped=false;let timer:ReturnType<typeof setTimeout>;
     const poll=async()=>{try{const value=await request(`${base}/${draft.id}`);if(stopped)return;accept(value);setError('');if(value.job&&['queued','running'].includes(value.job.status))timer=setTimeout(poll,2000);}catch(e:any){if(!stopped){setError(`刷新识别结果失败，将重试：${e.message}`);timer=setTimeout(poll,4000);}}};
@@ -65,6 +77,10 @@ export function ScriptImportDialog({file,resumeId,sourceTarget,productionId,proj
   },[draft?.id,pending]);
   async function run(action:()=>Promise<void>){setBusy(true);setError('');try{await action();}catch(e:any){if(alive.current)setError(e.message);}finally{if(alive.current)setBusy(false);}}
   async function analyze(){
+    // Notification permission must be requested from the user's click. Analysis
+    // still starts when the browser blocks desktop notifications; the workspace
+    // completion card remains available as the fallback.
+    void requestImportNotificationPermission();
     await submitAnalysis(draft!.id);
   }
   async function confirm(){

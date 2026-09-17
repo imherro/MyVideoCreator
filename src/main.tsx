@@ -175,6 +175,11 @@ import { GlobalNav, type GlobalPanel } from "./app/GlobalNav";
 import { planGlobalPanelAction } from "./app/globalNavigation";
 import { WorkflowStageNav } from "./app/WorkflowStageNav";
 import { readApiErrorMessage } from "./apiResponse";
+import {
+  importAnalysisCompletions,
+  importResultStage,
+  showImportDesktopNotification,
+} from "./importNotifications";
 import { WorkflowGuideBanner } from "./app/WorkflowGuideBanner";
 import { deriveWorkflowGuide } from "./app/workflowGuide";
 import {
@@ -653,6 +658,14 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     [revisions, setRevisions] = useState<Any[]>([]),
     [trashItems, setTrashItems] = useState<Any>({ productions: [], projects: [], assets: [], sources: [], chapters: [] }),
     [preview, setPreview] = useState<Asset | null>(null);
+  const [importCompletion, setImportCompletion] = useState<{
+    id: string;
+    title: string;
+    body: string;
+    stage: "source" | "script";
+    productionId: string;
+    importId: string;
+  } | null>(null);
   const batchSubmissionRef = useRef(false);
   const [workflowDataRevision, setWorkflowDataRevision] = useState({ source: 0, adaptation: 0, script: 0 });
   const [previewTimeline, setPreviewTimeline] = useState(false);
@@ -693,6 +706,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     ),
     fileInput = useRef<HTMLInputElement>(null),
     observedCompletedJobs = useRef(new Set<string>()),
+    observedImportJobs = useRef(new Map<string, string>()),
     { fitView } = useReactFlow(),
     updateNodeInternals = useUpdateNodeInternals();
   const [layoutVersion, setLayoutVersion] = useState(0);
@@ -725,6 +739,18 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     if (next === "storyboard" && view === "shots") return;
     if (next === "images" && ["shots", "grid"].includes(view)) return;
     setView(defaultViewForStage(next));
+  }
+  function revealImportResult(value: {productionId?: string;importId?: string;stage: "source" | "script"}) {
+    const productionId = value.productionId || current.current.project?.production_id;
+    const importId = value.importId;
+    if (productionId && importId) {
+      try { sessionStorage.setItem("anying-open-import", JSON.stringify({ productionId, importId, stage: value.stage })); } catch {}
+    }
+    activateWorkflowStage(value.stage);
+    setImportCompletion(null);
+    if (productionId && importId) {
+      window.setTimeout(() => window.dispatchEvent(new CustomEvent("anying:open-import", { detail: { productionId, importId } })), 0);
+    }
   }
   const report = (e: any) => {
     const message = e?.message || String(e);
@@ -1228,6 +1254,35 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           }).catch(report);
         }
       }
+    }
+  }, [productionJobs]);
+  useEffect(() => {
+    const completed = importAnalysisCompletions(observedImportJobs.current, productionJobs);
+    for (const item of completed) {
+      void (async () => {
+        let draft: Any | null = null;
+        try {
+          draft = await api(`/productions/${item.productionId}/script-imports/${encodeURIComponent(item.importId)}`);
+        } catch {
+          // The job snapshot is enough to notify. Opening the result will retry
+          // the draft request through the normal import-resume flow.
+        }
+        const stage = importResultStage(item.productionId, item.importId);
+        const count = Number(draft?.manifest?.episodes?.length || 0);
+        const title = item.status === "succeeded"
+          ? "原著 / 剧本分析完成"
+          : item.status === "cancelled"
+            ? "原著 / 剧本分析已停止"
+            : item.status === "interrupted"
+              ? "原著 / 剧本分析已中断"
+              : "原著 / 剧本分析未完成";
+        const body = item.status === "succeeded"
+          ? `“${item.filename}”${count ? `已识别 ${count} 集` : "已完成结构识别"}，点击查看结果。`
+          : `“${item.filename}”${draft?.job?.error ? `：${draft.job.error}` : "的原文已保留，可返回工作室查看详情。"}`;
+        const alert = { id: item.id, title, body, stage, productionId: item.productionId, importId: item.importId };
+        setImportCompletion(alert);
+        showImportDesktopNotification(alert, () => revealImportResult(alert));
+      })();
     }
   }, [productionJobs]);
   useEffect(() => {
@@ -4645,6 +4700,20 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         }}
       />
       {trashTarget && <TrashConfirmDialog key={`${trashTarget.kind}:${trashTarget.item.id}`} name={trashTarget.item.name} whole={trashTarget.kind==="production"} onClose={()=>setTrashTarget(null)} onConfirm={()=>trashTarget.kind==="production"?deleteProduction(trashTarget.item):deleteProject(trashTarget.item)}/> }
+      {importCompletion && (
+        <aside className="background-task-complete" role="alertdialog" aria-labelledby="import-completion-title">
+          <FileText size={21}/>
+          <div>
+            <strong id="import-completion-title">{importCompletion.title}</strong>
+            <span>{importCompletion.body}</span>
+            <div>
+              <button className="primary" onClick={()=>revealImportResult(importCompletion)}>查看结果</button>
+              <button onClick={()=>setImportCompletion(null)}>稍后处理</button>
+            </div>
+          </div>
+          <button className="icon-button" aria-label="关闭完成提醒" onClick={()=>setImportCompletion(null)}><X size={16}/></button>
+        </aside>
+      )}
       {notice && (
         <div className="toast">
           <Check size={16} />

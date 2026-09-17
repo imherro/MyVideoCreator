@@ -124,6 +124,10 @@ def test_analysis_uses_project_duration_and_upload_is_isolated(client):
     assert data['script_import_analysis']['targetDurationSeconds']==15
     assert '15 秒' in data['prompt'] and '过长' in data['system_prompt']
     assert data['schema_version']=='script-import/v2'
+    status=next(item for item in client.get(base+'/job-statuses').json() if item['id']==job.json()['jobs'][0]['id'])
+    assert status['input']['script_import_analysis']=={
+        'productionId':p['production_id'],'importId':d['id'],'filename':'story.txt',
+    }
     assert client.post(path+'/confirm-source',json={'original_only':True}).status_code==400
     assert client.post(f'/api/productions/{other["production_id"]}/script-imports/{d["id"]}/confirm-source',json={'original_only':True}).status_code==400
 
