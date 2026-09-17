@@ -185,9 +185,7 @@ export function FilmBiblePanel({
   const voiceJob = jobs.find(item => item.id === storedVoice?.generationJobId);
   const voiceGenerating = ["queued", "running"].includes(voiceJob?.status || "");
   const previewAsset = assets.find(item => item.id === storedVoice?.previewAssetId) || voiceJob?.result?.assets?.find((item: Record<string, any>) => item.id === storedVoice?.previewAssetId);
-  const [voiceOpen, setVoiceOpen] = useState(false);
   const [referenceOpen, setReferenceOpen] = useState(true);
-  const [bindingOpen, setBindingOpen] = useState(false);
   const dialogueRows = useMemo(
     () => projectCharacterDialogueRows({
       shots,
@@ -233,9 +231,7 @@ export function FilmBiblePanel({
     setAutoPreview(null);
     setVoiceAuthorized(false);
     setVoiceAssetChoice("");
-    setVoiceOpen(false);
     setReferenceOpen(true);
-    setBindingOpen(false);
   }, [card?.id]);
   if (!versions.length)
     return (
@@ -247,12 +243,6 @@ export function FilmBiblePanel({
     );
   if (!selected || !card) return null;
   const editable = ["draft", "pending_reference"].includes(selected.status);
-  const bound = isVersionBound(shot, selected.id);
-  const bindingActionDisabled = isVisualBindingActionDisabled(
-    selected.status,
-    card.status,
-    bound,
-  );
   const reference = primaryReference(selected);
   const currentVersion = visual.versions[card.currentVersionId];
   const impacted = discoverImpactedShots(
@@ -322,7 +312,7 @@ export function FilmBiblePanel({
           );
         })}
       </div>}
-      <div className={`film-bible-editor ${compactSingleSelection ? "compact" : ""}`}>
+      <div className={`film-bible-editor ${compactSingleSelection ? "compact" : ""} ${card.kind === "character" || card.kind === "character_state" ? "has-voice" : ""}`}>
         <div className="film-bible-toolbar">
           <span className={`visual-status ${selected.status}`}>
             {visualStatusLabels[selected.status]}
@@ -618,11 +608,10 @@ export function FilmBiblePanel({
         </div>}
         </section>
         {(card.kind === "character" || card.kind === "character_state") && <section className="bible-voice-section">
-          <button type="button" className="film-bible-section-toggle" aria-expanded={voiceOpen} onClick={() => { setVoiceOpen((value) => !value); if (voiceOpen) setAutoPreview(null); }}>
+          <div className="bible-section-heading">
             <span><Volume2 size={15}/><b>{card.kind === "character_state" ? "状态音色覆盖" : "角色固定声音"}</b><small>{storedVoice ? `V${storedVoice.version} · ${storedVoice.status === "locked" ? "已锁定" : "草稿"}` : card.kind === "character_state" ? "继承基础角色" : "未设置"}</small></span>
-            <span>{voiceOpen ? "收起" : "设置声音"}</span>
-          </button>
-          {voiceOpen && <div className="film-bible-collapsible-body">
+          </div>
+          <div className="film-bible-collapsible-body">
           <label>{card.kind === "character_state" ? "使用音色" : "默认音色"}<select value={card.kind === "character_state" ? storedVoice?.sourceVoiceVersion || "" : storedVoice?.defaultVersion || (storedVoice?.status === "locked" ? storedVoice.version : "")} onChange={event => event.target.value ? onChooseVoiceVersion(card.id, Number(event.target.value)) : onInheritVoice(card.id)}>
             <option value="" disabled={card.kind !== "character_state"}>{card.kind === "character_state" ? "继承基础角色默认音色" : "请先生成并锁定声音"}</option>
             {Object.values(voiceLibrary).map(voice => <option key={voice.version} value={voice.version}>{voice.name || catalogVoice(voice.voiceType)?.name || "角色声音"} · V{voice.version}</option>)}
@@ -701,14 +690,13 @@ export function FilmBiblePanel({
             {voiceError && <p className="error">{voiceError}</p>}
           </>
           </>}
-          </div>}
+          </div>
         </section>}
         <section className="bible-binding-section">
-        <button type="button" className="film-bible-section-toggle" aria-expanded={bindingOpen} onClick={() => setBindingOpen((value) => !value)}>
+        <div className="bible-section-heading">
           <span><Link2 size={15}/><b>分镜绑定</b><small>{impacted.length ? `${impacted.length} 镜待升级` : shots.length ? `${shots.length} 个分镜可管理` : "暂无分镜"}</small></span>
-          <span>{bindingOpen ? "收起" : "管理绑定"}</span>
-        </button>
-        {bindingOpen && <div className="film-bible-collapsible-body">
+        </div>
+        <div className="film-bible-collapsible-body">
         {selected.id === card.currentVersionId && currentVersion?.status === "locked" && impacted.length > 0 && (
           <div className="version-impact">
             <b>{impacted.length} 个分镜仍使用旧版本</b>
@@ -737,28 +725,29 @@ export function FilmBiblePanel({
           <p className="muted">导入分镜后可以建立视觉绑定。</p>
         ) : (
           <>
-            <label>
-              目标分镜
-              <select value={shotUid} onChange={(event) => setShotUid(event.target.value)}>
-                {shots.map((item, index) => (
-                  <option key={String(item.uid || item.id)} value={String(item.uid || item.id)}>
-                    {String(index + 1).padStart(2, "0")} · {item.scene || item.id}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              className={bound ? "secondary full" : "primary full"}
-              disabled={bindingActionDisabled}
-              onClick={() => bound ? onUnbind(shotUid, selected.id) : onBind(shotUid, selected.id)}
-            >
-              {bound ? <Unlink size={15} /> : <Link2 size={15} />}
-              {bound ? "解除当前绑定" : "绑定到这个分镜"}
-            </button>
-            <small>绑定会自动投影为视觉资产到分镜图的受管连线。</small>
+            <div className="bible-binding-list full" aria-label="目标分镜">
+              {shots.map((item, index) => {
+                const uid = String(item.uid || item.id);
+                const bound = isVersionBound(item, selected.id);
+                const disabled = isVisualBindingActionDisabled(selected.status, card.status, bound);
+                const label = `${String(index + 1).padStart(2, "0")} · ${item.scene || item.id || "未命名镜头"}`;
+                return <div key={uid} className={`bible-binding-row ${bound ? "bound" : ""} ${shotUid === uid ? "selected" : ""}`}>
+                  <button type="button" className="bible-binding-target" aria-pressed={shotUid === uid} onClick={() => setShotUid(uid)}>
+                    <b>{label}</b><small>{item.id || `镜头 ${index + 1}`} · {bound ? `已绑定当前 V${selected.version}` : "未绑定当前版本"}</small>
+                  </button>
+                  <button type="button" className={bound ? "secondary" : "primary"} disabled={disabled}
+                    aria-label={`${bound ? "解除" : "绑定"} ${label}`}
+                    title={disabled ? "已弃用版本不能建立新绑定" : undefined}
+                    onClick={() => { setShotUid(uid); if (bound) onUnbind(uid, selected.id); else onBind(uid, selected.id); }}>
+                    {bound ? <Unlink size={14}/> : <Link2 size={14}/>}{bound ? "解除" : "绑定"}
+                  </button>
+                </div>;
+              })}
+            </div>
+            <small className="full">绑定会自动投影为视觉资产到分镜图的受管连线。</small>
           </>
         )}
-        </div>}
+        </div>
         </section>
       </div>
     </div>
