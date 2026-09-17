@@ -2,6 +2,7 @@ import { useState } from "react";
 import { BookOpen, Film, LoaderCircle, Settings2, X } from "lucide-react";
 import { GenerationPolicyPanel } from "../GenerationPolicyPanel";
 import { VisualStylePicker } from "../VisualStylePicker";
+import { CreationModePicker } from "../components/CreationModePicker";
 import { DURATION_OPTIONS, PLATFORM_OPTIONS } from "../adaptation";
 import { VIDEO_FORMATS, VIDEO_RATIOS, VIDEO_RESOLUTIONS } from "../mediaSpecs";
 import {
@@ -48,11 +49,8 @@ export function ProjectSetupDialog({
         <div className="project-setup-content">
           <section>
             <h3><Film size={17}/> ① 基本信息</h3>
-            <label>创作起点<select value={draft.creationMode} onChange={event=>patch({creationMode:event.target.value as "direct" | "adaptation"})}><option value="direct">直接写剧本（编写、粘贴或 AI 辅助创作）</option><option value="adaptation">从原著改编</option></select></label>
-            <div className="two-fields">
-              <label>作品名称 *<input autoFocus maxLength={100} value={draft.name} onChange={(event)=>patch({name:event.target.value})} placeholder="例如：花信未迟"/></label>
-              <label>EP01 标题<input maxLength={100} value={draft.episodeTitle} onChange={(event)=>patch({episodeTitle:event.target.value})}/></label>
-            </div>
+            <CreationModePicker value={draft.creationMode} onChange={creationMode=>patch({creationMode})} disabled={busy}/>
+            <label>作品名称 *<input autoFocus maxLength={100} value={draft.name} onChange={(event)=>patch({name:event.target.value})} placeholder="例如：花信未迟"/></label>
             <VisualStylePicker value={draft.style} onChange={(style)=>patch({style})}/>
             <div className="two-fields">
               <label>画幅 *<select value={draft.ratio} onChange={(event)=>patch({ratio:event.target.value as ProjectSetupDraft["ratio"]})}><option>16:9</option><option>9:16</option><option>1:1</option></select></label>
