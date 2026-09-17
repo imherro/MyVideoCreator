@@ -21,7 +21,10 @@ import type {
   VoiceProfile,
 } from "./types.ts";
 import { voiceIdentity, lockedVoiceVersions, effectiveVoiceProfile, defaultVoiceProfile } from "./voices.ts";
-import { catalogVoice, CUSTOM_VOICE_ID, DOUBAO_TTS2_VOICES } from "./voiceCatalog.ts";
+import { catalogVoice } from "./voiceCatalog.ts";
+import { VoicePicker } from "./VoicePicker.tsx";
+import { suggestVoicePreview } from "./voicePreviewText.ts";
+import { VoiceSamplePlayer } from "./VoiceSamplePlayer.tsx";
 import { projectCharacterDialogueRows } from "./dialogueAssets.ts";
 import { visualKindLabels, visualStatusLabels } from "./types.ts";
 import {
@@ -68,6 +71,7 @@ export function FilmBiblePanel({
   localModels,
   request,
   voiceProfiles,
+  scriptText = "",
   onSaveVoice,
   onBindVoiceSample,
   onInheritVoice,
@@ -78,6 +82,7 @@ export function FilmBiblePanel({
   onRegenerateDialogue,
   compactSingleSelection = false,
 }: {
+  scriptText?: string;
   visual: VisualBible;
   shots: Array<Record<string, any>>;
   focusVersionId?: string;
@@ -176,6 +181,10 @@ export function FilmBiblePanel({
   const [voiceAssetChoice, setVoiceAssetChoice] = useState("");
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [voiceError, setVoiceError] = useState("");
+  const [autoPreview, setAutoPreview] = useState<{cardId: string; previousAssetId?: string} | null>(null);
+  const voiceJob = jobs.find(item => item.id === storedVoice?.generationJobId);
+  const voiceGenerating = ["queued", "running"].includes(voiceJob?.status || "");
+  const previewAsset = assets.find(item => item.id === storedVoice?.previewAssetId) || voiceJob?.result?.assets?.find((item: Record<string, any>) => item.id === storedVoice?.previewAssetId);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [referenceOpen, setReferenceOpen] = useState(true);
   const [bindingOpen, setBindingOpen] = useState(false);
@@ -190,6 +199,9 @@ export function FilmBiblePanel({
     }),
     [shots, assets, jobs, card?.id, activeVoice?.version, visual, voiceProfiles],
   );
+  const suggestedPreview = suggestVoicePreview(dialogueRows, scriptText);
+  const previewTextSource = dialogueRows.find(row => row.text.trim() === voiceDraft.previewText.trim())?.shotId
+    || (voiceDraft.previewText.trim() === suggestedPreview.text ? suggestedPreview.source : "已保存 / 自定义文本");
   useEffect(() => {
     if (focusVersionId && visual.versions[focusVersionId])
       setSelectedId(focusVersionId);
@@ -211,10 +223,14 @@ export function FilmBiblePanel({
   }, [selected?.id]);
   useEffect(() => {
     if (!card) return;
-    setVoiceDraft(storedVoice || defaultVoiceProfile(card.id, speechProviders[0]?.id || ""));
+    const initial = defaultVoiceProfile(card.id, speechProviders[0]?.id || "");
+    initial.previewText = suggestedPreview.text;
+    initial.parameters.emotion = suggestedPreview.emotion;
+    setVoiceDraft(storedVoice || initial);
     setVoiceError("");
   }, [card?.id, storedVoice, speechProviders[0]?.id]);
   useEffect(() => {
+    setAutoPreview(null);
     setVoiceAuthorized(false);
     setVoiceAssetChoice("");
     setVoiceOpen(false);
@@ -318,6 +334,8 @@ export function FilmBiblePanel({
             <Trash2 size={13} /> 移至回收站
           </button>
         </div>
+        <section className="bible-spec-card">
+        <h4>外观设定</h4>
         <label>
           资产卡名称
           <input
@@ -335,9 +353,8 @@ export function FilmBiblePanel({
             onChange={(event) => setDraft({ ...draft, description: event.target.value })}
           />
         </label>
-        <div className="film-bible-section-title">
-          <b>结构化属性</b><small>只保存长期外观特征</small>
-        </div>
+        <details className="bible-attributes" key={selected.id}><summary>外观约束 <small>{draft.attributes.length} 项属性 · {draft.invariants.filter(Boolean).length} 项不可改变项</small></summary>
+        <div className="bible-attribute-list">
         {draft.attributes.map((attribute, index) => (
           <div className="film-bible-attribute" key={index}>
             <input
@@ -383,6 +400,7 @@ export function FilmBiblePanel({
             })}
           >+ 添加属性</button>
         )}
+        </div>
         <label>
           不可改变项（每行一项）
           <textarea
@@ -394,6 +412,7 @@ export function FilmBiblePanel({
             })}
           />
         </label>
+        </details>
         {editable && (
           <div className="film-bible-actions">
             <button className="primary" onClick={() => onSaveVersion(selected.id, draft)}>
@@ -425,95 +444,18 @@ export function FilmBiblePanel({
             </p>
             {selected.status === "locked" && (
               <>
-                <button className="secondary full" onClick={() => onFork(selected.id, draft)}>
+                <button className="secondary" onClick={() => onFork(selected.id, draft)}>
                   创建新版本
                 </button>
-                <button className="danger-button full" onClick={() => onStatus(selected.id, "deprecated")}>
+                <button className="danger-button" onClick={() => onStatus(selected.id, "deprecated")}>
                   弃用此版本（保留分镜引用）
                 </button>
               </>
             )}
           </>
         )}
-        {(card.kind === "character" || card.kind === "character_state") && <>
-          <button type="button" className="film-bible-section-toggle" aria-expanded={voiceOpen} onClick={() => setVoiceOpen((value) => !value)}>
-            <span><Volume2 size={15}/><b>{card.kind === "character_state" ? "状态音色覆盖" : "角色固定声音"}</b><small>{storedVoice ? `V${storedVoice.version} · ${storedVoice.status === "locked" ? "已锁定" : "草稿"}` : card.kind === "character_state" ? "继承基础角色" : "未设置"}</small></span>
-            <span>{voiceOpen ? "收起" : "设置声音"}</span>
-          </button>
-          {voiceOpen && <div className="film-bible-collapsible-body">
-          <label>{card.kind === "character_state" ? "使用音色" : "默认音色"}<select value={card.kind === "character_state" ? storedVoice?.sourceVoiceVersion || "" : storedVoice?.defaultVersion || (storedVoice?.status === "locked" ? storedVoice.version : "")} onChange={event => event.target.value ? onChooseVoiceVersion(card.id, Number(event.target.value)) : onInheritVoice(card.id)}>
-            <option value="" disabled={card.kind !== "character_state"}>{card.kind === "character_state" ? "继承基础角色默认音色" : "请先生成并锁定声音"}</option>
-            {Object.values(voiceLibrary).map(voice => <option key={voice.version} value={voice.version}>{voice.name || catalogVoice(voice.voiceType)?.name || "角色声音"} · V{voice.version}</option>)}
-          </select></label>
-          {card.kind === "character_state" && <>
-            <p className="muted">从基础角色的音色库选择。选定版本保持固定，不随默认音色变化。</p>
-            {!Object.keys(voiceLibrary).length && <p className="warning-text">请先在基础角色中生成、试听并锁定声音版本。</p>}
-            {(activeVoice || effectiveVoiceProfile(baseVoice))?.referenceAssetId && <button onClick={() => { const asset = assets.find(item => item.id === (activeVoice || effectiveVoiceProfile(baseVoice))?.referenceAssetId); if (asset) onPreviewAsset(asset); }}>试听所选音色</button>}
-            {storedVoice && <button disabled={voiceBusy} onClick={() => {setVoiceBusy(true);setVoiceError("");void onGenerateCharacterDialogue(card.id).catch(error => setVoiceError(String(error.message || error))).finally(() => setVoiceBusy(false));}}>生成此状态的本集对白</button>}
-            {voiceError && <p className="error">{voiceError}</p>}
-          </>}
-          {card.kind === "character" && <>
-          <>
-            <label>声音来源<select disabled={voiceDraft.status === 'locked' || voiceBusy} value={voiceDraft.source?.type || 'doubao_tts'} onChange={event => {setVoiceAuthorized(false);setVoiceAssetChoice('');setVoiceDraft({...voiceDraft,source:event.target.value==='uploaded'?{type:'uploaded',originalAssetId:'',authorizedAt:''}:{type:'doubao_tts'},previewAssetId:undefined,referenceAssetId:undefined,referenceVersion:undefined,generationJobId:undefined});}}><option value="doubao_tts">豆包音色</option><option value="uploaded">上传声音</option></select></label>
-
-            <label>声音版本名称<input value={voiceDraft.name || ""} disabled={voiceDraft.status === "locked"} placeholder="例如：常态男声、变身女声" onChange={event => setVoiceDraft({...voiceDraft, name: event.target.value})}/></label>
-            {voiceDraft.source?.type === 'uploaded' ? <div className="voice-upload-fields">
-              <p className="muted">清晰、单人、少背景干扰的 MP3 / WAV；不必说本镜台词。系统上限 30 MB / 120 秒，提交时另检查模型限制。</p>
-              <label>声音描述<input value={voiceDraft.description || ''} disabled={voiceDraft.status === 'locked'} onChange={event=>setVoiceDraft({...voiceDraft,description:event.target.value})}/></label>
-              {voiceDraft.status !== 'locked' && <>
-                <label><input type="checkbox" checked={voiceAuthorized} onChange={event=>setVoiceAuthorized(event.target.checked)}/>我拥有该声音的使用权或已获授权</label>
-                <div className="two-fields"><label>上传音频<input type="file" accept=".mp3,.wav" disabled={!voiceAuthorized || voiceBusy} onChange={event=>{const file=event.target.files?.[0];event.target.value='';if(!file)return;setVoiceBusy(true);setVoiceError('');void onBindVoiceSample(card.id,voiceDraft,file).catch(error=>setVoiceError(error.message)).finally(()=>setVoiceBusy(false));}}/></label>
-                <label>已有音频<select disabled={voiceBusy} value={voiceAssetChoice} onChange={event=>setVoiceAssetChoice(event.target.value)}><option value="">选择项目音频素材</option>{assets.filter(asset=>asset.kind==='audio').map(asset=><option key={asset.id} value={asset.id}>{asset.name} · {Number(asset.metadata?.duration || 0).toFixed(1)} 秒</option>)}</select></label></div>
-                <button disabled={!voiceAuthorized || !voiceAssetChoice || voiceBusy} onClick={()=>{setVoiceBusy(true);setVoiceError('');void onBindVoiceSample(card.id,voiceDraft,undefined,voiceAssetChoice).catch(error=>setVoiceError(error.message)).finally(()=>setVoiceBusy(false));}}>使用所选音频</button>
-              </>}
-              {voiceDraft.previewAssetId && <small>{assets.find(a=>a.id===voiceDraft.previewAssetId)?.name} · {Number(assets.find(a=>a.id===voiceDraft.previewAssetId)?.metadata?.duration || 0).toFixed(1)} 秒</small>}
-            </div> : <>
-            {!speechProviders.length && <p className="warning-text">尚未配置豆包语音服务，也可以选择上传声音。</p>}
-            <label>语音服务<select value={voiceDraft.providerId} disabled={voiceDraft.status === "locked"} onChange={(event)=>setVoiceDraft({...voiceDraft,providerId:event.target.value})}>{speechProviders.map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-            <label>预置音色<select value={catalogVoice(voiceDraft.voiceType)?.id || CUSTOM_VOICE_ID} disabled={voiceDraft.status === "locked"} onChange={(event)=>setVoiceDraft({...voiceDraft,voiceType:event.target.value === CUSTOM_VOICE_ID ? "" : event.target.value})}>{[...new Set(DOUBAO_TTS2_VOICES.map((item)=>item.category))].map((category)=><optgroup key={category} label={category}>{DOUBAO_TTS2_VOICES.filter((item)=>item.category===category).map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</optgroup>)}<option value={CUSTOM_VOICE_ID}>自定义 / 声音复刻 ID…</option></select></label>
-            {!catalogVoice(voiceDraft.voiceType) && <label>自定义 Speaker ID<input value={voiceDraft.voiceType} disabled={voiceDraft.status === "locked"} placeholder="粘贴声音复刻或音色设计返回的 ID" onChange={(event)=>setVoiceDraft({...voiceDraft,voiceType:event.target.value})}/><small>声音复刻训练完成后，把控制台返回的 Speaker ID 粘贴到这里。</small></label>}
-            {catalogVoice(voiceDraft.voiceType) && <p className="muted">Speaker ID：{voiceDraft.voiceType}</p>}
-            <label>试听台词<textarea value={voiceDraft.previewText} disabled={voiceDraft.status === "locked"} onChange={(event)=>setVoiceDraft({...voiceDraft,previewText:event.target.value})}/></label>
-            <div className="two-fields">
-              <label>语速<select value={voiceDraft.parameters.speechRate} disabled={voiceDraft.status === "locked"} onChange={(event)=>setVoiceDraft({...voiceDraft,parameters:{...voiceDraft.parameters,speechRate:Number(event.target.value)}})}><option value={-25}>较慢</option><option value={0}>正常</option><option value={25}>较快</option></select></label>
-              <label>情绪<input value={voiceDraft.parameters.emotion} disabled={voiceDraft.status === "locked"} placeholder="留空自动演绎" onChange={(event)=>setVoiceDraft({...voiceDraft,parameters:{...voiceDraft.parameters,emotion:event.target.value}})}/></label>
-            </div>
-            </>}
-            <div className="film-bible-actions">
-              {voiceDraft.status !== "locked" && <button onClick={()=>onSaveVoice(card.id,voiceDraft)}>保存声音设定</button>}
-              {voiceDraft.status !== "locked" && voiceDraft.source?.type !== "uploaded" && <button className="primary" disabled={voiceBusy} onClick={()=>{setVoiceBusy(true);setVoiceError("");void onGenerateVoice(card.id,voiceDraft).catch((reason)=>setVoiceError(reason?.message||String(reason))).finally(()=>setVoiceBusy(false));}}>{voiceBusy?<LoaderCircle className="spin" size={14}/>:<Volume2 size={14}/>}生成试听</button>}
-              {storedVoice?.previewAssetId && <button className="secondary" onClick={()=>{const asset=assets.find((item)=>item.id===storedVoice.previewAssetId);if(asset)onPreviewAsset(asset);}}>试听声音</button>}
-              {storedVoice?.status === "locked" ? <button onClick={()=>onLockVoice(card.id,false)}>创建新声音版本</button> : storedVoice?.previewAssetId ? <button disabled={voiceBusy || voiceIdentity(voiceDraft)!==voiceIdentity(storedVoice)} title="先保存设置，再试听并锁定当前样本" onClick={()=>onLockVoice(card.id,true)}>锁定为角色声音参考 V{storedVoice.version}</button> : null}
-              {storedVoice?.status === 'locked' && !storedVoice.referenceAssetId && storedVoice.previewAssetId && <button onClick={()=>onLockVoice(card.id,true)}>将试听确认为角色声音参考</button>}
-              {storedVoice?.referenceAssetId && <button onClick={()=>{const asset=assets.find(item=>item.id===storedVoice.referenceAssetId);if(asset)onPreviewAsset(asset);}}>试听已确认声音参考</button>}
-              {storedVoice?.status === "locked" && <button className="primary" disabled={voiceBusy} onClick={()=>{setVoiceBusy(true);setVoiceError("");void onGenerateCharacterDialogue(card.id).catch((reason)=>setVoiceError(reason?.message||String(reason))).finally(()=>setVoiceBusy(false));}}><Volume2 size={14}/>生成本集全部对白</button>}
-            </div>
-            <p className="muted">{storedVoice ? `声音 V${storedVoice.version} · ${storedVoice.status === "locked" ? "已锁定" : "草稿"}` : "保存并试听后可锁定为角色主音色。"}</p>
-            <p className="muted">音色样本参考模式下，无需生成本集全部对白。建议每个角色用 3–6 秒清晰、自然的样本；本镜情绪由分镜决定。完整对白参考模式仍需先合成对白。</p>
-            <div className="voice-dialogue-heading">
-              <b>本集对白</b>
-              <small>{dialogueRows.length ? `${dialogueRows.filter((item)=>item.status==="ready").length}/${dialogueRows.length} 已生成` : "分镜中暂无该角色对白"}</small>
-            </div>
-            {dialogueRows.length > 0 && <div className="voice-dialogue-list">{dialogueRows.map((row)=>{
-              const statusLabel = {missing:"未生成",queued:"排队中",running:"生成中",failed:"生成失败",interrupted:"待恢复",syncing:"正在同步",ready:"已生成"}[row.status];
-              return <div className="voice-dialogue-row" key={row.id}>
-                <div className="voice-dialogue-copy">
-                  <div><b>第 {row.shotOrder} 镜</b>{row.emotion && <small>{row.emotion}</small>}</div>
-                  <p title={row.text}>{row.text}</p>
-                  {row.status === "failed" && row.job?.error && <small className="error" title={row.job.error}>{row.job.error}</small>}
-                </div>
-                <div className="voice-dialogue-state">
-                  <span className={`voice-state ${row.status}`}>{statusLabel}</span>
-                  {row.asset && <button className="secondary" onClick={()=>onPreviewAsset(row.asset!)}><Volume2 size={13}/>试听</button>}
-                  {!(["queued","running","syncing"] as string[]).includes(row.status) && <button disabled={voiceBusy} onClick={()=>{setVoiceBusy(true);setVoiceError("");void onRegenerateDialogue(card.id,row.id).catch((reason)=>setVoiceError(reason?.message||String(reason))).finally(()=>setVoiceBusy(false));}}>{row.status === "ready" ? "重新生成" : "生成"}</button>}
-                </div>
-              </div>;
-            })}</div>}
-            {voiceError && <p className="error">{voiceError}</p>}
-          </>
-          </>}
-          </div>}
-        </>}
+        </section>
+        <section className="bible-reference-section">
         <button type="button" className="film-bible-section-toggle" aria-expanded={referenceOpen} onClick={() => setReferenceOpen((value) => !value)}>
           <span><ImagePlus size={15}/><b>主参考图</b><small>{reference ? selected.status === "locked" ? "已锁定" : "待确认" : "未生成"}</small></span>
           <span>{referenceOpen ? "收起" : "展开"}</span>
@@ -674,6 +616,94 @@ export function FilmBiblePanel({
           </p>
         )}
         </div>}
+        </section>
+        {(card.kind === "character" || card.kind === "character_state") && <section className="bible-voice-section">
+          <button type="button" className="film-bible-section-toggle" aria-expanded={voiceOpen} onClick={() => { setVoiceOpen((value) => !value); if (voiceOpen) setAutoPreview(null); }}>
+            <span><Volume2 size={15}/><b>{card.kind === "character_state" ? "状态音色覆盖" : "角色固定声音"}</b><small>{storedVoice ? `V${storedVoice.version} · ${storedVoice.status === "locked" ? "已锁定" : "草稿"}` : card.kind === "character_state" ? "继承基础角色" : "未设置"}</small></span>
+            <span>{voiceOpen ? "收起" : "设置声音"}</span>
+          </button>
+          {voiceOpen && <div className="film-bible-collapsible-body">
+          <label>{card.kind === "character_state" ? "使用音色" : "默认音色"}<select value={card.kind === "character_state" ? storedVoice?.sourceVoiceVersion || "" : storedVoice?.defaultVersion || (storedVoice?.status === "locked" ? storedVoice.version : "")} onChange={event => event.target.value ? onChooseVoiceVersion(card.id, Number(event.target.value)) : onInheritVoice(card.id)}>
+            <option value="" disabled={card.kind !== "character_state"}>{card.kind === "character_state" ? "继承基础角色默认音色" : "请先生成并锁定声音"}</option>
+            {Object.values(voiceLibrary).map(voice => <option key={voice.version} value={voice.version}>{voice.name || catalogVoice(voice.voiceType)?.name || "角色声音"} · V{voice.version}</option>)}
+          </select></label>
+          {card.kind === "character_state" && <>
+            <p className="muted">从基础角色的音色库选择。选定版本保持固定，不随默认音色变化。</p>
+            {!Object.keys(voiceLibrary).length && <p className="warning-text">请先在基础角色中生成、试听并锁定声音版本。</p>}
+            {(activeVoice || effectiveVoiceProfile(baseVoice))?.referenceAssetId && <button onClick={() => { const asset = assets.find(item => item.id === (activeVoice || effectiveVoiceProfile(baseVoice))?.referenceAssetId); if (asset) onPreviewAsset(asset); }}>试听所选音色</button>}
+            {storedVoice && <button disabled={voiceBusy} onClick={() => {setVoiceBusy(true);setVoiceError("");void onGenerateCharacterDialogue(card.id).catch(error => setVoiceError(String(error.message || error))).finally(() => setVoiceBusy(false));}}>生成此状态的本集对白</button>}
+            {voiceError && <p className="error">{voiceError}</p>}
+          </>}
+          {card.kind === "character" && <>
+          <>
+            <label>声音来源<select disabled={voiceDraft.status === 'locked' || voiceBusy} value={voiceDraft.source?.type || 'doubao_tts'} onChange={event => {setVoiceAuthorized(false);setVoiceAssetChoice('');setVoiceDraft({...voiceDraft,source:event.target.value==='uploaded'?{type:'uploaded',originalAssetId:'',authorizedAt:''}:{type:'doubao_tts'},previewAssetId:undefined,referenceAssetId:undefined,referenceVersion:undefined,generationJobId:undefined});}}><option value="doubao_tts">豆包音色</option><option value="uploaded">上传声音</option></select></label>
+
+            <label>声音版本名称<input value={voiceDraft.name || ""} disabled={voiceDraft.status === "locked"} placeholder="例如：常态男声、变身女声" onChange={event => setVoiceDraft({...voiceDraft, name: event.target.value})}/></label>
+            {voiceDraft.source?.type === 'uploaded' ? <div className="voice-upload-fields">
+              <p className="muted">清晰、单人、少背景干扰的 MP3 / WAV；不必说本镜台词。系统上限 30 MB / 120 秒，提交时另检查模型限制。</p>
+              <label>声音描述<input value={voiceDraft.description || ''} disabled={voiceDraft.status === 'locked'} onChange={event=>setVoiceDraft({...voiceDraft,description:event.target.value})}/></label>
+              {voiceDraft.status !== 'locked' && <>
+                <label><input type="checkbox" checked={voiceAuthorized} onChange={event=>setVoiceAuthorized(event.target.checked)}/>我拥有该声音的使用权或已获授权</label>
+                <div className="two-fields"><label>上传音频<input type="file" accept=".mp3,.wav" disabled={!voiceAuthorized || voiceBusy} onChange={event=>{const file=event.target.files?.[0];event.target.value='';if(!file)return;setVoiceBusy(true);setVoiceError('');void onBindVoiceSample(card.id,voiceDraft,file).catch(error=>setVoiceError(error.message)).finally(()=>setVoiceBusy(false));}}/></label>
+                <label>已有音频<select disabled={voiceBusy} value={voiceAssetChoice} onChange={event=>setVoiceAssetChoice(event.target.value)}><option value="">选择项目音频素材</option>{assets.filter(asset=>asset.kind==='audio').map(asset=><option key={asset.id} value={asset.id}>{asset.name} · {Number(asset.metadata?.duration || 0).toFixed(1)} 秒</option>)}</select></label></div>
+                <button disabled={!voiceAuthorized || !voiceAssetChoice || voiceBusy} onClick={()=>{setVoiceBusy(true);setVoiceError('');void onBindVoiceSample(card.id,voiceDraft,undefined,voiceAssetChoice).catch(error=>setVoiceError(error.message)).finally(()=>setVoiceBusy(false));}}>使用所选音频</button>
+              </>}
+              {voiceDraft.previewAssetId && <small>{assets.find(a=>a.id===voiceDraft.previewAssetId)?.name} · {Number(assets.find(a=>a.id===voiceDraft.previewAssetId)?.metadata?.duration || 0).toFixed(1)} 秒</small>}
+            </div> : <>
+            {!speechProviders.length && <p className="warning-text">尚未配置豆包语音服务，也可以选择上传声音。</p>}
+            <label>语音服务<select value={voiceDraft.providerId} disabled={voiceDraft.status === "locked"} onChange={(event)=>setVoiceDraft({...voiceDraft,providerId:event.target.value})}>{speechProviders.map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+            <VoicePicker key={card.id} value={voiceDraft.voiceType} disabled={voiceDraft.status === "locked" || voiceBusy || voiceGenerating} onChange={voiceType => setVoiceDraft({...voiceDraft, voiceType})}/>
+            <label className="full voice-dialogue-select">试听对白<select aria-label="选择镜头对白作为试听" value="" disabled={voiceDraft.status === "locked" || voiceBusy || voiceGenerating} onChange={event => {
+              const row = dialogueRows.find(row => row.id === event.target.value);
+              if (row) setVoiceDraft({...voiceDraft, previewText: row.text, parameters: {...voiceDraft.parameters, emotion: row.emotion}});
+            }}><option value="">{dialogueRows.length ? "从本集镜头对白填入…" : "暂无本角色对白，可使用剧本节选"}</option>{dialogueRows.filter(row => row.text.trim()).map(row => <option key={row.id} value={row.id}>{row.shotId} · {row.text}</option>)}</select></label>
+            <div className="voice-text-heading full"><span>试听文本 · {previewTextSource}</span><button type="button" className="quiet" disabled={voiceDraft.status === "locked" || voiceBusy || voiceGenerating || !suggestedPreview.text} onClick={() => setVoiceDraft({...voiceDraft, previewText:suggestedPreview.text, parameters:{...voiceDraft.parameters,emotion:suggestedPreview.emotion}})}>填入{dialogueRows.some(row => row.text.trim()) ? "本集对白" : "剧本节选"}</button></div>
+            <label className="full voice-text-editor">试听台词<textarea value={voiceDraft.previewText} disabled={voiceDraft.status === "locked" || voiceBusy || voiceGenerating} onChange={(event)=>setVoiceDraft({...voiceDraft,previewText:event.target.value})}/></label>
+            <div className="two-fields">
+              <label>语速<select value={voiceDraft.parameters.speechRate} disabled={voiceDraft.status === "locked"} onChange={(event)=>setVoiceDraft({...voiceDraft,parameters:{...voiceDraft.parameters,speechRate:Number(event.target.value)}})}><option value={-25}>较慢</option><option value={0}>正常</option><option value={25}>较快</option></select></label>
+              <label>情绪<input value={voiceDraft.parameters.emotion} disabled={voiceDraft.status === "locked"} placeholder="留空自动演绎" onChange={(event)=>setVoiceDraft({...voiceDraft,parameters:{...voiceDraft.parameters,emotion:event.target.value}})}/></label>
+            </div>
+            </>}
+            <div className="film-bible-actions">
+              {voiceDraft.status !== "locked" && <button onClick={()=>onSaveVoice(card.id,voiceDraft)}>保存声音设定</button>}
+              {voiceDraft.status !== "locked" && voiceDraft.source?.type !== "uploaded" && <button className="primary" disabled={voiceBusy || voiceGenerating || !voiceDraft.previewText.trim()} title="用当前文本生成并播放试听" onClick={()=>{setAutoPreview({cardId:card.id,previousAssetId:storedVoice?.previewAssetId});setVoiceBusy(true);setVoiceError("");void onGenerateVoice(card.id,voiceDraft).catch((reason)=>{setAutoPreview(null);setVoiceError(reason?.message||String(reason));}).finally(()=>setVoiceBusy(false));}}>{voiceBusy || voiceGenerating?<LoaderCircle className="spin" size={14}/>:<Volume2 size={14}/>} {voiceGenerating ? "正在生成试听…" : "生成试听"}</button>}
+
+              {storedVoice?.status === "locked" ? <button onClick={()=>onLockVoice(card.id,false)}>创建新声音版本</button> : storedVoice?.previewAssetId ? <button disabled={voiceBusy || voiceGenerating || voiceIdentity(voiceDraft)!==voiceIdentity(storedVoice)} title="先保存设置，再试听并锁定当前样本" onClick={()=>onLockVoice(card.id,true)}>锁定为角色声音参考 V{storedVoice.version}</button> : null}
+              {storedVoice?.status === 'locked' && !storedVoice.referenceAssetId && storedVoice.previewAssetId && <button onClick={()=>onLockVoice(card.id,true)}>将试听确认为角色声音参考</button>}
+              {storedVoice?.referenceAssetId && storedVoice.referenceAssetId !== storedVoice.previewAssetId && <button onClick={()=>{const asset=assets.find(item=>item.id===storedVoice.referenceAssetId);if(asset)onPreviewAsset(asset);}}>试听已确认声音参考</button>}
+              {storedVoice?.status === "locked" && <button className="primary" disabled={voiceBusy} onClick={()=>{setVoiceBusy(true);setVoiceError("");void onGenerateCharacterDialogue(card.id).catch((reason)=>setVoiceError(reason?.message||String(reason))).finally(()=>setVoiceBusy(false));}}><Volume2 size={14}/>生成本集全部对白</button>}
+            </div>
+            {previewAsset?.url && <VoiceSamplePlayer key={`${card.id}:${previewAsset.id}`} url={previewAsset.url} name={`声音 V${storedVoice?.version || 1} · ${catalogVoice(storedVoice?.voiceType || "")?.name || "角色试听"}`} autoPlay={autoPreview?.cardId === card.id && autoPreview.previousAssetId !== previewAsset.id}/>}
+            {voiceJob?.status === "failed" && <p className="error">试听生成失败：{voiceJob.error || "请重试"}</p>}
+
+            <p className="muted">优先使用本角色对白，无对白时使用本集剧本节选。参考时长建议 8–15 秒，以实际试听为准。</p>
+            <details className="voice-dialogues-details full"><summary>本集对白 <small>{dialogueRows.filter(item => item.status === "ready").length}/{dialogueRows.length} 已生成</small></summary>
+            <div className="voice-dialogue-heading">
+              <b>本集对白</b>
+              <small>{dialogueRows.length ? `${dialogueRows.filter((item)=>item.status==="ready").length}/${dialogueRows.length} 已生成` : "分镜中暂无该角色对白"}</small>
+            </div>
+            {dialogueRows.length > 0 && <div className="voice-dialogue-list">{dialogueRows.map((row)=>{
+              const statusLabel = {missing:"未生成",queued:"排队中",running:"生成中",failed:"生成失败",interrupted:"待恢复",syncing:"正在同步",ready:"已生成"}[row.status];
+              return <div className="voice-dialogue-row" key={row.id}>
+                <div className="voice-dialogue-copy">
+                  <div><b>第 {row.shotOrder} 镜</b>{row.emotion && <small>{row.emotion}</small>}</div>
+                  <p title={row.text}>{row.text}</p>
+                  {row.status === "failed" && row.job?.error && <small className="error" title={row.job.error}>{row.job.error}</small>}
+                </div>
+                <div className="voice-dialogue-state">
+                  <span className={`voice-state ${row.status}`}>{statusLabel}</span>
+                  {row.asset && <button className="secondary" onClick={()=>onPreviewAsset(row.asset!)}><Volume2 size={13}/>试听</button>}
+                  {!(["queued","running","syncing"] as string[]).includes(row.status) && <button disabled={voiceBusy} onClick={()=>{setVoiceBusy(true);setVoiceError("");void onRegenerateDialogue(card.id,row.id).catch((reason)=>setVoiceError(reason?.message||String(reason))).finally(()=>setVoiceBusy(false));}}>{row.status === "ready" ? "重新生成" : "生成"}</button>}
+                </div>
+              </div>;
+            })}</div>}
+            </details>
+            {voiceError && <p className="error">{voiceError}</p>}
+          </>
+          </>}
+          </div>}
+        </section>}
+        <section className="bible-binding-section">
         <button type="button" className="film-bible-section-toggle" aria-expanded={bindingOpen} onClick={() => setBindingOpen((value) => !value)}>
           <span><Link2 size={15}/><b>分镜绑定</b><small>{impacted.length ? `${impacted.length} 镜待升级` : shots.length ? `${shots.length} 个分镜可管理` : "暂无分镜"}</small></span>
           <span>{bindingOpen ? "收起" : "管理绑定"}</span>
@@ -729,6 +759,7 @@ export function FilmBiblePanel({
           </>
         )}
         </div>}
+        </section>
       </div>
     </div>
   );

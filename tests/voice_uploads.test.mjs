@@ -15,7 +15,7 @@ test('upload without TTS configuration locks one immutable sample and preserves 
  assert.throws(()=>requireTtsVoice(d.filmBible.voices.profiles.hero),/不能自动逐句合成/);
 });
 test('old TTS completion cannot overwrite an uploaded revision or different config',()=>{
- let p={...defaultVoiceProfile('hero','speech'),voiceType:'speaker'};
+ let p={...defaultVoiceProfile('hero','speech'),voiceType:'speaker',previewText:'本集的测试对白。'};
  let d=saveVoiceProfile(doc(),'hero',p);
  const job={id:'old',input:{voice_profile:{cardId:'hero',version:1,identity:voiceIdentity(p)}},result:{assets:[{id:'tts',kind:'audio'}]}};
  d=saveVoiceProfile(d,'hero',{...p,parameters:{speechRate:25,emotion:'开心'}});

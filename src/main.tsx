@@ -2421,6 +2421,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   const projectBibleFields = bibleFields(doc);
   const filmBiblePanelProps: React.ComponentProps<typeof FilmBiblePanel> = {
     visual: visualBibleOf(doc),
+    scriptText: String(doc.nodes.find(node => node.data?.canonicalScriptProjection)?.data?.text || ""),
     shots: doc.shots,
     assets,
     jobs,

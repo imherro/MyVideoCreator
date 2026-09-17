@@ -8,3 +8,95 @@
 .visual-node-scene,.visual-node-scene_state{border-color:#426574;background:linear-gradient(145deg,#223038,#202629)}
 .visual-node-prop{border-color:#665071;background:linear-gradient(145deg,#2c2631,#202629)}
 .visual-node-character_state,.visual-node-scene_state{width:230px;opacity:.94;border-style:dashed}
+
+/* Compact version workspace: container queries also work in the canvas sidebar. */
+.film-bible-panel{container-type:inline-size;gap:10px}
+.film-bible-panel .film-bible-editor{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;align-items:start;padding-top:0}
+.film-bible-panel .film-bible-toolbar{grid-column:1/-1;margin:0;gap:8px;justify-content:flex-start}
+.film-bible-toolbar .danger{margin-left:auto}
+.film-bible-panel .bible-spec-card{padding:10px 12px;background:#1b2225;border:1px solid #343f43;border-radius:9px;min-width:0;order:1}
+.bible-spec-card h4{font-size:13px;color:#d7c29a;margin:0 0 8px}
+.bible-spec-card label{display:block;margin:7px 0;font-size:12px}
+.bible-spec-card input,.bible-spec-card textarea{margin-top:4px;padding:7px 9px}
+.bible-spec-card textarea{min-height:70px;resize:vertical}
+.bible-spec-card .muted{font-size:11px;line-height:1.5;margin:8px 0}
+.bible-spec-card>.secondary,.bible-spec-card>.danger-button{margin:4px 8px 0 0;width:auto;font-size:12px;padding:7px 9px}
+.bible-spec-card .danger-button{margin-left:auto}
+.bible-attributes{margin-top:9px;border-top:1px solid #344044;padding-top:8px}
+.bible-attributes summary{cursor:pointer;font-size:12px;color:#c1cbcc}
+.bible-attributes summary small{color:#899a9e;font-size:11px;margin-left:7px}
+.bible-attribute-list{margin-top:8px;display:grid;gap:6px}
+.film-bible-panel .film-bible-attribute{margin:0;gap:5px;min-width:0}
+.film-bible-panel .film-bible-attribute input{min-width:0;margin:0}
+.bible-reference-section{order:2;min-width:0}
+.bible-voice-section{order:3;min-width:0}
+.bible-binding-section{order:4;min-width:0}
+.film-bible-panel .film-bible-section-toggle{margin:0;min-height:37px;padding:8px 10px;gap:8px}
+.film-bible-panel .film-bible-section-toggle>span{flex-wrap:wrap;text-align:left}
+.film-bible-panel .film-bible-section-toggle>span:last-child{white-space:nowrap;flex-shrink:0}
+.film-bible-panel .film-bible-collapsible-body{padding:10px;gap:8px;min-width:0}
+.film-bible-panel .film-bible-collapsible-body>label{min-width:0;font-size:12px}
+.film-bible-panel .film-bible-collapsible-body select,.film-bible-panel .film-bible-collapsible-body input{min-width:0;width:100%}
+.film-bible-panel .film-bible-collapsible-body .muted{margin:2px 0;font-size:11px;line-height:1.5}
+.film-bible-panel .reference-policy{margin:0;padding:0 0 8px;border:0;border-bottom:1px solid #344044;border-radius:0;background:none}
+.film-bible-panel .reference-policy>label{margin:0}
+.film-bible-panel .reference-policy .muted{margin-top:6px;overflow-wrap:anywhere}
+.film-bible-panel .primary-reference{margin:0;padding:8px;gap:10px;grid-template-columns:112px minmax(0,1fr)}
+.film-bible-panel .primary-reference-preview{width:112px;height:108px}
+.film-bible-panel .primary-reference-preview img{object-fit:contain}
+.film-bible-panel .primary-reference small{font-size:11px;overflow-wrap:anywhere;white-space:normal}
+.film-bible-panel .reference-actions{margin:0;gap:6px;flex-wrap:wrap}
+.film-bible-panel .reference-actions button,.film-bible-panel .upload-reference-button{font-size:12px;padding:7px 9px;margin:0}
+.film-bible-panel .locked-reference-note{padding:7px 9px;font-size:11px;margin:0}
+.film-bible-panel .film-bible-actions{margin:3px 0;gap:6px}
+.film-bible-panel .film-bible-actions button{padding:6px 9px}
+.voice-picker{min-width:0}
+.voice-picker-trigger{display:flex;justify-content:space-between;align-items:center;width:100%;gap:8px;padding:8px 10px;text-align:left}
+.voice-picker-trigger>span{display:flex;align-items:center;gap:8px;min-width:0}
+.voice-picker-trigger small{font-size:11px;color:#a0adb0}
+.voice-picker-trigger b{font-size:12px}
+.voice-picker-trigger>span:last-child{font-size:11px;white-space:nowrap}
+.voice-picker-panel{padding:9px;background:#101719;border:1px solid #536569;border-radius:8px;margin-top:6px}
+.film-bible-panel .voice-picker-search{display:flex;align-items:center;gap:6px;margin:0}
+.film-bible-panel .voice-picker-search input{margin:0;background:transparent;min-width:0}
+.voice-picker-filters{display:flex;gap:4px;flex-wrap:wrap;margin:8px 0}
+.voice-picker-filters button{font-size:11px;padding:4px 7px}
+.voice-picker [aria-pressed=true]{border-color:#c5a36b;background:#373227;color:#f0d7a9}
+.voice-picker-results{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;max-height:228px;overflow:auto;scrollbar-gutter:stable}
+.voice-picker-results>button{display:flex;justify-content:space-between;align-items:center;padding:7px 8px;min-width:0;text-align:left}
+.voice-picker-results>button>span{display:grid;gap:3px;min-width:0}
+.voice-picker-results b{font-size:12px;overflow-wrap:anywhere}
+.voice-picker-results small{font-size:10px;color:#9facaf}
+.voice-picker-footer,.voice-text-heading{display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:11px}
+.voice-picker-footer{margin-top:6px}
+.voice-picker-footer button,.voice-text-heading button{font-size:11px;padding:4px 6px}
+.voice-picker-custom{display:block;margin:8px 0 0;font-size:12px}
+.voice-picker-custom small{display:block;margin-top:4px;font-size:11px;color:#8d9da0}
+.voice-picker-custom a{color:#cbb07e}
+.voice-sample-player{display:grid;gap:5px;min-width:0;border:1px solid #3e5147;border-radius:8px;background:#1c2923;padding:8px}
+.voice-sample-player>span{font-size:12px;color:#bad5bd}
+.voice-sample-player audio{width:100%;height:34px}
+.voice-sample-player>small{font-size:11px;color:#c0c7bc}
+.film-bible-panel .voice-upload-fields{grid-column:1/-1}
+.film-bible-panel .voice-upload-fields input[type=checkbox]{width:auto}
+@container (min-width:850px){
+  .film-bible-panel .film-bible-editor{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .bible-spec-card{grid-column:1;grid-row:2}
+  .bible-reference-section{grid-column:2;grid-row:2}
+  .bible-voice-section{grid-column:1/-1;grid-row:3}
+  .bible-binding-section{grid-column:1/-1}
+  .bible-attribute-list{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@container (max-width:380px){
+  .film-bible-panel .film-bible-collapsible-body{grid-template-columns:minmax(0,1fr)}
+  .voice-picker-results{grid-template-columns:minmax(0,1fr)}
+  .voice-picker-trigger>span{flex-wrap:wrap}
+}
+
+.voice-dialogues-details summary{cursor:pointer;font-size:12px;padding:5px 0;color:#c1cbcc}
+.voice-dialogues-details summary small{color:#8b9c9f;font-size:11px;margin-left:7px}
+@container (min-width:850px){
+  .bible-voice-section .film-bible-collapsible-body{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .bible-voice-section .voice-dialogue-select,.bible-voice-section .voice-text-heading,.bible-voice-section .voice-text-editor,.bible-voice-section .film-bible-collapsible-body>.two-fields{grid-column:span 2}
+  .voice-picker-results{grid-template-columns:repeat(4,minmax(0,1fr))}
+}

@@ -14,7 +14,7 @@ export function defaultVoiceProfile(cardId: string, providerId = ""): VoiceProfi
     voiceType: "zh_female_vv_uranus_bigtts",
     version: 1,
     status: "draft",
-    previewText: "你好，我是这个故事中的角色。",
+    previewText: "",
     parameters: { speechRate: 0, emotion: "" },
   };
 }
