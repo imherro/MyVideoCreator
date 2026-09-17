@@ -80,14 +80,19 @@
 .sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
 .production-library{display:grid;gap:14px}
 .production-group{overflow:hidden;border:1px solid #394145;border-radius:10px;background:#202629}
-.production-group>header{display:flex;align-items:center;gap:10px;padding:13px 12px;border-bottom:1px solid #343b3f;background:#262c2f}
-.production-group>header>svg{color:#c3a36f}
-.production-group>header>div{display:flex;flex:1;min-width:0;flex-direction:column;gap:3px}
+.production-group>header{display:flex;align-items:center;gap:6px;padding:6px 8px;background:#262c2f}
+.production-group.expanded>header{border-bottom:1px solid #343b3f}
+.production-group-toggle{flex:1;min-width:0;justify-content:flex-start;padding:7px 4px;background:transparent;border:0;text-align:left}
+.production-group-toggle>svg{flex-shrink:0;color:#c3a36f}
+.production-group-toggle>span{display:flex;flex:1;min-width:0;flex-direction:column;gap:3px}
+.production-group.expanded .production-expand-icon{transform:rotate(90deg)}
+.production-group>header>.quiet,.production-group>header>.icon-button{flex-shrink:0}
+@media(min-width:801px){.side-panel:has(.production-library){width:min(520px,calc(100vw - 94px))}}
 .production-group>header b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
 .production-group>header .quiet{font-size:11px;white-space:nowrap}
 .episode-row{display:flex;align-items:stretch;border-bottom:1px solid #30373a}
 .episode-row:last-child{border-bottom:0}
-.episode-row>button:first-child{flex:1;justify-content:flex-start;border:0;border-radius:0;background:transparent;padding:13px 12px;text-align:left}
+.episode-row>button:first-child{flex:1;min-width:0;justify-content:flex-start;border:0;border-radius:0;background:transparent;padding:13px 12px;text-align:left}
 .episode-row>button:first-child.active{background:#3b352b;color:#f0ca87}
 .episode-row>button:first-child>div{display:flex;flex:1;min-width:0;flex-direction:column;gap:4px}
 .episode-row>button:first-child b,.episode-row>button:first-child small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

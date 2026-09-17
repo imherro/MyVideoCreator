@@ -1,4 +1,5 @@
 import { ChevronRight, Film, Plus, Trash2 } from "lucide-react";
+import { useState } from "react";
 import {
   episodeLabel,
   episodesForProduction,
@@ -27,6 +28,8 @@ export function ProductionLibrary({
   onDeleteEpisode: (episode: EpisodeSummary) => void;
   onDeleteProduction: (production: ProductionSummary) => void;
 }) {
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
+
   return (
     <div className="production-library">
       <p className="muted">一个 Production 对应一部剧或影片；每个 Episode 是独立制作、生成和剪辑的工作区。</p>
@@ -36,21 +39,39 @@ export function ProductionLibrary({
       {!!productions.length && <button className="full" onClick={onOpenProjectSettings}>项目设置</button>}
       {productions.map((production) => {
         const productionEpisodes = episodesForProduction(episodes, production.id);
+        const expanded = expandedIds.has(production.id);
+        const isCurrent = productionEpisodes.some((episode) => episode.id === currentEpisodeId);
         return (
-          <section className="production-group" key={production.id}>
+          <section className={`production-group${expanded ? " expanded" : ""}`} key={production.id}>
             <header>
-              <Film size={17} />
-              <div><b>{production.name}</b><small>{productionEpisodes.length} 集</small></div>
+              <button
+                className="production-group-toggle"
+                title={production.name}
+                aria-expanded={expanded}
+                aria-controls={`production-episodes-${production.id}`}
+                onClick={() => setExpandedIds((previous) => {
+                  const next = new Set(previous);
+                  if (next.has(production.id)) next.delete(production.id);
+                  else next.add(production.id);
+                  return next;
+                })}
+              >
+                <ChevronRight size={16} className="production-expand-icon" />
+                <Film size={17} />
+                <span><b>{production.name}</b><small>{productionEpisodes.length} 集{isCurrent ? " · 当前作品" : ""}</small></span>
+              </button>
               <button className="quiet" onClick={() => onCreateEpisode(production)}>
                 <Plus size={14} />新增集
               </button>
               <button className="icon-button danger production-trash-button" title="将整部作品移入回收站" aria-label={`删除整部作品 ${production.name}`} onClick={()=>onDeleteProduction(production)}><Trash2 size={15}/></button>
             </header>
+            <div id={`production-episodes-${production.id}`} hidden={!expanded}>
             {!productionEpisodes.length && <p className="production-empty">还没有 Episode</p>}
             {productionEpisodes.map((episode) => (
               <div className="episode-row" key={episode.id}>
                 <button
                   className={episode.id === currentEpisodeId ? "active" : ""}
+                  title={episodeLabel(episode)}
                   onClick={() => onOpenEpisode(episode)}
                 >
                   <div>
@@ -69,6 +90,7 @@ export function ProductionLibrary({
                 </button>
               </div>
             ))}
+            </div>
           </section>
         );
       })}
