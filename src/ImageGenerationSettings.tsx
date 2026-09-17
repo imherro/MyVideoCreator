@@ -33,7 +33,7 @@ export function ImageGenerationSettings(props: Props) {
   const settings = data.imageSettings || {};
   const body = JSON.stringify({
     project: { ratio: document.ratio, videoResolution: document.videoResolution },
-    input: { provider: data.provider, model: data.model, imageSettings: settings, seed: data.seed ?? -1 },
+    input: { provider: data.provider, model: data.model, imagePurpose: data.imagePurpose, imageSettings: settings, seed: data.seed ?? -1 },
   });
   const key = props.projectId + body;
   const capabilityKey = JSON.stringify([data.provider, data.model, provider]);

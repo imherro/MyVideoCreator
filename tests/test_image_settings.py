@@ -44,3 +44,12 @@ def test_comfy_requires_template_placeholders_before_exposing_controls():
     assert not spec['seedSupported'] and len(spec['sizeOptions']) == 1
     spec = resolve_image_settings({}, {}, {'type': 'comfy', 'workflow': {'seed': '{{seed}}', 'width': '{{width}}', 'height': '{{height}}'}})
     assert spec['seedSupported'] and len(spec['sizeOptions']) == 3
+
+
+def test_panorama_original_is_two_to_one_without_changing_project_frame():
+    document={'ratio':'9:16'}
+    result=resolve_image_settings(document,{'imagePurpose':'panorama'},{'type':'volcengine_ark'})
+    assert result['ratio']=='2:1' and result['size']=='3072x1536'
+    assert document['ratio']=='9:16'
+    with pytest.raises(ValueError,match='2:1'):
+        resolve_image_settings(document,{'imagePurpose':'panorama'},{'type':'runninghub'})

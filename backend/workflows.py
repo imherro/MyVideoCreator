@@ -29,6 +29,7 @@ def execution_plan(document,selected=None,include_descendants=False,exact=False)
         edge for edge in document.get('edges',[])
         if edge.get('source') not in managed_visual_ids
         and edge.get('target') not in managed_visual_ids
+        and edge.get('data',{}).get('origin') not in ('composition_output','composition_source')
         and not (
             edge.get('data',{}).get('managed') is True
             and edge.get('data',{}).get('origin')=='visual_binding'

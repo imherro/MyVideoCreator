@@ -65,7 +65,7 @@ def generation_fingerprint_payload(
     """Return only generation-semantic, JSON-canonical inputs."""
     if production_context is not None:
         document = compose_project_document(document, production_context)
-    return {
+    result = {
         'shotVariables': {key: shot.get(key) for key in SHOT_VARIABLE_FIELDS},
         'boundVisualVersions': _bound_versions(document, shot),
         'styleVersion': _style_version(document),
@@ -73,6 +73,13 @@ def generation_fingerprint_payload(
         'providerId': str(provider_id or ''),
         'modelId': str(model_id or ''),
     }
+    from .composition_references import composition_sources
+    node_id = shot.get('imageNode') or (shot.get('pipeline') or {}).get('imageNodeId')
+    sources = composition_sources(document, node_id)
+    if sources:
+        result['compositionReferences'] = [{'nodeId': n['id'], 'assetId': n['data'].get('assetId'),
+                                            'description': n['data'].get('compositionDescription', '')} for n in sources]
+    return result
 
 
 def build_generation_fingerprint(

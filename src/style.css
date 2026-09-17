@@ -366,3 +366,9 @@
 .canvas-edge-menu>span{display:block;padding:8px;font-size:12px;line-height:1.6;color:var(--muted)}
 .canvas-edge-selection-hint{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);padding:7px 12px;border-radius:6px;background:var(--panel);color:var(--muted);font-size:12px;pointer-events:none;white-space:nowrap}
 .canvas-run-input-hint{display:block;padding:0 16px 12px;color:var(--muted);font-size:12px;line-height:1.5}
+.composition-editor-modal{width:min(1180px,96vw);max-height:92vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+.composition-editor-modal .panel-title{display:flex;align-items:center;gap:12px}.composition-editor-modal .panel-title>label{margin-left:auto;display:flex;align-items:center;gap:8px}
+.composition-editor-modal .director-viewport{max-height:60vh;overflow:auto}
+.composition-node-edit{margin:4px 10px;width:calc(100% - 20px);padding:6px;font-size:12px}
+.panorama-modal fieldset{border:0;padding:0}
+.director-viewport canvas{display:block;margin:0 auto}.composition-preview{padding:0;width:100%}.composition-preview img{width:100%;max-height:240px;object-fit:contain}

@@ -94,7 +94,7 @@ export function acceptResult<T extends Graph>(graph:T,job:ResultJob,jobs:ResultJ
   }
   const next=invalidate(graph,[job.node_id],expectedNodes);
   const compiledPrompt=Boolean(
-    job.input.reference_compiler||job.input.shot_video_projection||job.input.dialogue_projection||job.input.motion_compiler||job.input.canvas_script_sources
+    job.input.reference_compiler||job.input.shot_video_projection||job.input.dialogue_projection||job.input.motion_compiler||job.input.canvas_script_sources||job.input.composition_references
   );
   return {...next,nodes:next.nodes.map(node=>node.id!==job.node_id?node:{...node,data:{...node.data,
     text:job.result.text||node.data.text,assetId:job.result.assets?.[0]?.id||node.data.assetId,resultJob:job.id,

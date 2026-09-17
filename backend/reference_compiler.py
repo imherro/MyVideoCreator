@@ -9,6 +9,7 @@ from .generation_fingerprint import (
     build_generation_fingerprint,
 )
 from .production_context import compose_project_document
+from .composition_references import append_composition_input
 
 
 GROUP_KINDS = {
@@ -157,7 +158,7 @@ def compile_shot_image_input(
         document = compose_project_document(document, production_context)
     shot = _shot_for_image_node(document, node_id)
     if not shot:
-        return result
+        return append_composition_input(document, node_id, result)
     rows = _binding_rows(shot)
     visual = ((document.get('filmBible') or {}).get('visual') or {})
     active_cards = [
@@ -167,7 +168,7 @@ def compile_shot_image_input(
     if active_cards and not rows:
         raise ValueError('项目已有 Film Bible，所选分镜尚未绑定角色、场景或道具视觉版本')
     if not rows:
-        return result
+        return append_composition_input(document, node_id, result)
     result.pop('model_capabilities', None)
     result.pop('allow_reference_text_fallback', None)
 
@@ -212,7 +213,7 @@ def compile_shot_image_input(
     if active_cards and not compiled:
         raise ValueError('项目已有 Film Bible，但所选分镜没有可用的视觉绑定')
     if not compiled:
-        return result
+        return append_composition_input(document, node_id, result)
 
     provider_id = str(result.get('provider') or '')
     provider = next((item for item in providers if item.get('id') == provider_id), None)
@@ -260,4 +261,4 @@ def compile_shot_image_input(
             document, shot, provider_id, model_id, PROMPT_COMPILER_VERSION,
         ),
     })
-    return result
+    return append_composition_input(document, node_id, result, maximum)

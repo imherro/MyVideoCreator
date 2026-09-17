@@ -68,6 +68,35 @@ def input_value():
     }
 
 
+def test_composition_appends_after_identity_references_and_participates_in_fingerprint():
+    value=document()
+    value['nodes'].append({'id':'composition','data':{'kind':'reference','referencePurpose':'composition','assetId':'crop','label':'机位一'}})
+    value['edges'].append({'source':'composition','target':'image-1'})
+    compile=lambda maximum:compile_shot_image_input(value,'image-1','image',input_value(),PROVIDERS,lambda p,m:{'image_reference':True,'max_references':maximum})
+    result=compile(5)
+    assert result['asset_ids']==['asset-hero','asset-friend','asset-alley','asset-umbrella','crop']
+    assert '图片5：机位一' in result['prompt'] and '不要照搬白模' in result['prompt']
+    assert result['composition_references'][0]['assetId']=='crop'
+    with pytest.raises(ValueError,match='超过模型'):
+        compile(4)
+    value['nodes'][-1]['data']['assetId']='crop2'
+    assert compile(5)['generation_fingerprint']['hash'] != result['generation_fingerprint']['hash']
+    value['nodes'][-1]['data']['stale']=True
+    with pytest.raises(ValueError,match='构图参考需要更新'):
+        compile(5)
+
+
+def test_composition_helpers_are_not_execution_dependencies():
+    from backend.workflows import execution_plan
+    doc={'nodes':[{'id':key,'data':{'kind':kind}} for key,kind in [('original','image'),('helper','reference'),('crop','reference'),('shot','image')]],'edges':[
+        {'source':'original','target':'helper','data':{'origin':'composition_source'}},
+        {'source':'helper','target':'crop','data':{'origin':'composition_output'}},
+        {'source':'crop','target':'shot'},
+    ]}
+    plan=execution_plan(doc,['shot'])
+    assert [node['id'] for node,parents in plan]==['crop','shot']
+
+
 def test_compiler_accepts_separate_production_context():
     value = document()
     expected = compile_shot_image_input(

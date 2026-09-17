@@ -156,6 +156,8 @@ import { deriveVideoProductionRows, validateVideoSubmission } from "./videoProdu
 import { RunWorkflow } from "./RunWorkflow";
 import { PanoramaViewer } from "./PanoramaViewer";
 import { defaultStage } from "./directorScene";
+import {compositionData,panoramaSource,patchCompositionNode,setCompositionOutput,type CompositionKind} from "./compositionNodes";
+import {CompositionInspector} from "./CompositionInspector";
 const DirectorStage = lazy(() =>
   import("./DirectorStage").then((m) => ({ default: m.DirectorStage })),
 );
@@ -429,7 +431,7 @@ function MediaNode({ data, selected }: { data: Any; selected?: boolean }) {
         <Icon size={15} />
         <span>{data.label || titles[data.kind]}</span>
         <small>
-          {data.provider && data.provider !== "local" ? "服务模型" : "本地"}
+          {data.compositionType ? "构图辅助" : data.referencePurpose === "composition" ? "构图参考" : data.provider && data.provider !== "local" ? "服务模型" : "本地"}
         </small>
       </div>
       <div
@@ -461,11 +463,12 @@ function MediaNode({ data, selected }: { data: Any; selected?: boolean }) {
           <div className="node-empty">
             <Icon size={32} />
             <p>
-              {data.kind === "image" ? "描绘故事的第一个瞬间" : "让画面动起来"}
+              {data.compositionType ? "选择以编辑构图" : data.kind === "image" ? "描绘故事的第一个瞬间" : "让画面动起来"}
             </p>
           </div>
         )}
       </div>
+      {data.compositionType && <button className="nodrag nowheel composition-node-edit" onClick={event=>{event.stopPropagation();data.onEditComposition?.();}}>编辑构图</button>}
       <div className="node-footer">
         <span>
           {data.stale
@@ -662,6 +665,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
   const [edgeMenu, setEdgeMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const [compositionEditor, setCompositionEditor] = useState<string | null>(null);
   const [panorama, setPanorama] = useState<Asset | null>(null);
   const [syncFailure, setSyncFailure] = useState<SyncFailure | null>(null);
   const [mediaRetryKey, setMediaRetryKey] = useState(0);
@@ -713,7 +717,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     }
     setPanel(null);
     if (next === "editor") setSelected(null);
-    if (next === "storyboard" && ["shots", "director"].includes(view)) return;
+    if (next === "storyboard" && view === "shots") return;
     if (next === "images" && ["shots", "grid"].includes(view)) return;
     setView(defaultViewForStage(next));
   }
@@ -743,7 +747,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     dirty.current = true;
     setSaved("未保存");
   }, []);
-  useEffect(() => { setSelectedEdge(null); setEdgeMenu(null); }, [project?.id, view, workflowStage]);
+  useEffect(() => { setSelectedEdge(null); setEdgeMenu(null); setCompositionEditor(null); }, [project?.id, view, workflowStage]);
   useEffect(() => {
     if (selectedEdge && !doc?.edges.some(edge => edge.id === selectedEdge)) {
       setSelectedEdge(null); setEdgeMenu(null);
@@ -1381,7 +1385,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             kind,
             label: titles[kind],
             prompt,
-            ...nodeDefaults(kind, config.providers, system.models, doc?.generationPolicy),
+            ...(kind === "reference" ? {} : nodeDefaults(kind, config.providers, system.models, doc?.generationPolicy)),
             ...extra,
           },
         },
@@ -1398,6 +1402,33 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setSelected(nid);
     setPanel(null);
     return nid;
+  }
+  function newComposition(kind: CompositionKind) {
+    const legacy = kind === "director" && !doc?.nodes.some(n=>n.data.compositionType === "director") ? (doc as Any)?.director : undefined;
+    return newNode("reference", "", compositionData(kind, legacy));
+  }
+  function patchComposition(nodeId: string, patch: Any) {
+    update(document=>patchCompositionNode(document,nodeId,patch));
+  }
+  function createPanoramaSource(owner: Any) {
+    const existing=doc?.nodes.find(n=>n.id===owner.data.composition?.sourceNodeId);
+    if(existing){setSelected(existing.id);return;}
+    const nid=newNode("image", "生成 360 度等距柱状全景环境图，2:1 画幅，完整覆盖四周环境，上下分别为天空与地面，左右边缘连续，地平线位于画面中线，无文字。场景：", {label:`${owner.data.label} · 全景原图`,imagePurpose:"panorama"});
+    update(document=>({...document,nodes:document.nodes.map(n=>n.id===owner.id?{...n,data:{...n.data,composition:{...(n.data.composition as Any),sourceAssetId:"",sourceNodeId:nid}}}:n),edges:[...document.edges,{id:id(),source:nid,target:owner.id,data:{origin:"composition_source"}}]}));
+  }
+  async function saveComposition(nodeId: string, blob: Blob) {
+    const snapshot=current.current;
+    const owner=snapshot.doc?.nodes.find(n=>n.id===nodeId);
+    if(!snapshot.project||!owner)return;
+    const config=JSON.stringify(owner.data.composition);
+    const form=new FormData();form.append("file",blob,`${owner.data.label}构图_${Date.now()}.png`);
+    const asset=await api(`/projects/${snapshot.project.id}/assets`,{method:"POST",body:form});
+    if(current.current.project?.id!==snapshot.project.id)return;
+    if(!current.current.doc?.nodes.some(n=>n.id===nodeId))return;
+    update(document=>setCompositionOutput(document,nodeId,asset.id,id,config));
+    await refresh(snapshot.project.id);
+    await save();
+    setNotice("已保存构图参考图，可从输出节点连到分镜图");
   }
   function generateStoryboardFromScript(sourceNode: Any) {
     if (!doc || busy) return;
@@ -2237,7 +2268,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         selected: n.id === selected,
         data: {
           ...n.data,
-          asset: assets.find((a) => a.id === n.data.assetId),
+          asset: assets.find((a) => a.id === (n.data.compositionType ? n.data.previewAssetId : n.data.assetId)),
+          onEditComposition: () => setCompositionEditor(n.id),
           job: jobs.find((j) => j.node_id === n.id),
           mediaRetryKey,
           layoutVersion,
@@ -2720,9 +2752,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               <button className={view === "shots" ? "active" : ""} onClick={() => setView("shots")}>
                 <Table2 size={15} />分镜表<span>{doc.shots.length || ""}</span>
               </button>
-              <button className={view === "director" ? "active" : ""} onClick={() => setView("director")}>
-                3D 导演台
-              </button>
               <button onClick={() => activateWorkflowStage("canvas")}>
                 高级画布<ArrowUpRight size={13} />
               </button>
@@ -3151,6 +3180,12 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 const target = doc.nodes.find(
                   (item) => item.id === connection.target,
                 );
+                if(source?.data.compositionType || target?.data.compositionType){
+                  setNotice("构图辅助通过编辑器选择输入并保存输出，请从构图参考图节点连线");return;
+                }
+                if(source?.data.referencePurpose === "composition" && target?.data.kind !== "image"){
+                  setNotice("构图参考请连接到图像或分镜图节点，再由分镜图生成视频");return;
+                }
                 if (source && isManagedVisualNode(source as Any)) {
                   const versionId = visualVersionIdFromNode(source as Any);
                   const shot = doc.shots.find(
@@ -3264,29 +3299,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               </div>
             )}
           </div>
-        ) : view === "director" ? (
-          <Suspense fallback={<div className="loading">加载 3D 导演台…</div>}>
-            <DirectorStage
-              stage={(doc as any).director || defaultStage()}
-              onChange={(director) => update((d) => ({ ...d, director }))}
-              newId={id}
-              onCapture={async (blob, prompt) => {
-                const form = new FormData();
-                form.append("file", blob, "导演构图.png");
-                const asset = await api(`/projects/${project.id}/assets`, {
-                  method: "POST",
-                  body: form,
-                });
-                await refresh(project.id);
-                newNode("image", prompt, {
-                  asset_ids: [asset.id],
-                  resolution: "1280x720",
-                });
-                activateWorkflowStage("canvas");
-                setNotice("构图已保存，完善场景描述后即可生成");
-              }}
-            />
-          </Suspense>
         ) : null}
         {view !== "editor" && timelineOpen && (
           <section className="timeline">
@@ -3483,7 +3495,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           </section>
         )}
       </main>
-      {selected && node && !panel && !isManagedVisualNode(node as Any) && (
+      {selected && node && !panel && data.compositionType && <CompositionInspector node={node} assets={assets} sourceAssetId={panoramaSource(doc,node)} onPatch={patch=>patchComposition(node.id,patch)} onEdit={()=>setCompositionEditor(node.id)} onGenerate={()=>createPanoramaSource(node)} onDuplicate={()=>newNode("reference","",{...compositionData(data.compositionType),composition:structuredClone(data.composition)})} onDelete={removeNode}/>}
+      {selected && node && !panel && data.referencePurpose === "composition" && <aside className="inspector"><div className="inspector-title"><b>构图参考图</b><button aria-label="关闭属性" onClick={()=>setSelected(null)}><X size={17}/></button></div><div className="inspector-scroll"><p>{data.label}</p>{assets.find(a=>a.id===data.assetId) && <button className="composition-preview" onClick={()=>setPreview(assets.find(a=>a.id===data.assetId)!)}><img src={assets.find(a=>a.id===data.assetId)!.url} alt={data.label}/></button>}<p className="muted">提供站位、空间布局和机位参考，人物外观与服装仍由视觉资产决定。将本节点连到分镜图即可使用。</p>{data.stale && <p className="error">构图已改变，请重新编辑并保存。</p>}{doc.nodes.some(n=>n.id===data.compositionOwner) && <button onClick={()=>setCompositionEditor(data.compositionOwner)}>编辑来源构图</button>}<button onClick={()=>newNode("image","依据构图参考生成正式画面，请补充角色和场景描述。",{},node.id)}>新建图像生成节点</button></div><div className="inspector-bottom"><button title="移除参考图节点" onClick={removeNode}><Trash2 size={16}/></button></div></aside>}
+      {selected && node && !panel && !data.compositionType && data.referencePurpose !== "composition" && !isManagedVisualNode(node as Any) && (
         <aside className="inspector">
           <div className="inspector-title">
             <span>{titles[data.kind]}设置</span>
@@ -3520,6 +3534,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   : "描述主体、画面、动作与镜头…"
               }
             />
+            {data.imagePurpose === "panorama" && <p className="muted">这是 2:1 全景原图。生成后，请回到“全景场景”节点选择方向并保存普通构图参考图。</p>}
             {data.kind === "image" && requiresInitialStateReview(data.prompt) && (
               <div className={data.state_reviewed ? "notice" : "danger"}>
                 <b>首帧状态核验</b>
@@ -4019,6 +4034,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                     </button>
                   );
                 })}
+                <h3>构图辅助</h3>
+                <button onClick={()=>newComposition("panorama")}><ImageIcon/><div><b>全景场景</b><span>选择或生成全景图，保存不同方向的构图</span></div><Plus size={17}/></button>
+                <button onClick={()=>newComposition("director")}><Monitor/><div><b>3D 构图</b><span>摆放人物与物体，设计机位并保存参考图</span></div><Plus size={17}/></button>
                 <button onClick={() => fileInput.current?.click()}>
                   <Upload />
                   <div>
@@ -4177,11 +4195,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 uploadCategory={uploadCategory}
                 onUploadCategory={setUploadCategory}
                 onUpload={() => fileInput.current?.click()}
-                onCreatePanorama={() => newNode(
-                  "image",
-                  "生成 360 度等距柱状全景环境图，2:1 画幅，完整覆盖四周环境，上下分别为天空与地面，左右边缘连续，地平线位于画面中线，无文字。场景：",
-                  { resolution: "1024x512" },
-                )}
                 onOpenArt={(versionId) => {
                   setVisualFocus(versionId);
                   activateWorkflowStage("art");
@@ -4588,8 +4601,19 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           </button>
         </div>
       )}
+      {compositionEditor && (()=>{
+        const owner=doc.nodes.find(n=>n.id===compositionEditor);
+        if(!owner)return null;
+        const config=(owner.data.composition || {}) as Any;
+        if(owner.data.compositionType==="panorama"){
+          const source=assets.find(a=>a.id===panoramaSource(doc,owner));
+          return source ? <PanoramaViewer key={owner.id+source.id} asset={source} projectRatio={doc.ratio} initialView={config} onViewChange={view=>patchComposition(owner.id,{composition:{...config,...view}})} onClose={()=>setCompositionEditor(null)} onSave={blob=>saveComposition(owner.id,blob)}/> : <div className="modal-overlay"><div className="episode-setup-dialog"><p>请先选择或生成一张全景原图。</p><button onClick={()=>setCompositionEditor(null)}>关闭</button></div></div>;
+        }
+        return <div className="modal-overlay"><div className="composition-editor-modal" role="dialog" aria-modal="true" aria-label="3D 构图编辑器"><header className="panel-title"><h2>{owner.data.label as string}</h2><label>输出画幅<select value={config.ratio || ""} onChange={e=>patchComposition(owner.id,{composition:{...config,ratio:e.target.value}})}><option value="">跟随项目 · {doc.ratio}</option>{["21:9","16:9","4:3","1:1","3:4","9:16"].map(r=><option key={r}>{r}</option>)}</select></label><button className="icon-button" aria-label="关闭构图" onClick={()=>setCompositionEditor(null)}><X/></button></header><Suspense fallback={<div>加载构图工具…</div>}><DirectorStage key={owner.id} stage={config.stage || defaultStage()} ratio={config.ratio || doc.ratio} onChange={stage=>patchComposition(owner.id,{composition:{...config,stage}})} newId={id} onCapture={async blob=>{await saveComposition(owner.id,blob);setCompositionEditor(null);}}/></Suspense></div></div>;
+      })()}
       {panorama && (
         <PanoramaViewer
+          projectRatio={doc.ratio}
           asset={panorama}
           onClose={() => setPanorama(null)}
           onSave={async (blob, name) => {

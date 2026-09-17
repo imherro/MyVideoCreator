@@ -12,9 +12,12 @@ IMAGE_SIZES = {
 
 
 def resolve_image_settings(document, value, provider):
-    ratio = str(document.get('ratio') or '16:9')
-    if ratio not in IMAGE_SIZES:
+    panorama = value.get('imagePurpose') == 'panorama'
+    ratio = '2:1' if panorama else str(document.get('ratio') or '16:9')
+    if not panorama and ratio not in IMAGE_SIZES:
         raise ValueError('请先设置项目图像画幅比例')
+    if panorama and provider.get('type') == 'runninghub':
+        raise ValueError('当前 RunningHub 适配器尚未支持 2:1 全景出图，请选择支持像素尺寸的图像服务或上传全景图')
     settings = value.get('imageSettings') or {}
     if not isinstance(settings, dict):
         raise ValueError('图像生成设置格式无效')
@@ -32,7 +35,7 @@ def resolve_image_settings(document, value, provider):
                     {'value': 'custom', 'label': '自定义像素尺寸'}]
     if mode not in {item['value'] for item in choices}:
         raise ValueError('当前图像适配器未开放此尺寸选项，请选择跟随项目画幅；不会静默覆盖尺寸')
-    size = IMAGE_SIZES.get(ratio, '2048x2048')
+    size = '3072x1536' if panorama else IMAGE_SIZES.get(ratio, '2048x2048')
     if mode == 'video':
         # Video output uses a short-edge resolution and the project frame.
         short = {'480p': 480, '720p': 720, '1080p': 1080}.get(document.get('videoResolution'), 720)
@@ -58,7 +61,8 @@ def resolve_image_settings(document, value, provider):
         'version': 'image-settings/v1', 'sizeMode': mode, 'ratio': ratio, 'size': size,
         'seedSupported': seed_supported, 'seed': seed if seed_supported else None,
         'sizeOptions': choices,
-        'sizeNote': ('RunningHub 按 2K 档位出图，实际像素以生成结果为准。'
+        'sizeNote': ('全景原图固定使用 2:1；取景输出另行跟随项目画幅。' if panorama else
+                    'RunningHub 按 2K 档位出图，实际像素以生成结果为准。'
                      if provider.get('type') == 'runninghub' else
                      '图像尺寸独立于视频输出分辨率；画幅跟随项目。'),
     }

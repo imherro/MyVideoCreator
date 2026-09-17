@@ -27,7 +27,6 @@ export function ProductionAssetCenter({
   uploadCategory,
   onUploadCategory,
   onUpload,
-  onCreatePanorama,
   onOpenArt,
   onPreview,
   renderMedia,
@@ -45,7 +44,6 @@ export function ProductionAssetCenter({
   uploadCategory: string;
   onUploadCategory: (value: string) => void;
   onUpload: () => void;
-  onCreatePanorama: () => void;
   onOpenArt: (versionId?: string) => void;
   onPreview: (asset: Any) => void;
   renderMedia: (asset: Any) => ReactNode;
@@ -79,7 +77,7 @@ export function ProductionAssetCenter({
     <div className="production-asset-center">
       <div className="asset-center-intro">
         <div><span className="eyebrow">PRODUCTION ASSET CENTER</span><h3>资产中心</h3><p>语义资产来自 Film Bible；媒体文件按 Production 共享，来源分集仍保留。</p></div>
-        <div><button onClick={onCreatePanorama}><ImageIcon size={15} />全景节点</button><button onClick={() => onOpenArt()}><BookOpen size={15} />塑角造景</button></div>
+        <div><button onClick={() => onOpenArt()}><BookOpen size={15} />塑角造景</button></div>
       </div>
       <div className="segmented asset-layer-tabs" aria-label="资产层级">
         <button className={layer === "semantic" ? "active" : ""} onClick={() => setLayer("semantic")}><BookOpen size={15} />语义资产 <span>{Object.values(visual.cards).filter((item) => !item.deletedAt).length}</span></button>
@@ -119,7 +117,7 @@ export function ProductionAssetCenter({
               <select aria-label={`${asset.name} 分类`} value={asset.category || "other"} onChange={(event) => onCategory(asset, event.target.value)}>{Object.entries(categoryLabels).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select>
               <small>{kindLabels[asset.kind] || asset.kind} · {sourceLabels[asset.source] || asset.source} · EP{String(asset.origin_episode_no || "?").padStart(2, "0")}</small>
               <details><summary>来源与使用记录</summary>{(() => { const version = Object.values(visual.versions).find((item) => primaryReference(item)?.assetId === asset.id); const used = version ? usageByVersion.get(version.id) : undefined; const history = version ? Object.values(visual.versions).filter((item) => item.cardId === version.cardId).sort((left, right) => left.version - right.version) : []; return <dl><dt>Asset ID</dt><dd>{asset.id}</dd><dt>来源项目</dt><dd>{asset.origin_project_name || asset.project_id}</dd><dt>创建时间</dt><dd>{new Date(asset.created * 1000).toLocaleString()}</dd><dt>Provider / Model</dt><dd>{asset.provider_id || "—"} / {asset.model_id || "—"}</dd><dt>Job</dt><dd>{asset.metadata?.job_id || "—"}</dd><dt>VisualVersion</dt><dd>{asset.visual_version_id || version?.id || "—"}</dd><dt>使用范围</dt><dd>{used ? `${used.episodes.map((item) => `EP${String(item.episode_no).padStart(2, "0")}`).join(" · ")} / ${used.shots.length} 镜` : "—"}</dd><dt>版本历史</dt><dd>{history.length ? history.map((item) => `V${item.version} ${item.status}`).join(" → ") : "—"}</dd><dt>Fingerprint</dt><dd>{asset.generation_fingerprint?.hash || "—"}</dd></dl>; })()}</details>
-              <div>{asset.kind === "image" && <button onClick={() => onPanorama(asset)}>全景构图</button>}{asset.kind === "image" && onReference && <button onClick={() => onReference(asset)}>引用</button>}{["image", "video"].includes(asset.kind) && <button onClick={() => onTimeline(asset)}>入时间线</button>}<a href={asset.url} download={asset.name}><Download size={14} /></a><button className="icon-button danger asset-delete-button" onClick={() => onDelete(asset)} title="移入回收站"><Trash2 size={14} /></button></div>
+              <div>{asset.kind === "image" && <button onClick={() => onPanorama(asset)}>全景取景</button>}{asset.kind === "image" && onReference && <button onClick={() => onReference(asset)}>引用</button>}{["image", "video"].includes(asset.kind) && <button onClick={() => onTimeline(asset)}>入时间线</button>}<a href={asset.url} download={asset.name}><Download size={14} /></a><button className="icon-button danger asset-delete-button" onClick={() => onDelete(asset)} title="移入回收站"><Trash2 size={14} /></button></div>
             </article>)}
           </div>
           {!media.length && <div className="empty-state"><FolderOpen /><h3>没有符合筛选条件的媒体</h3><p>可切换分集或清除筛选。</p></div>}
