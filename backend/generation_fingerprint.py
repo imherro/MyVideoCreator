@@ -73,6 +73,8 @@ def generation_fingerprint_payload(
         'providerId': str(provider_id or ''),
         'modelId': str(model_id or ''),
     }
+    from .visual_style import style_context
+    result['visualStyle'] = style_context(document)
     from .composition_references import composition_sources
     node_id = shot.get('imageNode') or (shot.get('pipeline') or {}).get('imageNodeId')
     sources = composition_sources(document, node_id)
@@ -104,4 +106,9 @@ def build_generation_fingerprint(
 def fingerprint_status(saved, current):
     if not isinstance(saved, dict) or not saved.get('hash'):
         return 'unknown'
-    return 'current' if saved.get('hash') == current.get('hash') else 'stale'
+    current_hash=current.get('hash')
+    # Do not invalidate every historical image merely by introducing this field.
+    if 'visualStyle' not in (saved.get('inputs') or {}) and 'visualStyle' in (current.get('inputs') or {}):
+        legacy={key:value for key,value in current['inputs'].items() if key!='visualStyle'}
+        current_hash=hashlib.sha256(json.dumps(legacy,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+    return 'current' if saved.get('hash') == current_hash else 'stale'

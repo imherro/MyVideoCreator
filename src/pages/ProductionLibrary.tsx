@@ -15,6 +15,7 @@ export function ProductionLibrary({
   onOpenProjectSettings,
   onOpenEpisode,
   onDeleteEpisode,
+  onDeleteProduction,
 }: {
   productions: ProductionSummary[];
   episodes: EpisodeSummary[];
@@ -24,6 +25,7 @@ export function ProductionLibrary({
   onOpenProjectSettings: () => void;
   onOpenEpisode: (episode: EpisodeSummary) => void;
   onDeleteEpisode: (episode: EpisodeSummary) => void;
+  onDeleteProduction: (production: ProductionSummary) => void;
 }) {
   return (
     <div className="production-library">
@@ -42,6 +44,7 @@ export function ProductionLibrary({
               <button className="quiet" onClick={() => onCreateEpisode(production)}>
                 <Plus size={14} />新增集
               </button>
+              <button className="icon-button danger production-trash-button" title="将整部作品移入回收站" aria-label={`删除整部作品 ${production.name}`} onClick={()=>onDeleteProduction(production)}><Trash2 size={15}/></button>
             </header>
             {!productionEpisodes.length && <p className="production-empty">还没有 Episode</p>}
             {productionEpisodes.map((episode) => (

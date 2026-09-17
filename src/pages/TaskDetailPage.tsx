@@ -119,6 +119,7 @@ export function TaskDetailPage({ jobId, request }: { jobId: string; request: (pa
           </article>;
         }) : <>
           <h3>System Prompt</h3><pre className="debug-block">{job.input?.system_prompt || "此任务没有独立的 System Prompt"}</pre>
+          {job.input?.visual_style && <><h3>本次项目视觉风格 · {job.input.visual_style.name}</h3><pre className="debug-block">{JSON.stringify(job.input.visual_style,null,2)}</pre></>}
           <h3>User Prompt</h3><pre className="debug-block">{job.input?.prompt || "未记录"}</pre>
           <h3>Output Schema · {job.input?.schema_version || "无版本"}</h3><pre className="debug-block">{job.input?.response_schema ? JSON.stringify(job.input.response_schema, null, 2) : "此任务没有结构化输出 Schema"}</pre>
         </>}

@@ -55,6 +55,12 @@ async def auth(request: Request, call_next):
                 row = c.execute('SELECT expires FROM sessions WHERE token=?',(hashlib.sha256(token.encode()).hexdigest(),)).fetchone()
             if not row or row['expires'] < time.time():
                 return Response(s.dumps({'detail':'请登录工作室'}),401,media_type='application/json')
+        parts=request.url.path.split('/')
+        if len(parts)>3 and parts[2] in ('productions','projects'):
+            kind='production' if parts[2]=='productions' else 'project'
+            with s.db() as c:
+                hidden=c.execute('SELECT 1 FROM deleted_items WHERE kind=? AND item_id=?',(kind,parts[3])).fetchone()
+            if hidden:return Response(s.dumps({'detail':'内容已移入回收站，请先恢复'}),404,media_type='application/json')
     result = await call_next(request)
     result.headers['X-Content-Type-Options'] = 'nosniff'
     result.headers['Referrer-Policy'] = 'same-origin'
@@ -157,7 +163,7 @@ def production(production_id):
             (SELECT COUNT(*) FROM projects e WHERE e.production_id=p.id AND NOT EXISTS(
                 SELECT 1 FROM deleted_items d WHERE d.kind='project' AND d.item_id=e.id
             )) episode_count
-            FROM productions p WHERE p.id=?''',(production_id,)).fetchone()
+            FROM productions p WHERE p.id=? AND NOT EXISTS(SELECT 1 FROM deleted_items d WHERE d.kind='production' AND d.item_id=p.id)''',(production_id,)).fetchone()
     if not row:raise HTTPException(404,'Production 不存在')
     value=dict(row)
     value['context']=normalize_production_context(json.loads(value.pop('shared_context')))
@@ -171,13 +177,13 @@ def productions():
                 SELECT 1 FROM deleted_items d WHERE d.kind='project' AND d.item_id=e.id
             )) episode_count
             FROM productions p
-            WHERE NOT EXISTS(
+            WHERE NOT EXISTS(SELECT 1 FROM deleted_items d WHERE d.kind='production' AND d.item_id=p.id) AND (NOT EXISTS(
                 SELECT 1 FROM projects e WHERE e.production_id=p.id
             ) OR EXISTS(
                 SELECT 1 FROM projects e WHERE e.production_id=p.id AND NOT EXISTS(
                     SELECT 1 FROM deleted_items d WHERE d.kind='project' AND d.item_id=e.id
                 )
-            )
+            ))
             ORDER BY p.updated DESC''')]
 
 class ProductionCreate(BaseModel):
@@ -195,6 +201,15 @@ def create_production(body:ProductionCreate):
     with s.db() as c:
         c.execute('INSERT INTO productions(id,name,revision,shared_context,created,updated) VALUES(?,?,1,?,?,?)',(production_id,name,s.dumps(context),now,now))
     return production(production_id)
+
+@app.delete('/api/productions/{production_id}')
+def delete_production(production_id:str):
+    from .production_trash import trash_production
+    with s.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        episodes=trash_production(c,production_id)
+    for pid in episodes:s.event(pid,{'type':'production_deleted','production_id':production_id})
+    return {'deleted':production_id,'soft':True,'episode_count':len(episodes)}
 
 @app.patch('/api/productions/{production_id}')
 def update_production(production_id:str,body:ProductionUpdate):
@@ -266,7 +281,7 @@ def create_episode(production_id:str,body:EpisodeCreate):
     now=time.time();pid=s.uid('project-')
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
-        parent=c.execute('SELECT * FROM productions WHERE id=?',(production_id,)).fetchone()
+        parent=c.execute("SELECT * FROM productions WHERE id=? AND NOT EXISTS(SELECT 1 FROM deleted_items d WHERE d.kind='production' AND d.item_id=productions.id)",(production_id,)).fetchone()
         if not parent:raise HTTPException(404,'Production 不存在')
         episode_no=c.execute(
             'SELECT COALESCE(MAX(episode_no),0)+1 value FROM projects WHERE production_id=?',
@@ -706,7 +721,8 @@ def delete_asset(pid:str,aid:str):
 @app.get('/api/trash')
 def trash():
     with s.db() as c:
-        deleted_projects=[dict(row) for row in c.execute("SELECT p.id,p.name,d.deleted_at FROM deleted_items d JOIN projects p ON p.id=d.item_id WHERE d.kind='project' ORDER BY d.deleted_at DESC")]
+        deleted_productions=[dict(row) for row in c.execute("SELECT p.id,p.name,d.deleted_at,(SELECT COUNT(*) FROM production_trash_members m WHERE m.production_id=p.id) episode_count FROM deleted_items d JOIN productions p ON p.id=d.item_id WHERE d.kind='production' ORDER BY d.deleted_at DESC")]
+        deleted_projects=[dict(row) for row in c.execute("SELECT p.id,p.name,p.production_id,p.episode_no,p.episode_title,d.deleted_at FROM deleted_items d JOIN projects p ON p.id=d.item_id WHERE d.kind='project' AND NOT EXISTS(SELECT 1 FROM deleted_items parent WHERE parent.kind='production' AND parent.item_id=p.production_id) ORDER BY d.deleted_at DESC")]
         deleted_assets=[dict(row) for row in c.execute("SELECT a.id,a.name,a.kind,a.category,a.project_id,a.production_id,p.name project_name,d.deleted_at FROM deleted_items d JOIN assets a ON a.id=d.item_id JOIN projects p ON p.id=a.project_id WHERE d.kind='asset' ORDER BY d.deleted_at DESC")]
         deleted_sources=[dict(row) for row in c.execute('''SELECT sd.id,sd.title name,sd.type,
             sd.production_id,p.name production_name,
@@ -722,20 +738,24 @@ def trash():
             FROM deleted_items d JOIN source_chapters sc ON sc.id=d.item_id
             JOIN source_documents sd ON sd.id=sc.source_id JOIN productions p ON p.id=sd.production_id
             WHERE d.kind='chapter' ORDER BY d.deleted_at DESC''')]
-    return {'projects':deleted_projects,'assets':deleted_assets,'sources':deleted_sources,'chapters':deleted_chapters}
+    return {'productions':deleted_productions,'projects':deleted_projects,'assets':deleted_assets,'sources':deleted_sources,'chapters':deleted_chapters}
 
 @app.post('/api/trash/{kind}/{item_id}/restore')
 def restore_deleted_item(kind:str,item_id:str):
-    if kind not in ('project','asset','source','chapter'):raise HTTPException(400,'回收站类型无效')
+    if kind not in ('production','project','asset','source','chapter'):raise HTTPException(400,'回收站类型无效')
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
         row=c.execute('SELECT * FROM deleted_items WHERE kind=? AND item_id=?',(kind,item_id)).fetchone()
         if not row:raise HTTPException(404,'回收站中没有该项目')
+        from .production_trash import hidden_owner,restore_production
+        if hidden_owner(c,kind,item_id):raise HTTPException(409,'请先恢复所属整部作品。')
         if kind=='asset':
             hidden_project=c.execute("SELECT 1 FROM deleted_items WHERE kind='project' AND item_id=?",(row['project_id'],)).fetchone()
             if hidden_project:raise HTTPException(409,'请先恢复素材所属项目。')
         c.execute('DELETE FROM deleted_items WHERE kind=? AND item_id=?',(kind,item_id))
-        if kind=='asset':
+        if kind=='production':
+            episode_ids=restore_production(c,item_id)
+        elif kind=='asset':
             asset=c.execute('SELECT production_id FROM assets WHERE id=?',(item_id,)).fetchone()
             episode_ids=[item['id'] for item in c.execute('SELECT id FROM projects WHERE production_id=?',(asset['production_id'],))] if asset and asset['production_id'] else [row['project_id']]
         elif kind=='source':
@@ -1001,6 +1021,7 @@ def preview_image_spec(pid: str, body: dict):
 
 def create_job_record(c,pid,body):
     from .job_contracts import freeze_prompt_contract
+    if c.execute("SELECT 1 FROM deleted_items WHERE kind='project' AND item_id=?",(pid,)).fetchone():raise HTTPException(404,'制作集已移入回收站')
     if body.kind=='storyboard' and body.input.get('film_bible'):
         previous=c.execute('SELECT project_id,input FROM jobs WHERE submission_id=?',(body.submission_id,)).fetchone()
         if previous and previous['project_id']==pid:
@@ -1026,6 +1047,14 @@ def create_job_record(c,pid,body):
                 frozen = json.loads(previous['input']) if previous and previous['project_id'] == pid else {}
                 body.input['seed'] = (frozen.get('image_spec') or {}).get('actualSeed', secrets.randbelow(2147483648))
             spec['actualSeed'] = body.input['seed']
+    if body.kind in ('image','video','storyboard'):
+        from .visual_style import compile_visual_style
+        state=read_project_state(c,pid)
+        previous=c.execute('SELECT project_id,input FROM jobs WHERE submission_id=?',(body.submission_id,)).fetchone()
+        frozen=json.loads(previous['input']) if previous and previous['project_id']==pid else None
+        # Idempotent retries use the original style; old jobs without this contract stay untouched.
+        if frozen is None or frozen.get('visual_style'):
+            body.input=compile_visual_style(state['document'],body.kind,body.input,(frozen or {}).get('visual_style'))
     body.input=freeze_prompt_contract(body.kind,body.input)
     if body.kind not in ('text','storyboard','image','video','audio','export'): raise ValueError('不支持的任务类型')
     old=c.execute('SELECT * FROM jobs WHERE submission_id=?',(body.submission_id,)).fetchone()
@@ -1178,7 +1207,9 @@ def video_submission_preview(pid:str,node_id:str):
     if provider and provider.get('type') in ('volcengine_ark','runninghub','hc_atom'):
         data=bind_fixed_dialogue_audio(document,node_id,'video',data,production_assets(saved['production_id'],kind='audio'))
     data=compile_motion_input(document,node_id,'video',data,pid,provider)
-    return {key:data.get(key) for key in ('prompt','reference_manifest','motion_reference','motion_warnings','planned_shot_duration','shot_duration','motion_compiler','generation_mode','dialogue_mode','voice_samples')}
+    from .visual_style import compile_visual_style
+    data=compile_visual_style(document,'video',data)
+    return {key:data.get(key) for key in ('visual_style','prompt','reference_manifest','motion_reference','motion_warnings','planned_shot_duration','shot_duration','motion_compiler','generation_mode','dialogue_mode','voice_samples')}
 
 @app.get('/api/projects/{pid}/nodes/{node_id}/video-result-status')
 def video_result_status(pid:str,node_id:str):
@@ -1202,6 +1233,8 @@ def video_result_status(pid:str,node_id:str):
         data=compile_shot_video_input(document,node_id,'video',data)
         data=bind_fixed_dialogue_audio(document,node_id,'video',data,production_assets(saved['production_id'],kind='audio'))
         data=compile_motion_input(document,node_id,'video',data,pid,provider)
+        from .visual_style import compile_visual_style
+        if job['input'].get('visual_style'):data=compile_visual_style(document,'video',data)
         if not private:return response
         original_provider=json.loads(private['provider'])
         if any(original_provider.get(key)!=provider.get(key) for key in ('type','base_url','url','video_path')):return response

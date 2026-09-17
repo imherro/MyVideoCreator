@@ -64,6 +64,7 @@ def init():
         CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT,project_id TEXT,payload TEXT NOT NULL,created REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS deleted_items(kind TEXT NOT NULL,item_id TEXT NOT NULL,project_id TEXT,deleted_at REAL NOT NULL,PRIMARY KEY(kind,item_id));
         CREATE INDEX IF NOT EXISTS deleted_items_project ON deleted_items(project_id,deleted_at);
+        CREATE TABLE IF NOT EXISTS production_trash_members(production_id TEXT NOT NULL,project_id TEXT PRIMARY KEY);
         CREATE TABLE IF NOT EXISTS provider_asset_groups(
             provider_id TEXT NOT NULL,
             account_hash TEXT NOT NULL,

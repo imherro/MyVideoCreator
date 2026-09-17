@@ -1,3 +1,4 @@
+import { TrashConfirmDialog } from "./components/TrashConfirmDialog";
 import { voiceCardId } from "./filmBible/voiceResolution.ts";
 import { planShotTimeline } from "./shotTimeline";
 import { ensureShotNodes, importStoryboardShots } from "./shotNodes";
@@ -647,7 +648,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     [busy, setBusy] = useState(false),
     [timelineOpen, setTimelineOpen] = useState(false),
     [revisions, setRevisions] = useState<Any[]>([]),
-    [trashItems, setTrashItems] = useState<Any>({ projects: [], assets: [], sources: [], chapters: [] }),
+    [trashItems, setTrashItems] = useState<Any>({ productions: [], projects: [], assets: [], sources: [], chapters: [] }),
     [preview, setPreview] = useState<Asset | null>(null);
   const [workflowDataRevision, setWorkflowDataRevision] = useState({ source: 0, adaptation: 0, script: 0 });
   const [previewTimeline, setPreviewTimeline] = useState(false);
@@ -1606,19 +1607,28 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     }
     setPanel(action.panel);
   }
+  const [trashTarget, setTrashTarget] = useState<{kind:"production"|"project";item:Any}|null>(null);
+  async function deleteProduction(target: Any) {
+    if (!target) return;
+    const isCurrent=project?.production_id===target.id;
+    if(isCurrent && (dirty.current || saveFlight.current)) await save();
+    if(isCurrent && dirty.current) throw new Error("当前制作集尚未保存，请先解决保存问题。");
+    await api(`/productions/${target.id}`,send("DELETE"));
+    const list=await api("/projects");
+    setProjects(list);setProductions(await api("/productions"));
+    if(isCurrent){
+      dirty.current=false;
+      if(list.length)await openProject(list[0].id);
+      else{current.current={project:null,doc:null};setProject(null);setDoc(null);setPanel(null);setProjectSetupOpen(false);}
+    }
+    await loadTrash();setNotice(`整部作品“${target.name}”已移入回收站`);
+  }
   async function deleteProject(target: Any) {
     if (!target) return;
     if (target.id === project?.id && (dirty.current || saveFlight.current))
       await save();
     if (target.id === project?.id && dirty.current)
       throw new Error("当前项目尚未保存，请先解决保存问题再移入回收站。");
-    const entered = window.prompt(
-      `项目会移入回收站并可恢复。请输入项目名称“${target.name}”确认：`,
-      "",
-    );
-    if (entered === null) return;
-    if (entered.trim() !== target.name)
-      throw new Error("项目名称不匹配，未执行删除。");
     await api(`/projects/${target.id}`, send("DELETE"));
     const list = await api("/projects");
     setProjects(list);
@@ -1634,7 +1644,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       }
     }
     await loadTrash();
-    setNotice(`项目“${target.name}”已移入回收站`);
+    setNotice(`制作集“${target.name}”已移入回收站`);
   }
   async function deleteAsset(asset: Asset) {
     if (!project) return;
@@ -1644,16 +1654,18 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     await loadTrash();
     setNotice(`素材“${asset.name}”已移入回收站`);
   }
-  async function restoreTrashItem(kind: "project" | "asset" | "source" | "chapter", item: Any) {
+  async function restoreTrashItem(kind: "production" | "project" | "asset" | "source" | "chapter", item: Any) {
     const currentProjectId = project?.id;
     await api(`/trash/${kind}/${item.id}/restore`, send("POST"));
-    setProjects(await api("/projects"));
+    const restoredProjects=await api("/projects");
+    setProjects(restoredProjects);
+    if(!currentProjectId && restoredProjects.length){setProjectSetupOpen(false);await openProject(restoredProjects[0].id);}
     setProductions(await api("/productions"));
     if (kind === "asset" && currentProjectId && item.production_id === project?.production_id)
       await refresh(currentProjectId);
     if (kind === "source" || kind === "chapter") setWorkflowDataRevision((value) => ({ ...value, source: value.source + 1, adaptation: value.adaptation + 1 }));
     await loadTrash();
-    const label = kind === "project" ? "项目" : kind === "asset" ? "素材" : kind === "source" ? "原著" : "章节";
+    const label = kind === "production" ? "整部作品" : kind === "project" ? "制作集" : kind === "asset" ? "素材" : kind === "source" ? "原著" : "章节";
     setNotice(`${label}“${item.name}”已恢复`);
   }
   function sourceAssets(nid: string) {
@@ -2346,13 +2358,15 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           <h1>创建第一部作品</h1>
           <p>先确认视觉风格、画幅、目标时长、默认模型与 Project Bible，再进入 EP01。</p>
           <button className="primary" onClick={openProjectSetup}><Plus size={17}/>创建第一部作品</button>
+          <button onClick={()=>{loadTrash().then(()=>setPanel("trash")).catch(report);}}><Trash2 size={16}/>回收站</button>
+          {panel==="trash"&&<section className="empty-trash-list"><h3>回收站</h3>{[...(trashItems.productions||[]).map((item:Any)=>({...item,trashKind:"production"})),...trashItems.projects.map((item:Any)=>({...item,trashKind:"project"}))].map((item:Any)=><div className="trash-row" key={item.id}><b>{item.name}</b><button onClick={()=>restoreTrashItem(item.trashKind,item).catch(report)}>恢复{item.trashKind==="production"?"整部作品":"制作集"}</button></div>)}{!trashItems.productions?.length&&!trashItems.projects.length&&<p className="muted">没有可恢复的作品或制作集</p>}</section>}
           {error && <div className="error">{error}</div>}
         </>}
         {projectSetupOpen && <ProjectSetupDialog
           key={projectSetupKey}
           providers={config.providers}
           localModels={system.models}
-          onClose={projects.length ? () => setProjectSetupOpen(false) : undefined}
+          onClose={() => setProjectSetupOpen(false)}
           onCreate={createProduction}
         />}
       </div>
@@ -4070,13 +4084,16 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 onOpenProjectSettings={() => { setProjectSettingsTab("production"); setPanel("projectInfo"); }}
                 onCreateEpisode={setEpisodeSetupProduction}
                 onOpenEpisode={(episode) => openProject(episode.id).catch(report)}
-                onDeleteEpisode={(episode) => deleteProject(episode.id === project.id ? { ...episode, name: project.name } : episode).catch(report)}
+                onDeleteProduction={(production)=>setTrashTarget({kind:"production",item:production})}
+                onDeleteEpisode={(episode) => setTrashTarget({kind:"project",item:episode.id === project.id ? { ...episode, name: project.name } : episode})}
               />
             )}
             {panel === "trash" && (
               <>
                 <p className="muted">这里只隐藏内容，不删除数据库记录和媒体文件。恢复后会回到原来的项目。</p>
-                {!!trashItems.projects.length && <h3>项目</h3>}
+                {!!trashItems.productions?.length && <h3>整部作品</h3>}
+                {trashItems.productions?.map((item:Any)=><div className="trash-row" key={item.id}><Film size={17}/><div><b>{item.name}</b><small>{item.episode_count} 集 · {new Date(item.deleted_at*1000).toLocaleString()}</small></div><button onClick={()=>restoreTrashItem("production",item).catch(report)}><RefreshCw size={14}/>恢复整部作品</button></div>)}
+                {!!trashItems.projects.length && <h3>制作集</h3>}
                 {trashItems.projects.map((item: Any) => (
                   <div className="trash-row" key={`project-${item.id}`}>
                     <FolderOpen size={17} />
@@ -4138,7 +4155,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                     }}><RefreshCw size={14} /> 恢复</button>
                   </div>
                 ))}
-                {!trashItems.projects.length && !trashItems.assets.length && !trashItems.sources?.length && !trashItems.chapters?.length && !doc.characters.some((item) => item.deletedAt) && !Object.values(visualBibleOf(doc).cards).some((item) => item.deletedAt) && (
+                {!trashItems.productions?.length && !trashItems.projects.length && !trashItems.assets.length && !trashItems.sources?.length && !trashItems.chapters?.length && !doc.characters.some((item) => item.deletedAt) && !Object.values(visualBibleOf(doc).cards).some((item) => item.deletedAt) && (
                   <div className="empty-state"><Trash2 /><h3>回收站为空</h3><p>移入回收站的项目、素材、原著和角色场景会显示在这里。</p></div>
                 )}
               </>
@@ -4194,10 +4211,10 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 </>}
                 <button
                   className="full danger-button"
-                  onClick={() => deleteProject(project).catch(report)}
+                  onClick={() => setTrashTarget({kind:"project",item:project})}
                 >
                   <Trash2 size={16} />
-                  将项目移入回收站
+                  将当前集移入回收站
                 </button>
               </>
             )}
@@ -4580,6 +4597,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           e.target.value = "";
         }}
       />
+      {trashTarget && <TrashConfirmDialog key={`${trashTarget.kind}:${trashTarget.item.id}`} name={trashTarget.item.name} whole={trashTarget.kind==="production"} onClose={()=>setTrashTarget(null)} onConfirm={()=>trashTarget.kind==="production"?deleteProduction(trashTarget.item):deleteProject(trashTarget.item)}/> }
       {notice && (
         <div className="toast">
           <Check size={16} />

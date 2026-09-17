@@ -119,15 +119,7 @@ def _style_text(value):
 
 def compile_shot_prompt(document, shot, constraints):
     """Compile the final provider prompt only from canonical project state."""
-    film_bible = document.get('filmBible') or {}
-    project_style = _style_text(document.get('style'))
-    bible_style = _style_text(film_bible.get('style'))
-    lines = ['[项目视觉风格]']
-    lines.append(f'项目风格：{project_style or "未指定"}')
-    if bible_style:
-        lines.append(f'视觉圣经风格：{bible_style}')
-    lines.extend([
-        '',
+    lines = [
         '[本镜头变量]',
         f"首帧描述：{str(shot.get('image_prompt') or '').strip() or '按分镜结构生成首帧'}",
         f"动作：{str(shot.get('action') or '').strip() or '无额外动作说明'}",
@@ -138,8 +130,9 @@ def compile_shot_prompt(document, shot, constraints):
         '以下图号对应按角色、场景、道具顺序提交的独立参考图；不要把它们理解为拼贴画。',
         *constraints,
         '必须保持上述身份、服装、场景结构和道具外观；只改变本镜头明确要求的动作、表情、构图和光线。',
-    ])
-    return '\n'.join(lines).strip()
+    ]
+    from .visual_style import compile_visual_style
+    return compile_visual_style(document,'image',{'prompt':'\n'.join(lines).strip()})['prompt']
 
 
 def compile_shot_image_input(
