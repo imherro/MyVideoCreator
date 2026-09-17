@@ -1,4 +1,23 @@
+import type { Node, Edge } from "@xyflow/react";
+import { invalidate } from "./graph.ts";
+import { filterManagedEdgeRemovals } from "./filmBible/managedGraph.ts";
+
 type Value = Record<string, any>;
+
+export function removeCanvasEdges<T extends { nodes: Node[]; edges: Edge[] }>(document: T, ids: string[]) {
+  const requested = document.edges.filter(edge => ids.includes(edge.id));
+  const { allowed, blocked } = filterManagedEdgeRemovals(
+    requested.map(edge => ({ type: "remove", id: edge.id })), document.edges,
+  );
+  const removed = new Set(allowed.map(change => change.id));
+  return {
+    document: removed.size ? invalidate(
+      { ...document, edges: document.edges.filter(edge => !removed.has(edge.id)) },
+      requested.filter(edge => removed.has(edge.id)).map(edge => edge.target),
+    ) : document,
+    removed: [...removed], blocked: blocked.map(change => change.id),
+  };
+}
 
 export const CANVAS_EDGE_COLORS: Record<string, string> = {
   character: "#d58fbd",

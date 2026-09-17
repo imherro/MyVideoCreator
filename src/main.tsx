@@ -3,7 +3,7 @@ import { planShotTimeline } from "./shotTimeline";
 import { ensureShotNodes, importStoryboardShots } from "./shotNodes";
 import { mergeStoryboardResult } from "./filmBible/storyboardImport";
 import { autoLayoutCanvas } from "./canvasLayout";
-import { canvasEdgeColor } from "./canvasEdges";
+import { canvasEdgeColor, removeCanvasEdges } from "./canvasEdges";
 import { imageSizeForRatio, VIDEO_FORMATS, VIDEO_RATIOS, VIDEO_RESOLUTIONS } from "./mediaSpecs";
 import {
   planBatchGeneration,
@@ -123,6 +123,7 @@ import {
 import {
   deriveManagedGraph,
   filterManagedEdgeRemovals,
+  isManagedVisualEdge,
   isManagedVisualNode,
   visualVersionIdFromNode,
 } from "./filmBible/managedGraph";
@@ -657,6 +658,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   const [visualStyleDraft, setVisualStyleDraft] = useState("");
   const [visualFocus, setVisualFocus] = useState<string | undefined>();
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+  const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
+  const [edgeMenu, setEdgeMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
   const [panorama, setPanorama] = useState<Asset | null>(null);
   const [syncFailure, setSyncFailure] = useState<SyncFailure | null>(null);
   const [mediaRetryKey, setMediaRetryKey] = useState(0);
@@ -738,6 +742,34 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     dirty.current = true;
     setSaved("未保存");
   }, []);
+  useEffect(() => { setSelectedEdge(null); setEdgeMenu(null); }, [project?.id, view, workflowStage]);
+  useEffect(() => {
+    if (selectedEdge && !doc?.edges.some(edge => edge.id === selectedEdge)) {
+      setSelectedEdge(null); setEdgeMenu(null);
+    }
+  }, [selectedEdge, doc?.edges]);
+  useEffect(() => {
+    if (!edgeMenu) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest(".canvas-edge-menu")) setEdgeMenu(null);
+    };
+    window.addEventListener("pointerdown", dismiss);
+    return () => window.removeEventListener("pointerdown", dismiss);
+  }, [edgeMenu]);
+  function deleteCanvasEdge(edgeId: string) {
+    const document = current.current.doc;
+    if (!document) return;
+    const result = removeCanvasEdges(document, [edgeId]);
+    setEdgeMenu(null);
+    if (result.blocked.length) {
+      setNotice("此连线由资产绑定或角色状态关系管理，请到塑角造景解除对应绑定");
+      return;
+    }
+    if (!result.removed.length) return;
+    update(() => result.document);
+    setSelectedEdge(null);
+    setNotice("已删除连线，卡片与已有素材保留");
+  }
   const refresh = useCallback((pid: string) => {
     const pending = refreshFlights.current.get(pid);
     if (pending) return pending;
@@ -2220,6 +2252,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         !focusedNode || edge.source === focusedNode || edge.target === focusedNode;
       return {
         ...edge,
+        selected: edge.id === selectedEdge,
+        interactionWidth: 24,
         // Orthogonal smooth-step edges share vertical trunks when one source
         // fans out to many shots. Bezier wires diverge immediately, matching
         // the readable socket-to-socket routing used by node editors.
@@ -2231,7 +2265,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         },
         animated: edge.animated !== false && related,
         className: `${edge.className || ""} mvc-flow-edge${managed ? " mvc-flow-edge-managed" : ""}${lineage ? " mvc-flow-edge-lineage" : ""}`.trim(),
-        zIndex: 0,
+        zIndex: edge.id === selectedEdge ? 1 : 0,
         markerEnd: {
           ...(typeof edge.markerEnd === "object" ? edge.markerEnd : {}),
           type: MarkerType.ArrowClosed,
@@ -2244,9 +2278,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         style: {
           ...edge.style,
           stroke,
-          strokeWidth: focusedNode && related ? 2.65 : lineage ? 1.75 : managed ? 1.85 : 1.7,
+          strokeWidth: edge.id === selectedEdge ? 4 : focusedNode && related ? 2.65 : lineage ? 1.75 : managed ? 1.85 : 1.7,
           strokeDasharray: lineage ? "7 7" : undefined,
-          opacity: focusedNode
+          opacity: edge.id === selectedEdge ? 1 : focusedNode
             ? related
               ? 0.96
               : 0.19
@@ -3015,12 +3049,30 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             />
           </Suspense>
         ) : view === "canvas" ? (
-          <div className="canvas">
+          <div className="canvas" ref={canvasRef} tabIndex={0} aria-label="工作流画布" onKeyDown={event => {
+            const target = event.target as HTMLElement;
+            if (target.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"]')) return;
+            if (event.key === "Escape") { setEdgeMenu(null); setSelectedEdge(null); }
+            if (selectedEdge && !event.ctrlKey && !event.metaKey && !event.altKey && ["Delete", "Backspace"].includes(event.key)) {
+              event.preventDefault(); event.stopPropagation(); deleteCanvasEdge(selectedEdge);
+            }
+          }}>
             <VisualBibleGraphProvider visual={visualBibleOf(doc)} assets={assets}>
             <ReactFlow
               nodes={renderedNodes}
               edges={renderedEdges}
               nodeTypes={nodeTypes}
+              onEdgeClick={(_, edge) => {
+                setSelected(null); setSelectedEdge(edge.id); setEdgeMenu(null);
+                canvasRef.current?.focus({ preventScroll: true });
+              }}
+              onEdgeContextMenu={(event, edge) => {
+                event.preventDefault();
+                setSelected(null); setSelectedEdge(edge.id);
+                setEdgeMenu({ id: edge.id, x: Math.max(8, Math.min(event.clientX, window.innerWidth - 268)), y: Math.max(8, Math.min(event.clientY, window.innerHeight - 112)) });
+                canvasRef.current?.focus({ preventScroll: true });
+              }}
+              onMoveStart={() => setEdgeMenu(null)}
               onNodesChange={(changes: NodeChange[]) => {
                 let measurementsChanged = false;
                 for (const change of changes) {
@@ -3138,6 +3190,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 );
               }}
               onNodeClick={(_, n) => {
+                setSelectedEdge(null); setEdgeMenu(null);
                 if (isManagedVisualNode(n as Any)) {
                   setSelected(n.id);
                   setVisualFocus(visualVersionIdFromNode(n as Any));
@@ -3152,7 +3205,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               onNodeDragStop={(_, n) => {
                 requestAnimationFrame(() => updateNodeInternals(n.id));
               }}
-              onPaneClick={() => setSelected(null)}
+              onPaneClick={() => { setSelected(null); setSelectedEdge(null); setEdgeMenu(null); }}
               fitView
               minZoom={0.2}
               maxZoom={1.8}
@@ -3168,6 +3221,12 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               <MiniMap nodeColor="#5b5545" maskColor="rgba(10,12,13,.6)" />
             </ReactFlow>
             </VisualBibleGraphProvider>
+            {edgeMenu && <div className="canvas-edge-menu" role="menu" aria-label="连线操作" style={{ left: edgeMenu.x, top: edgeMenu.y }}>
+              {isManagedVisualEdge(doc.edges.find(edge => edge.id === edgeMenu.id) || {})
+                ? <span>资产关系连线，请到塑角造景解除绑定或调整状态关系</span>
+                : <button role="menuitem" onClick={() => deleteCanvasEdge(edgeMenu.id)}><Trash2 size={15}/>删除连线<kbd>Delete</kbd></button>}
+            </div>}
+            {selectedEdge && !edgeMenu && <div className="canvas-edge-selection-hint">已选中连线 · Delete / Backspace 删除 · 右键查看操作</div>}
             {!doc.nodes.length && (
               <div className="canvas-welcome">
                 <div className="welcome-mark">
