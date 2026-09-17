@@ -2,6 +2,7 @@ import {useEffect,useRef,useState} from 'react';
 import {Sparkles,Upload,X,Minimize2,LoaderCircle,FileText} from 'lucide-react';
 import {rememberImport,forgetImport} from './ImportResumeNotice';
 import {systemModelTargets,targetKey,targetLabel} from '../modelAccess';
+import {requestId} from '../requestId';
 
 type Value=Record<string,any>;
 export function ScriptImportDialog({file,resumeId,sourceTarget,productionId,projectId,providers=[],defaultTarget,request,onJobsSubmitted,onClose,onImported,onSourceImport}:{
@@ -33,7 +34,7 @@ export function ScriptImportDialog({file,resumeId,sourceTarget,productionId,proj
   }
   async function submitAnalysis(id:string){
     if(!selectedTarget)throw new Error('请选择本次分析使用的文本模型');
-    const result=await request(`${base}/${id}/analyze`,{method:'POST',body:JSON.stringify({project_id:projectId,submission_id:crypto.randomUUID(),provider_id:selectedTarget.providerId,model_id:selectedTarget.modelId})});
+    const result=await request(`${base}/${id}/analyze`,{method:'POST',body:JSON.stringify({project_id:projectId,submission_id:requestId('script-import-'),provider_id:selectedTarget.providerId,model_id:selectedTarget.modelId})});
     onJobsSubmitted(result.jobs);
     const value=await request(`${base}/${id}`);
     if(alive.current)accept(value);

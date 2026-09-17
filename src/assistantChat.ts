@@ -4,7 +4,7 @@ export type AssistantMessage = { id: string; role: "user" | "assistant"; content
 
 export function assistantRequestId() {
   // randomUUID requires HTTPS; the studio also supports plain HTTP on a LAN.
-  return 'chat-'+Array.from(crypto.getRandomValues(new Uint8Array(16)),value=>value.toString(16).padStart(2,'0')).join('');
+  return requestId('chat-');
 }
 
 // NDJSON may split anywhere, including inside Chinese UTF-8 sequences.
@@ -41,3 +41,4 @@ export async function readAssistantStream(response: Response, onEvent: (value: a
 export function assistantContextLabel(context: AssistantContext) {
   return [context.production || "工作室", context.episode ? `EP${String(context.episode).padStart(2,"0")}` : "", context.page, context.selectedNode?.label].filter(Boolean).join(" · ");
 }
+import {requestId} from "./requestId.ts";
