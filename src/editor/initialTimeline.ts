@@ -68,7 +68,7 @@ export function planInitialTimeline(
     // Target-fit mode below keeps the complete source by changing playback rate.
     const duration = mediaDuration;
     const elementId = `e-${newId()}`;
-    const trackId = `t-v${videoTracks.length + 1}`;
+    const trackId = fitMode === "preserve" ? "t-v1" : `t-v${videoTracks.length + 1}`;
     const element: ElementJSON = {
       id: elementId,
       trackId,
@@ -97,12 +97,16 @@ export function planInitialTimeline(
       objectFit: "cover",
       mediaDuration,
     };
-    videoTracks.push({
-      id: trackId,
-      name: `V${videoTracks.length + 1} · ${label}`,
-      type: "element",
-      elements: [element],
-    });
+    if (fitMode === "preserve" && videoTracks.length) {
+      videoTracks[0].elements.push(element);
+    } else {
+      videoTracks.push({
+        id: trackId,
+        name: fitMode === "preserve" ? "V1 · 完整镜头" : `V${videoTracks.length + 1} · ${label}`,
+        type: "element",
+        elements: [element],
+      });
+    }
     cursor += duration;
   });
 
@@ -174,5 +178,6 @@ export function planInitialTimeline(
     assets,
   );
 
-  return { timeline, issues, clipCount: videoTracks.length, naturalDuration, outputDuration: cursor, fitApplied };
+  const clipCount = videoTracks.reduce((count, track) => count + track.elements.length, 0);
+  return { timeline, issues, clipCount, naturalDuration, outputDuration: cursor, fitApplied };
 }

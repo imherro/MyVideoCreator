@@ -23,8 +23,9 @@ test("AI storyboard produces an ordered Twick V1 with stable source links", () =
 
   assert.deepEqual(plan.issues, []);
   assert.equal(plan.clipCount, 2);
-  assert.equal(plan.timeline.tracks[0].name, "V1 · 第 1 镜");
-  assert.equal(plan.timeline.tracks[1].name, "V2 · 第 2 镜");
+  assert.equal(plan.timeline.tracks.length, 1);
+  assert.equal(plan.timeline.tracks[0].name, "V1 · 完整镜头");
+  assert.ok(plan.timeline.tracks[0].elements.every(element=>element.trackId===plan.timeline.tracks[0].id));
   assert.equal(plan.timeline.metadata.custom.timelineDuration, 15);
   assert.equal(plan.naturalDuration, 9.2);
   assert.equal(plan.outputDuration, 9.2);
@@ -61,11 +62,28 @@ test("target-fit initial edit keeps every shot and compresses the sequence to th
     (() => { let id = 0; return () => String(++id); })(),
   );
   const elements = plan.timeline.tracks.flatMap((track) => track.elements);
+  assert.equal(plan.clipCount, 2);
+  assert.equal(plan.timeline.tracks.length, 2);
+  assert.ok(plan.timeline.tracks.every(track=>track.elements.length===1 && track.elements[0].trackId===track.id));
   assert.equal(plan.fitApplied, true);
   assert.equal(plan.naturalDuration, 20);
   assert.equal(plan.outputDuration, 15);
   assert.deepEqual(elements.map((element) => [element.s, element.e]), [[0, 6], [6, 15]]);
   assert.ok(elements.every((element) => Math.abs(element.props.playbackRate - 4 / 3) < 0.0001));
+});
+
+test("target mode separates tracks even when source duration is within the target", () => {
+  let id=0;
+  const plan=planInitialTimeline({
+    shots:[{videoNode:"one"},{videoNode:"two"}],
+    nodes:[{id:"one",data:{assetId:"a"}},{id:"two",data:{assetId:"b"}}],
+    assets:[{id:"a",name:"一",kind:"video",url:"/a",metadata:{duration:2}},{id:"b",name:"二",kind:"video",url:"/b",metadata:{duration:3}}],
+    resolution:{width:1280,height:720},fitMode:"target",targetDuration:15,
+  },()=>String(++id));
+  assert.equal(plan.timeline.tracks.length,2);
+  assert.equal(plan.clipCount,2);
+  assert.equal(plan.fitApplied,false);
+  assert.deepEqual(plan.timeline.tracks.map(track=>[track.elements[0].s,track.elements[0].e]),[[0,2],[2,5]]);
 });
 
 test("initial edit preserves video original audio and adds configured looping music", () => {

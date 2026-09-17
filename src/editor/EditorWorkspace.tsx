@@ -275,7 +275,7 @@ function EditorSurface({
     setCurrentTime(0);
     setSeekTime(0);
     setMessageTone("success");
-    setMessage(`已建立 ${plan.clipCount} 个镜头${plan.fitApplied ? `，由 ${plan.naturalDuration.toFixed(1)} 秒匹配至 ${plan.outputDuration.toFixed(1)} 秒` : `，总长 ${plan.outputDuration.toFixed(1)} 秒`}；准备好后请手动播放`);
+    setMessage(`已建立 ${plan.clipCount} 个镜头，${initialEditMode === "preserve" ? "顺序放入同一视频轨" : "按镜头分轨排列"}${plan.fitApplied ? `，由 ${plan.naturalDuration.toFixed(1)} 秒匹配至 ${plan.outputDuration.toFixed(1)} 秒` : `，总长 ${plan.outputDuration.toFixed(1)} 秒`}；准备好后请手动播放`);
   }
 
   return (
@@ -287,11 +287,11 @@ function EditorSurface({
         <button className="primary compact" onClick={generateInitialEdit}>
           <Sparkles size={15} /> 生成初剪
         </button>
-        <label className="mvc-initial-edit-mode" title="完整镜头保留原节奏；匹配影片时长会等比例加速全部镜头，保留完整内容">
+        <label className="mvc-initial-edit-mode" title="完整镜头按顺序放入同一视频轨，保留原时长；匹配影片时长按镜头分轨，超出目标时等比例加速，保留完整内容">
           初剪方式
           <select value={initialEditMode} onChange={(event) => setInitialEditMode(event.target.value as "preserve" | "target")}>
-            <option value="preserve">完整镜头</option>
-            <option value="target">匹配 {Number(duration).toLocaleString("zh-CN", { maximumFractionDigits: 1 })} 秒</option>
+            <option value="preserve">完整镜头 · 同轨</option>
+            <option value="target">匹配 {Number(duration).toLocaleString("zh-CN", { maximumFractionDigits: 1 })} 秒 · 分轨</option>
           </select>
         </label>
         <TimelineDurationFloor projectDuration={duration} />
