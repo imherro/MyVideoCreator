@@ -1,4 +1,5 @@
 import type {Node, Edge} from '@xyflow/react';
+import {canvasScriptInputMatches} from './canvasRunInput.ts';
 
 type Graph = {nodes:Node[];edges:Edge[]};
 
@@ -93,14 +94,14 @@ export function acceptResult<T extends Graph>(graph:T,job:ResultJob,jobs:ResultJ
   }
   const next=invalidate(graph,[job.node_id],expectedNodes);
   const compiledPrompt=Boolean(
-    job.input.reference_compiler||job.input.shot_video_projection||job.input.dialogue_projection||job.input.motion_compiler
+    job.input.reference_compiler||job.input.shot_video_projection||job.input.dialogue_projection||job.input.motion_compiler||job.input.canvas_script_sources
   );
   return {...next,nodes:next.nodes.map(node=>node.id!==job.node_id?node:{...node,data:{...node.data,
     text:job.result.text||node.data.text,assetId:job.result.assets?.[0]?.id||node.data.assetId,resultJob:job.id,
     generationFingerprint:job.result.assets?.[0]?.generationFingerprint||job.input.generation_fingerprint||node.data.generationFingerprint,
     stale:(
       !compiledPrompt&&node.data.prompt!==job.input.prompt
-    )||Number(node.data.generation_revision||0)!==Number(job.input.generation_revision||0),
+    )||!canvasScriptInputMatches(graph,node,job.input)||Number(node.data.generation_revision||0)!==Number(job.input.generation_revision||0),
     ...(node.data.kind==='image'&&job.result.assets?.[0]?{state_reviewed:false}:{})
   }})};
 }

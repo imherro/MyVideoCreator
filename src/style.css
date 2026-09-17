@@ -365,3 +365,4 @@
 .canvas-edge-menu kbd{margin-left:auto;opacity:.6;font-size:11px}
 .canvas-edge-menu>span{display:block;padding:8px;font-size:12px;line-height:1.6;color:var(--muted)}
 .canvas-edge-selection-hint{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);padding:7px 12px;border-radius:6px;background:var(--panel);color:var(--muted);font-size:12px;pointer-events:none;white-space:nowrap}
+.canvas-run-input-hint{display:block;padding:0 16px 12px;color:var(--muted);font-size:12px;line-height:1.5}

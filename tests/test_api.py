@@ -943,6 +943,38 @@ def test_graph_storyboard_defaults_to_two_pass_film_bible(authenticated):
         db.execute("UPDATE jobs SET status='cancelled' WHERE project_id=?",(p['id'],))
 
 
+def test_single_storyboard_reads_connected_script_without_own_prompt(authenticated):
+    c=authenticated; p=project(c)
+    def persist_script(text, **extra):
+        latest=c.get('/api/projects/'+p['id']).json()
+        latest['document']['nodes']=[
+            {'id':'script','data':{'kind':'text','prompt':'这个创作要求不应代替正文','text':text,**extra}},
+            {'id':'board','data':{'kind':'storyboard','prompt':'','provider':'local'}},
+        ]
+        latest['document']['edges']=[{'id':'linked','source':'script','target':'board'}]
+        response=c.put('/api/projects/'+p['id'],json={key:latest[key] for key in ('name','revision','production_revision','document')})
+        assert response.status_code==200,response.text
+    persist_script('机器人推开门，发现一束花。')
+    body={'node_id':'board','kind':'storyboard','submission_id':'linked-script-board-test','input':{'prompt':'','provider':'local','film_bible':True}}
+    result=c.post('/api/projects/'+p['id']+'/jobs',json=body)
+    assert result.status_code==200,result.text
+    job=result.json(); frozen=job['input']
+    assert '机器人推开门，发现一束花。' in frozen['prompt']
+    assert '这个创作要求不应代替正文' not in frozen['prompt']
+    assert frozen['canvas_script_sources'][0]['nodeId']=='script'
+    assert frozen['schema_version']=='film-bible-storyboard/v2'
+    assert frozen['target_duration']==15
+    assert c.post('/api/projects/'+p['id']+'/jobs',json=body).json()['id']==job['id']
+    persist_script('第二版正文')
+    assert c.get('/api/jobs/'+job['id']).json()['input']['canvas_script_sources'][0]['text']=='机器人推开门，发现一束花。'
+    for text,extra,message in [('',{},'还没有正文'),('第二版正文',{'stale':True},'需要更新')]:
+        persist_script(text,**extra)
+        rejected=c.post('/api/projects/'+p['id']+'/jobs',json={**body,'submission_id':s.uid()})
+        assert rejected.status_code==400,rejected.text
+        assert message in rejected.text
+    s.job_update(job['id'],status='cancelled')
+
+
 def test_episode_storyboard_freezes_shared_assets_for_single_and_batch(authenticated):
     from backend.film_bible.validate import normalize_visual_bible
     from test_film_bible import visual_input

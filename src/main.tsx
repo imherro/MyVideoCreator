@@ -4,6 +4,7 @@ import { ensureShotNodes, importStoryboardShots } from "./shotNodes";
 import { mergeStoryboardResult } from "./filmBible/storyboardImport";
 import { autoLayoutCanvas } from "./canvasLayout";
 import { canvasEdgeColor, removeCanvasEdges } from "./canvasEdges";
+import { canvasRunInput } from "./canvasRunInput";
 import { imageSizeForRatio, VIDEO_FORMATS, VIDEO_RATIOS, VIDEO_RESOLUTIONS } from "./mediaSpecs";
 import {
   planBatchGeneration,
@@ -1337,6 +1338,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   const pendingInitialStateNodes =
     node?.data.kind === "video" ? pendingInitialStateChecks(node.id) : [];
   const activeJob = jobs.find((j) => j.node_id === selected);
+  const selectedRunInput = canvasRunInput(doc || {}, node, jobs);
   const activeCount = activeTaskCount(productionJobs);
   function editNode(patch: Any) {
     if (!selected) return;
@@ -1647,6 +1649,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setBusy(true);
     setError("");
     try {
+      const readiness = canvasRunInput(current.current.doc || {}, n, jobs);
+      if (!readiness.ready) throw new Error(readiness.reason);
       if (n.data.kind === "video") {
         const pendingChecks = pendingInitialStateChecks(n.id);
         if (pendingChecks.length) {
@@ -3924,14 +3928,16 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               disabled={
                 busy ||
                 ["running", "queued"].includes(activeJob?.status || "") ||
-                !data.prompt?.trim()
+                !selectedRunInput.ready
               }
+              title={selectedRunInput.reason || (selectedRunInput.scriptCount ? `使用连线中的 ${selectedRunInput.scriptCount} 份剧本正文` : "提交生成任务")}
               onClick={() => run()}
             >
               <Play size={16} />
               {data.resultJob ? "重新生成" : "开始生成"}
             </button>
           </div>
+          {data.kind === "storyboard" && <small className="canvas-run-input-hint">{selectedRunInput.reason || (selectedRunInput.scriptCount ? `已连接 ${selectedRunInput.scriptCount} 份剧本，将使用上游正文生成分镜。` : "将按创作描述生成分镜。")}</small>}
         </aside>
       )}
       {panel && <div className="side-panel-scrim" onClick={() => setPanel(null)} aria-hidden="true" />}

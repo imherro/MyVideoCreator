@@ -1244,6 +1244,13 @@ def submit(pid:str,body:JobCreate):
     tracking = None
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
+        if body.kind == 'storyboard':
+            from .canvas_inputs import compile_storyboard_script_input
+            latest = read_project_state(c, pid)
+            active_nodes = {row['node_id'] for row in c.execute(
+                "SELECT node_id FROM jobs WHERE project_id=? AND status IN ('queued','running')", (pid,))}
+            body = body.model_copy(update={'input': compile_storyboard_script_input(
+                latest['document'], body.node_id, body.kind, body.input, active_nodes)})
         if body.input.get('reference_compiler') or body.input.get('motion_compiler'):
             current_revision=c.execute('''SELECT e.revision,p.revision production_revision
                 FROM projects e JOIN productions p ON p.id=e.production_id
