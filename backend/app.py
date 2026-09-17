@@ -258,6 +258,7 @@ def production_visual_usage(production_id:str):
 
 class EpisodeCreate(BaseModel):
     title:str=Field(default='',max_length=100)
+    creation_mode:str|None=None
 
 @app.post('/api/productions/{production_id}/episodes')
 def create_episode(production_id:str,body:EpisodeCreate):
@@ -271,6 +272,13 @@ def create_episode(production_id:str,body:EpisodeCreate):
             'SELECT COALESCE(MAX(episode_no),0)+1 value FROM projects WHERE production_id=?',
             (production_id,),
         ).fetchone()['value']
+        previous=c.execute('SELECT document FROM projects WHERE production_id=? ORDER BY episode_no DESC LIMIT 1',(production_id,)).fetchone()
+        previous_doc=json.loads(previous['document']) if previous else {}
+        for key in ('ratio','duration','videoResolution','videoRatio','videoDuration','videoFormat','videoReferenceMode','dialogueMode'):
+            if key in previous_doc: document[key]=previous_doc[key]
+        mode=body.creation_mode or previous_doc.get('creationMode') or 'adaptation'
+        if mode not in ('direct','adaptation'):raise ValueError('创作起点无效')
+        document['creationMode']=mode
         title=body.title.strip() or f'第 {episode_no:02d} 集'
         c.execute('''INSERT INTO projects(
             id,name,revision,document,created,updated,production_id,episode_no,episode_title
@@ -283,6 +291,8 @@ def create_episode(production_id:str,body:EpisodeCreate):
     return project(pid)
 
 class ProjectCreate(BaseModel):
+    # Older API clients keep the adaptation route; the creation UI sends direct explicitly.
+    creation_mode:str='adaptation'
     name:str=Field(default='未命名短片',max_length=100)
     episode_title:str|None=Field(default=None,max_length=100)
     style:str|None=Field(default=None,max_length=200)
@@ -309,6 +319,8 @@ def project_create_document(body:ProjectCreate):
     # Legacy API callers can keep inheriting the system pool. The browser sends
     # the reviewed cloud-only pool explicitly for every newly created project.
     document=new_document(default_ark_policy(providers),None)
+    if body.creation_mode not in ('direct','adaptation'):raise ValueError('创作起点无效')
+    document['creationMode']=body.creation_mode
     if body.style is not None:
         style=body.style.strip()
         if not style:raise ValueError('视觉风格不能为空')
@@ -1786,29 +1798,33 @@ def production_scripts(production_id:str):
             )''',(production_id,)).fetchall()
     existing={row['episode_no']:row for row in rows}
     result=[]
-    for plan in plans:
-        row=existing.get(plan['episodeNo'])
-        result.append({'episodeNo':plan['episodeNo'],'plan':plan,'projectId':row['project_id'] if row else None,
-            'episodeTitle':row['episode_title'] if row else f'第 {plan["episodeNo"]:02d} 集',
+    plan_map={plan['episodeNo']:plan for plan in plans}
+    for number in sorted(set(existing)|set(plan_map)):
+        plan=plan_map.get(number)
+        row=existing.get(number)
+        result.append({'episodeNo':number,'plan':plan,'projectId':row['project_id'] if row else None,
+            'episodeTitle':row['episode_title'] if row else f'第 {number:02d} 集',
             'script':script_to_api(row) if row and row['revision'] is not None else None})
     return result
 
-def episode_plan_context(connection,production_id,episode_no):
+def episode_plan_context(connection,production_id,episode_no,required=True):
     row=connection.execute('SELECT * FROM productions WHERE id=?',(production_id,)).fetchone()
     if not row:raise HTTPException(404,'Production 不存在')
     context=normalize_production_context(json.loads(row['shared_context']))
     plan=next((item for item in context['episodePlans'] if item['episodeNo']==episode_no),None)
-    if not plan:raise HTTPException(404,'分集规划中没有这一集')
+    if not plan and required:raise HTTPException(404,'分集规划中没有这一集')
     return row,context,plan
 
 @app.get('/api/productions/{production_id}/episode-scripts/{episode_no}')
 def read_episode_script(production_id:str,episode_no:int):
     from .adaptation import script_default_from_plan,script_row
     with s.db() as c:
-        _,_,plan=episode_plan_context(c,production_id,episode_no)
+        _,_,plan=episode_plan_context(c,production_id,episode_no,required=False)
         project_row=c.execute('''SELECT p.* FROM projects p WHERE p.production_id=? AND p.episode_no=?
             AND NOT EXISTS(SELECT 1 FROM deleted_items d WHERE d.kind='project' AND d.item_id=p.id)''',(production_id,episode_no)).fetchone()
-        if not project_row:return script_default_from_plan(None,plan)
+        if not project_row:
+            if not plan:raise HTTPException(404,'这一集尚未建立')
+            return script_default_from_plan(None,plan)
         return script_row(c,project_row['id']) or script_default_from_plan(project_row['id'],plan)
 
 @app.put('/api/productions/{production_id}/episode-scripts/{episode_no}')
@@ -1816,7 +1832,7 @@ def save_episode_script(production_id:str,episode_no:int,body:ScriptSave):
     from .adaptation import ensure_episode_for_plan,save_script_row,script_row,validate_source_references
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
-        _,_,plan=episode_plan_context(c,production_id,episode_no)
+        episode_plan_context(c,production_id,episode_no,required=False)
         existed=c.execute('SELECT id FROM projects WHERE production_id=? AND episode_no=?',(production_id,episode_no)).fetchone()
         project_row=ensure_episode_for_plan(c,production_id,episode_no)
         row=c.execute('SELECT * FROM episode_scripts WHERE project_id=?',(project_row['id'],)).fetchone()
@@ -1872,6 +1888,33 @@ def approve_episode_script(production_id:str,episode_no:int,body:RevisionAction)
 @app.post('/api/productions/{production_id}/episode-scripts/{episode_no}/needs-changes')
 def revise_episode_script(production_id:str,episode_no:int,body:RevisionAction):
     return transition_script(production_id,episode_no,body.revision,'draft')
+
+class DirectScriptGeneration(BaseModel):
+    provider:str
+    model:str=''
+    submission_id:str=Field(min_length=8,max_length=100)
+    instruction:str=Field(min_length=1,max_length=24000)
+    revision:int=Field(ge=1)
+
+@app.post('/api/productions/{production_id}/episode-scripts/{episode_no}/assist')
+def assist_episode_script(production_id:str,episode_no:int,body:DirectScriptGeneration):
+    from .adaptation import direct_script_context,script_row,protected_episode_nos
+    if not body.instruction.strip():raise ValueError('请填写创作想法或修改要求')
+    with s.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        project_row=c.execute("SELECT * FROM projects WHERE production_id=? AND episode_no=? AND NOT EXISTS(SELECT 1 FROM deleted_items WHERE kind='project' AND item_id=projects.id)",(production_id,episode_no)).fetchone()
+        if not project_row:raise HTTPException(404,'请先建立本集')
+        script=script_row(c,project_row['id'])
+        if not script or script['revision']!=body.revision:raise HTTPException(409,'本集剧本已更新，请刷新后重试')
+        if episode_no in protected_episode_nos(c,production_id):raise ValueError('本集已有成片视频，请手工修订剧本；不会自动覆盖')
+        context=direct_script_context(c,project_row)
+        prompt='请根据创作要求生成或修订本集剧本，只输出本集。\n创作要求：'+body.instruction.strip()+'\n项目规格、Bible 与前集承接：'+s.dumps(context)+'\n本集现有剧本：'+s.dumps(script)
+        result=create_job_record(c,project_row['id'],JobCreate(node_id='episode-script:'+project_row['id'],kind='text',submission_id=body.submission_id,input={
+            'provider':body.provider,'model':body.model,'stage':'script_generation','prompt':prompt,'max_tokens':12000,
+            'episode_script_generation':{'productionId':production_id,'episodeNo':episode_no,'scriptRevision':script['revision'],'mode':'direct','context':context},
+        }))
+    s.event(project_row['id'],{'type':'job','id':result['id']})
+    return {'jobs':[result],'count':1}
 
 @app.post('/api/productions/{production_id}/script-generations')
 def generate_episode_scripts(production_id:str,body:ScriptGenerationCreate):

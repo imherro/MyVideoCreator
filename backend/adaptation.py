@@ -327,6 +327,8 @@ def _stale_scripts(connection, production_id, episode_nos=None):
     rows = connection.execute('''SELECT sc.* FROM episode_scripts sc JOIN projects p ON p.id=sc.project_id
         WHERE p.production_id=? AND sc.status IN ('draft','review','approved') AND length(trim(sc.body))>0''' + episode_filter, params).fetchall()
     for row in rows:
+        if json.loads(row['metadata']).get('adaptationLinked') is False and not json.loads(row['source_chapter_refs']):
+            continue
         connection.execute(
             'INSERT INTO episode_script_revisions VALUES(?,?,?,?,?)',
             (s.uid('script-revision-'), row['project_id'], row['revision'], s.dumps(_script_snapshot(row)), now),
@@ -345,6 +347,20 @@ def mark_adaptation_stale(connection, production_id, *, chapter_ids=(), event_id
         return None
     context = normalize_production_context(json.loads(production['shared_context']))
     adaptation = context['adaptationPlan']
+    # A manually written script may cite source chapters without an adaptation
+    # plan. Track those real dependencies before the plan-only early exits.
+    changed_source_chapters = set(chapter_ids)
+    if event_ids:
+        placeholders = ','.join('?' for _ in event_ids)
+        changed_source_chapters.update(row['chapter_id'] for row in connection.execute(
+            f'SELECT chapter_id FROM source_events WHERE production_id=? AND id IN ({placeholders})',
+            [production_id, *event_ids],
+        ))
+    if changed_source_chapters:
+        completed = set(protected_episode_nos(connection, production_id))
+        referenced = connection.execute('SELECT sc.source_chapter_refs,p.episode_no FROM episode_scripts sc JOIN projects p ON p.id=sc.project_id WHERE p.production_id=?',(production_id,)).fetchall()
+        _stale_scripts(connection, production_id, [row['episode_no'] for row in referenced
+            if row['episode_no'] not in completed and set(json.loads(row['source_chapter_refs'])).intersection(changed_source_chapters)])
     relevant_chapters = {ref for plan in context['episodePlans'] for ref in plan.get('sourceChapterRefs', [])}
     relevant_events = set(adaptation.get('sourceEventIds') or [])
     if (chapter_ids or event_ids) and not (
@@ -451,6 +467,8 @@ def seed_episode_scripts(connection):
             'projectionNodeId': chosen['id'] if chosen else 'script-projection-' + project['id'],
             'legacyCandidateNodeIds': [node['id'] for node in candidates],
         }
+        if document.get('creationMode') == 'direct':
+            metadata.update({'origin':'manual','adaptationLinked':False})
         now = project['updated'] or time.time()
         connection.execute('''INSERT INTO episode_scripts(project_id,revision,status,title,synopsis,
             source_chapter_refs,story_goal,paywall_beat,body,estimated_duration,characters,scenes,props,
@@ -1022,16 +1040,39 @@ def apply_episode_script_generation(job, generated):
             raise ValueError('本集剧本已在生成期间更新，旧结果未写入')
         production = connection.execute('SELECT * FROM productions WHERE id=?',(production_id,)).fetchone()
         context = normalize_production_context(json.loads(production['shared_context']))
-        if adaptation_fingerprint(context) != marker.get('adaptationFingerprint'):
-            raise ValueError('分集规划已在生成期间更新，旧剧本结果未写入')
-        plan = next((item for item in context['episodePlans'] if item['episodeNo']==episode_no),None)
-        validate_script_generation_ready(connection, production_id, context, plan)
-        merged = {
-            **result,
-            'sourceChapterRefs': list(plan['sourceChapterRefs']),
-            'storyGoal': plan['coreConflict'],
-            'paywallBeat': {'role': plan['paywallRole'], 'hook': plan['hook'], 'cliffhanger': plan['cliffhanger']},
-        }
-        saved = save_script_row(connection,row,merged,status='review',generation_job_id=job['id'])
+        if marker.get('mode') == 'direct':
+            if direct_script_context(connection, project) != marker.get('context'):
+                raise ValueError('项目规格或前集承接已在生成期间更新，旧剧本结果未写入')
+            merged={**result,'sourceChapterRefs':json.loads(row['source_chapter_refs']),'storyGoal':row['story_goal'],'paywallBeat':json.loads(row['paywall_beat'])}
+        else:
+            if adaptation_fingerprint(context) != marker.get('adaptationFingerprint'):
+                raise ValueError('分集规划已在生成期间更新，旧剧本结果未写入')
+            plan = next((item for item in context['episodePlans'] if item['episodeNo']==episode_no),None)
+            validate_script_generation_ready(connection, production_id, context, plan)
+            merged = {**result,'sourceChapterRefs':list(plan['sourceChapterRefs']),'storyGoal':plan['coreConflict'],
+                      'paywallBeat':{'role':plan['paywallRole'],'hook':plan['hook'],'cliffhanger':plan['cliffhanger']}}
+        saved = save_script_row(connection,row,merged,status='draft' if marker.get('mode')=='direct' else 'review',generation_job_id=job['id'])
+        metadata=json.loads(row['metadata'])
+        metadata.update({'origin':'direct_ai' if marker.get('mode')=='direct' else 'adaptation','adaptationLinked':marker.get('mode')!='direct'})
+        connection.execute('UPDATE episode_scripts SET metadata=? WHERE project_id=?',(s.dumps(metadata),job['project_id']))
+        saved=script_row(connection,job['project_id'])
     s.event(job['project_id'], {'type': 'script', 'revision': saved['revision']})
     return {'script': saved}
+
+
+def direct_script_context(connection, project):
+    """Only actual narrative dependencies, not unrelated plan revisions."""
+    from .production_context import read_project_state
+    state=read_project_state(connection,project['id'])
+    document=state['document']
+    bible=document.get('filmBible') or {}
+    current_script=script_row(connection,project['id']) or {}
+    previous=connection.execute("""SELECT p.episode_no,sc.title,sc.synopsis,sc.body FROM episode_scripts sc JOIN projects p ON p.id=sc.project_id
+        WHERE p.production_id=? AND p.episode_no<? AND sc.status!='stale' AND length(trim(sc.body))>0
+        AND NOT EXISTS(SELECT 1 FROM deleted_items WHERE kind='project' AND item_id=p.id)
+        ORDER BY p.episode_no DESC LIMIT 3""",(project['production_id'],project['episode_no'])).fetchall()
+    return {'episodeNo':project['episode_no'],'duration':current_script.get('estimatedDuration') or document.get('duration',15),'ratio':document.get('ratio','16:9'),
+            'style':document.get('style'),'brief':document.get('brief',''),
+            'bible':{key:bible.get(key,{}) for key in ('story','style','continuity')},
+            'charactersAndScenes':[{'name':card.get('name'),'kind':card.get('kind'),'description':card.get('description')} for card in (bible.get('visual',{}).get('cards') or {}).values() if not card.get('deletedAt') and card.get('status')!='deprecated'],
+            'previousEpisodes':[{'episodeNo':r['episode_no'],'title':r['title'],'synopsis':r['synopsis'],'body':r['body'][-8000:]} for r in reversed(previous)]}

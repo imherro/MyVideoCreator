@@ -4,6 +4,17 @@ import {deriveWorkflowGuide} from '../src/app/workflowGuide.ts';
 
 const base={adaptation:{sourceEventCount:0,adaptationPlan:{status:'draft'}},scripts:[],currentProject:{id:'ep1',episode_no:1},document:{shots:[],nodes:[],timeline:[],filmBible:{visual:{cards:{},versions:{}}}},jobs:[]};
 
+test('direct creation starts at an editable script without source or a plan',()=>{
+ const input={...base,document:{...base.document,creationMode:'direct'}};
+ const guide=deriveWorkflowGuide(input);
+ assert.equal(guide.recommendedStage,'script');
+ assert.equal(guide.stages.source.state,'skipped');
+ assert.equal(guide.stages.adaptation.state,'skipped');
+ assert.equal(guide.stages.script.state,'ready');
+ const saved=deriveWorkflowGuide({...input,scripts:[{projectId:'ep1',episodeNo:1,script:{status:'draft',body:'已粘贴的本集剧本'}}]});
+ assert.equal(saved.recommendedStage,'storyboard');
+});
+
 const savedStory = {status:'draft', storyCore:{premise:'故事'}, storyArc:{opening:'开场'}, adaptationStrategy:{tone:'悬疑'}};
 const savedPlan = (episodeNo,status='draft') => ({episodeNo,status,sourceChapterRefs:['c1'],logline:'本集',coreConflict:'冲突',hook:'开场',cliffhanger:'悬念'});
 

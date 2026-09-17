@@ -68,6 +68,7 @@ export function deriveWorkflowGuide(input: {
   const adaptationReview = adaptationReviewSummary(adaptation);
   const currentScript = scripts.find((item) => item.projectId === project.id || item.episodeNo === project.episode_no)?.script;
   const quickCanvasScript = currentScript?.metadata?.origin === "canvas" && Boolean(String(currentScript?.body || "").trim());
+  const directCreation = document.creationMode === "direct" || quickCanvasScript || currentScript?.metadata?.adaptationLinked === false;
   const currentScriptReady = scriptReady(currentScript);
   const readyScripts = scripts.filter((item) => scriptReady(item.script)).length;
   const canGenerateScripts = sharedPlanningReady(adaptation.adaptationPlan) && (adaptation.episodePlans || []).some(episodePlanningReady);
@@ -87,13 +88,13 @@ export function deriveWorkflowGuide(input: {
   const timelineReady = Boolean(document.editor?.timeline?.tracks?.some((track: Value) => track.elements?.length) || document.timeline?.length);
 
   const stages: WorkflowGuide["stages"] = {
-    source: quickCanvasScript && !sourceEventCount
-      ? { stage: "source", state: "skipped", headline: "画布快速创作未使用原著", reasons: ["需要时仍可导入原著，现有正式剧本不会丢失。"] }
+    source: directCreation
+      ? { stage: "source", state: "skipped", headline: "直接创作：原著为可选资料", reasons: ["需要时仍可导入原著，现有正式剧本不会丢失。"] }
       : sourceEventCount
       ? { stage: "source", state: "complete", headline: `已提取 ${sourceEventCount} 条原著事件`, reasons: [], action: { label: "进入改编策划", stage: "adaptation" } }
       : { stage: "source", state: "ready", headline: "导入原著并提取事件", reasons: ["改编策划需要可追溯的原著事件。"] },
-    adaptation: quickCanvasScript && !sharedPlanningReady(adaptation.adaptationPlan)
-      ? { stage: "adaptation", state: "skipped", headline: "画布快速创作已跳过改编策划", reasons: ["可以直接完善本集正式剧本，也可以稍后补充改编策划。"] }
+    adaptation: directCreation
+      ? { stage: "adaptation", state: "skipped", headline: "直接创作：改编策划为可选步骤", reasons: ["可以直接完善本集正式剧本，也可以稍后补充改编策划。"] }
       : activeJob(jobs, (job) => ["adaptation_generation", "adaptation_episode_generation"].includes(job.input?.stage))
       ? { stage: "adaptation", state: "running", headline: "改编规划正在生成", reasons: ["完成后自动刷新，可继续生成剧本。"] }
       : adaptationReview.status === "ready"
@@ -111,9 +112,9 @@ export function deriveWorkflowGuide(input: {
           ? { stage: "script", state: "complete", headline: "本集剧本已保存，可进入分镜规划", reasons: [], action: { label: "进入分镜规划", stage: "storyboard" } }
           : readyScripts === scripts.length && scripts.length
             ? { stage: "script", state: "complete", headline: `${readyScripts} 集剧本已保存`, reasons: [] }
-            : canGenerateScripts
-              ? { stage: "script", state: "ready", headline: "生成或修订本集剧本", reasons: [] }
-              : { stage: "script", state: "blocked", headline: "先完善本集改编策划", reasons: ["保存故事骨架和本集规划后即可生成剧本。"], action: { label: "前往改编策划", stage: "adaptation" } },
+            : directCreation || canGenerateScripts
+              ? { stage: "script", state: "ready", headline: "编写或粘贴本集剧本", reasons: ["也可以使用 AI 辅助创作；无需先完成改编策划。"] }
+              : { stage: "script", state: "ready", headline: "编写本集剧本，或完善改编策划后生成", reasons: ["手工编写和 AI 辅助创作始终可用。"], action: { label: "前往剧本", stage: "script" } },
     storyboard: storyboardRunning
       ? { stage: "storyboard", state: "running", headline: "分镜规划正在生成", reasons: ["可在任务中心查看提示词、阶段和返回结果。"] }
       : shots.length

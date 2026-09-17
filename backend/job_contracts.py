@@ -29,6 +29,9 @@ def freeze_prompt_contract(kind: str, value: dict, *, origin: str = 'submission'
     elif stage == 'script_generation':
         from .adaptation import SCRIPT_SCHEMA, SCRIPT_SYSTEM_PROMPT
         system_prompt, response_schema, schema_version = SCRIPT_SYSTEM_PROMPT, SCRIPT_SCHEMA, 'episode-script/v1'
+        if (result.get('episode_script_generation') or {}).get('mode') == 'direct':
+            system_prompt = '你是影视编剧。根据用户创作要求、目标时长、项目 Bible 与已有剧本，写可拍摄的本集剧本。无需原著或改编规划。使用场景标题、可见动作与明确角色对白，保持前集人物与情节连续，不编造缺失的前集事实，不输出分析过程。严格遵守目标时长，只生成本集。'
+            schema_version = 'direct-episode-script/v1'
     elif kind == 'storyboard' and result.get('film_bible'):
         from .film_bible.reuse import visual_user_prompt
         from .film_bible.models import (

@@ -15,6 +15,7 @@ export type ProjectBibleFields = {
 };
 
 export type ProjectSetupDraft = {
+  creationMode: "direct" | "adaptation";
   name: string;
   episodeTitle: string;
   style: string;
@@ -62,6 +63,7 @@ export function defaultGenerationPolicy(providers: Value[]): GenerationPolicy {
 
 export function defaultProjectSetupDraft(providers: Value[], _localModels: Value[] = []): ProjectSetupDraft {
   return {
+    creationMode: "direct",
     name: "",
     episodeTitle: "第 01 集",
     style: "电影写实",
@@ -117,6 +119,7 @@ function compactObject(value: Value): Value {
 export function projectSetupPayload(draft: ProjectSetupDraft) {
   const avoidItems = draft.bible.avoidItems.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
   return {
+    creation_mode: draft.creationMode,
     name: draft.name.trim(),
     episode_title: draft.episodeTitle.trim() || "第 01 集",
     style: draft.style.trim(),

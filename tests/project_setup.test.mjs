@@ -17,6 +17,8 @@ test('project setup validates required fields and creates the reviewed API paylo
   draft.name=' 花信未迟 ';draft.ratio='9:16';draft.duration=60;draft.episodeCount=12;draft.platform='抖音';draft.bible.worldEra='江南';draft.bible.avoidItems='高饱和\n\n磨皮';
   draft.videoResolution='1080p';draft.videoRatio='21:9';draft.videoDuration=8;draft.videoFormat='mov';
   const payload=projectSetupPayload(draft);
+  assert.equal(draft.creationMode,'direct');
+  assert.equal(payload.creation_mode,'direct');
   assert.equal(payload.name,'花信未迟');
   assert.equal(payload.episode_title,'第 01 集');
   assert.equal(payload.episode_count,12);

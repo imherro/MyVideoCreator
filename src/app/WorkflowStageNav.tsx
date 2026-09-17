@@ -7,11 +7,13 @@ export function WorkflowStageNav({
   onChange,
   states = {},
   episodeControl,
+  directCreation = false,
 }: {
   active: WorkflowStage;
   onChange: (stage: WorkflowStage) => void;
   states?: Partial<Record<WorkflowStage, string>>;
   episodeControl?: ReactNode;
+  directCreation?: boolean;
 }) {
   const activeButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -21,7 +23,8 @@ export function WorkflowStageNav({
 
   return (
     <nav className="workflow-stage-nav" aria-label="制作流程">
-      {WORKFLOW_STAGES.map((stage) => <Fragment key={stage.id}>
+      {directCreation && <details className="workflow-optional-source"><summary>原著改编</summary><div><button className={active === "source" ? "active" : ""} onClick={event=>{onChange("source");event.currentTarget.closest("details")?.removeAttribute("open");}}>原著资料</button><button className={active === "adaptation" ? "active" : ""} onClick={event=>{onChange("adaptation");event.currentTarget.closest("details")?.removeAttribute("open");}}>改编策划</button></div></details>}
+      {WORKFLOW_STAGES.filter(stage=>!directCreation || !["source","adaptation"].includes(stage.id)).map((stage) => <Fragment key={stage.id}>
         {stage.id === "storyboard" && episodeControl && <div className="workflow-episode-boundary">{episodeControl}</div>}
         <button
           ref={active === stage.id ? activeButtonRef : undefined}

@@ -350,3 +350,11 @@
 .image-generation-advanced { margin-top: 6px; font-size: 12px; }
 .image-generation-advanced > label { max-width: 210px; margin-top: 8px; }
 .image-generation-settings small { display: block; margin-top: 4px; font-size: 11px; opacity: .85; }
+
+.episode-setup-dialog{width:min(460px,95vw);padding:24px;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+.workflow-optional-source{flex-shrink:0;margin:0;padding:6px;border:0;font-size:13px}
+.workflow-optional-source>summary{cursor:pointer;white-space:nowrap}
+.workflow-optional-source>div{position:fixed;top:60px;z-index:100;background:var(--panel);border:1px solid var(--line);padding:8px;display:flex;gap:5px;border-radius:8px}
+.script-room-page details.domain-card>summary{cursor:pointer;color:var(--muted)}
+.script-room-page details.domain-card>.domain-card{border:0;padding:8px 0}
+.script-room-page .script-episode-list>header{display:flex;align-items:center;justify-content:space-between}
