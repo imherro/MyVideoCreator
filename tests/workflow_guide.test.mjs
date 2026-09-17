@@ -4,18 +4,19 @@ import {deriveWorkflowGuide} from '../src/app/workflowGuide.ts';
 
 const base={adaptation:{sourceEventCount:0,adaptationPlan:{status:'draft'}},scripts:[],currentProject:{id:'ep1',episode_no:1},document:{shots:[],nodes:[],timeline:[],filmBible:{visual:{cards:{},versions:{}}}},jobs:[]};
 
-test('regenerated EP02 asks for review while completed EP01 and shared story stay approved',()=>{
-  const adaptation={sourceEventCount:6,adaptationPlan:{status:'approved'},protectedEpisodeNos:[1],episodePlans:[{episodeNo:1,status:'approved'},{episodeNo:2,status:'review'}]};
+const savedStory = {status:'draft', storyCore:{premise:'故事'}, storyArc:{opening:'开场'}, adaptationStrategy:{tone:'悬疑'}};
+const savedPlan = (episodeNo,status='draft') => ({episodeNo,status,sourceChapterRefs:['c1'],logline:'本集',coreConflict:'冲突',hook:'开场',cliffhanger:'悬念'});
+
+test('regenerated EP02 can continue directly while completed EP01 is protected',()=>{
+  const adaptation={sourceEventCount:6,adaptationPlan:savedStory,protectedEpisodeNos:[1],episodePlans:[savedPlan(1,'approved'),savedPlan(2,'review')]};
   const guide=deriveWorkflowGuide({...base,adaptation});
-  assert.equal(guide.stages.adaptation.state,'review');
-  assert.match(guide.stages.adaptation.headline,/EP02.*待审核/);
-  assert.match(guide.stages.adaptation.reasons[0],/无需重复生成/);
-  adaptation.episodePlans[1].status='approved';
-  assert.equal(deriveWorkflowGuide({...base,adaptation}).stages.adaptation.state,'complete');
+  assert.equal(guide.stages.adaptation.state,'complete');
+  assert.equal(guide.stages.adaptation.action.stage,'script');
+  assert.doesNotMatch(JSON.stringify(guide),/批准|审核/);
 });
 
 test('episode-only invalidation names the affected episode and respects running regeneration',()=>{
-  const adaptation={sourceEventCount:6,adaptationPlan:{status:'approved'},protectedEpisodeNos:[1],episodePlans:[{episodeNo:1,status:'approved'},{episodeNo:2,status:'stale'}]};
+  const adaptation={sourceEventCount:6,adaptationPlan:savedStory,protectedEpisodeNos:[1],episodePlans:[savedPlan(1,'approved'),savedPlan(2,'stale')]};
   let guide=deriveWorkflowGuide({...base,adaptation});
   assert.equal(guide.stages.adaptation.state,'stale');
   assert.match(guide.stages.adaptation.headline,/EP02/);
@@ -65,6 +66,30 @@ test('canvas-first script skips optional planning and becomes the recommended fo
   const guide=deriveWorkflowGuide({...base,scripts:[{episodeNo:1,projectId:'ep1',script}]});
   assert.equal(guide.stages.source.state,'skipped');
   assert.equal(guide.stages.adaptation.state,'skipped');
+  assert.equal(guide.stages.script.state,'complete');
+  assert.equal(guide.stages.storyboard.state,'ready');
+  assert.equal(guide.recommendedStage,'storyboard');
+});
+
+for (const status of ['draft','review','approved']) {
+  test(`legacy ${status} script with saved body can enter storyboard`,()=>{
+    const script={status,body:'角色推开门。'};
+    const guide=deriveWorkflowGuide({...base,scripts:[{episodeNo:1,projectId:'ep1',script}]});
+    assert.equal(guide.stages.script.state,'complete');
+    assert.equal(guide.stages.storyboard.state,'ready');
+  });
+}
+
+test('empty or stale script cannot start storyboarding merely because of a legacy status',()=>{
+  for (const script of [{status:'approved',body:' '},{status:'stale',body:'旧正文'}]) {
+    const guide=deriveWorkflowGuide({...base,scripts:[{episodeNo:1,projectId:'ep1',script}]});
+    assert.equal(guide.stages.storyboard.state,'blocked');
+  }
+});
+
+test('incomplete sibling planning does not block generating ready episodes',()=>{
+  const adaptation={sourceEventCount:2,adaptationPlan:savedStory,episodePlans:[savedPlan(1),{...savedPlan(2),hook:''}]};
+  const guide=deriveWorkflowGuide({...base,adaptation});
   assert.equal(guide.stages.script.state,'ready');
-  assert.equal(guide.recommendedStage,'script');
+  assert.match(guide.stages.adaptation.headline,/EP02.*待完善/);
 });

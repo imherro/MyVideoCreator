@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Lock, Plus, RefreshCw, Save, Sparkles } from "lucide-react";
+import { ArrowRight, Lock, Plus, RefreshCw, Save, Sparkles } from "lucide-react";
 import {
   DURATION_OPTIONS,
   PAYWALL_LABELS,
@@ -9,6 +9,7 @@ import {
   STATUS_LABELS,
   appendEpisodeForChapter,
   adaptationReviewSummary,
+  episodePlanningReady,
   resolvePlanningEpisode,
   createEpisodePlans,
   type EpisodePlan,
@@ -22,7 +23,7 @@ const storyGroups = [
 ] as const;
 
 export function AdaptationPage({
-  productionId, projectId, focusedEpisodeNo, onSelectEpisode, providers, defaultTarget, refreshKey = 0, request, notify, report, onRevision, onOpenSource,
+  productionId, projectId, focusedEpisodeNo, onSelectEpisode, providers, defaultTarget, refreshKey = 0, request, notify, report, onRevision, onOpenSource, onOpenScript,
 }: {
   productionId: string; projectId: string; providers: Value[]; defaultTarget?: Value; refreshKey?: number;
   request: (path: string, options?: RequestInit) => Promise<any>;
@@ -31,6 +32,7 @@ export function AdaptationPage({
   onSelectEpisode: (episodeNo: number) => void;
   onRevision: (revision: number) => void;
   onOpenSource: () => void;
+  onOpenScript: () => void;
 }) {
   const [draft, setDraft] = useState<Value | null>(null);
   const [chapters, setChapters] = useState<Value[]>([]);
@@ -92,7 +94,7 @@ export function AdaptationPage({
       episodePlans: plans,
     });
     onSelectEpisode(episodeNo);
-    notify(chapterId ? `已用该章节建立 EP${String(episodeNo).padStart(2, "0")}，保存草稿后生效` : `已新增 EP${String(episodeNo).padStart(2, "0")}，请设置原著章节引用`);
+    notify(chapterId ? `已用该章节建立 EP${String(episodeNo).padStart(2, "0")}，保存后生效` : `已新增 EP${String(episodeNo).padStart(2, "0")}，请设置原著章节引用`);
   }
   async function save(showNotice = true) {
     if (!draft) return null;
@@ -101,30 +103,15 @@ export function AdaptationPage({
       body: JSON.stringify({ revision: draft.revision, adaptationPlan: draft.adaptationPlan, episodePlans: draft.episodePlans, monetizationPlan: draft.monetizationPlan }),
     });
     const next = { ...value, sourceEventCount: draft.sourceEventCount, protectedEpisodeNos: value.protectedEpisodeNos || draft.protectedEpisodeNos || [] };
-    setDraft(next); onRevision(value.revision); if (showNotice) notify("改编策划已保存为草稿");
+    setDraft(next); onRevision(value.revision); if (showNotice) notify("改编策划已保存");
     return next;
-  }
-  async function transition(action: "review" | "approve") {
-    if (!draft) return;
-    const value = await request(`/productions/${productionId}/adaptation/${action}`, { method: "POST", body: JSON.stringify({ revision: draft.revision }) });
-    setDraft({ ...value, sourceEventCount: draft.sourceEventCount, protectedEpisodeNos: value.protectedEpisodeNos || draft.protectedEpisodeNos || [] }); onRevision(value.revision);
-    notify(action === "review" ? "改编策划已提交审核" : "改编策划已批准，可以生成逐集剧本");
-  }
-  async function transitionEpisode(action: "review" | "approve") {
-    if (!draft) return;
-    const saved = await save(false);
-    if (!saved) return;
-    const value = await request(`/productions/${productionId}/adaptation/episodes/${active}/${action}`, { method: "POST", body: JSON.stringify({ revision: saved.revision }) });
-    setDraft({ ...value, sourceEventCount: draft.sourceEventCount, protectedEpisodeNos: value.protectedEpisodeNos || draft.protectedEpisodeNos || [] });
-    onRevision(value.revision);
-    notify(action === "review" ? `EP${String(active).padStart(2, "0")} 规划已提交审核` : `EP${String(active).padStart(2, "0")} 规划已批准，可继续生成本集剧本`);
   }
   async function generate() {
     if (!draft) return;
     const provider = textProviders.find((item) => item.id === providerId);
     const modelId = model || provider?.models?.text || provider?.model || "";
     if (providerId !== "local" && !modelId) throw new Error("请填写文本模型 ID");
-    if (!window.confirm(`将依据 ${draft.sourceEventCount} 条原著事件重新生成完整改编策划。\n服务：${provider?.name || providerId}\n模型：${modelId || "本地默认"}\n生成结果会进入待审核状态。确认创建文本任务？`)) return;
+    if (!window.confirm(`将依据 ${draft.sourceEventCount} 条原著事件重新生成完整改编策划。\n服务：${provider?.name || providerId}\n模型：${modelId || "本地默认"}\n生成完成后可直接进入剧本。确认创建文本任务？`)) return;
     const episodePlans = createEpisodePlans(draft.adaptationPlan.format.episodeCount, draft.adaptationPlan.format.targetDuration, draft.episodePlans);
     const saved = await request(`/productions/${productionId}/adaptation`, {
       method: "PUT",
@@ -163,24 +150,17 @@ export function AdaptationPage({
   draft.episodePlans.forEach((item: EpisodePlan) => item.sourceChapterRefs.forEach((chapterId) => chapterAssignments.set(chapterId, [...(chapterAssignments.get(chapterId) || []), item.episodeNo])));
   return <section className="adaptation-page workflow-domain-page">
     <header className="domain-header">
-      <div><span className="eyebrow">ADAPTATION</span><h1>改编工作台</h1><p>原著事件 → 故事骨架 → 改编策略 → 分集规划。所有 AI 结果都需要人工批准。</p></div>
+      <div><span className="eyebrow">ADAPTATION</span><h1>改编工作台</h1><p>原著事件 → 故事骨架 → 改编策略 → 分集规划。保存后即可进入剧本，生成前自动检查内容。</p></div>
       <div className="settings-actions">
         <span className={`workflow-status ${reviewSummary.status}`} title={reviewSummary.reason}>{reviewSummary.headline}</span>
         <button disabled={busy} onClick={() => run(load)}><RefreshCw size={15} />刷新</button>
-        <button disabled={busy} onClick={() => run(() => save().then(() => undefined))}><Save size={15} />保存草稿</button>
-        {plan && <button
-          className="primary"
-          disabled={busy || activeProtected || plan.status === "approved"}
-          title={`EP${String(active).padStart(2, "0")} · ${activeProtected ? "已有成片，规划锁定" : "仅处理当前集，先保存修改"}`}
-          onClick={() => run(() => transitionEpisode(plan.status === "review" ? "approve" : "review"))}
-        ><Check size={15} />{plan.status === "approved" ? "当前集已批准" : activeProtected ? "当前集已锁定" : plan.status === "review" ? "批准当前集" : "提交当前集审核"}</button>}
-        <button disabled={busy || hasProtectedEpisodes} title={hasProtectedEpisodes ? "已有成片分集，请使用当前集审核" : ""} onClick={() => run(() => transition("review"))}>提交全剧审核</button>
-        <button className="primary" disabled={busy || hasProtectedEpisodes || draft.adaptationPlan.status !== "review"} onClick={() => run(() => transition("approve"))}><Check size={15} />批准全剧</button>
+        <button disabled={busy} onClick={() => run(() => save().then(() => undefined))}><Save size={15} />保存</button>
+        <button className="primary" disabled={busy || !plan} onClick={() => run(async () => { await save(false); onOpenScript(); })}><ArrowRight size={15} />进入剧本</button>
       </div>
     </header>
     <div className="adaptation-layout"><aside className="episode-plan-list">
       <div className="episode-plan-list-heading"><h3>分集导航</h3><button className="icon-button" title="新增分集" aria-label="新增分集" disabled={busy || draft.episodePlans.length >= 500} onClick={() => createEpisode()}><Plus size={14}/></button></div>
-      <div className="episode-plan-buttons">{draft.episodePlans.map((item: EpisodePlan) => <button key={item.episodeNo} className={active === item.episodeNo ? "active" : ""} onClick={() => onSelectEpisode(item.episodeNo)}><span>EP{String(item.episodeNo).padStart(2, "0")}</span>{protectedEpisodes.has(item.episodeNo) ? <small className="protected"><Lock size={9}/>成片锁定</small> : <small className={item.status}>{STATUS_LABELS[item.status] || item.status}</small>}</button>)}</div>
+      <div className="episode-plan-buttons">{draft.episodePlans.map((item: EpisodePlan) => <button key={item.episodeNo} className={active === item.episodeNo ? "active" : ""} onClick={() => onSelectEpisode(item.episodeNo)}><span>EP{String(item.episodeNo).padStart(2, "0")}</span>{protectedEpisodes.has(item.episodeNo) ? <small className="protected"><Lock size={9}/>成片锁定</small> : <small className={item.status}>{item.status === "stale" ? "需要更新" : episodePlanningReady(item) ? "可生成剧本" : "待完善"}</small>}</button>)}</div>
       <div className="adaptation-chapter-index"><h4>原著章节 <span>{chapters.length}</span></h4>{chapters.map((chapter) => {
         const assigned = chapterAssignments.get(chapter.id) || [];
         return <div className={assigned.length ? "assigned" : "unassigned"} key={chapter.id}>
@@ -209,7 +189,7 @@ export function AdaptationPage({
       </article>
       <MonetizationEditor draft={draft} setDraft={setDraft} locked={hasProtectedEpisodes} />
     </main></div>
-    <footer className="domain-generation-bar"><div><b>{hasProtectedEpisodes ? `EP${String(active).padStart(2, "0")} · ${activeProtected ? "成片锁定" : STATUS_LABELS[plan?.status || "draft"]}` : "AI 基于原著生成整个改编工作台"}</b><small>{hasProtectedEpisodes ? (plan?.status === "review" && !activeProtected ? "规划已生成，请检查内容后点击右上角“批准当前集”；无需重复生成。" : `沿用已批准故事骨架及前集连续性资料；已完成分集不变。`) : draft.sourceEventCount ? `${draft.sourceEventCount} 条原著事件 · 将生成故事骨架、策略、分集规划和商业卡点` : "尚未提取原著事件，请先完成原著分析"}</small></div><label>服务<select value={providerId} onChange={(e) => { setProviderId(e.target.value); const p = textProviders.find((x) => x.id === e.target.value); setModel(p?.enabled_models?.text?.[0] || p?.models?.text || p?.model || ""); }}>{textProviders.map((item) => <option key={item.id} value={item.id}>{item.local ? "本地" : "云端"} · {item.name}</option>)}</select></label><label>模型{providerId === "local" ? <input value={model} placeholder="本地默认" onChange={(e) => setModel(e.target.value)} /> : <select value={model} onChange={(e) => setModel(e.target.value)}>{!allowedTextModels.includes(model) && model && <option value={model} disabled>{model}（已停用）</option>}{allowedTextModels.map((modelId) => <option value={modelId} key={modelId}>{modelId}</option>)}</select>}</label>{draft.sourceEventCount ? hasProtectedEpisodes ? <button className="primary" disabled={busy || activeProtected || !plan?.sourceChapterRefs.length} onClick={() => run(generateEpisode)}><Sparkles size={15} />{plan?.logline ? "重新生成当前集规划" : "生成当前集规划"}</button> : <button className="primary" disabled={busy} onClick={() => run(generate)}><Sparkles size={15} />生成整个工作台</button> : <button className="primary" disabled={busy} onClick={onOpenSource}>先提取原著事件</button>}</footer>
+    <footer className="domain-generation-bar"><div><b>{hasProtectedEpisodes ? `EP${String(active).padStart(2, "0")} · ${activeProtected ? "成片锁定" : STATUS_LABELS[plan?.status || "draft"]}` : "AI 基于原著生成整个改编工作台"}</b><small>{hasProtectedEpisodes ? (plan?.status === "review" && !activeProtected ? "规划已保存，可进入剧本；无需重复生成。" : `沿用已保存故事骨架及前集连续性资料；已完成分集不变。`) : draft.sourceEventCount ? `${draft.sourceEventCount} 条原著事件 · 将生成故事骨架、策略、分集规划和商业卡点` : "尚未提取原著事件，请先完成原著分析"}</small></div><label>服务<select value={providerId} onChange={(e) => { setProviderId(e.target.value); const p = textProviders.find((x) => x.id === e.target.value); setModel(p?.enabled_models?.text?.[0] || p?.models?.text || p?.model || ""); }}>{textProviders.map((item) => <option key={item.id} value={item.id}>{item.local ? "本地" : "云端"} · {item.name}</option>)}</select></label><label>模型{providerId === "local" ? <input value={model} placeholder="本地默认" onChange={(e) => setModel(e.target.value)} /> : <select value={model} onChange={(e) => setModel(e.target.value)}>{!allowedTextModels.includes(model) && model && <option value={model} disabled>{model}（已停用）</option>}{allowedTextModels.map((modelId) => <option value={modelId} key={modelId}>{modelId}</option>)}</select>}</label>{draft.sourceEventCount ? hasProtectedEpisodes ? <button className="primary" disabled={busy || activeProtected || !plan?.sourceChapterRefs.length} onClick={() => run(generateEpisode)}><Sparkles size={15} />{plan?.logline ? "重新生成当前集规划" : "生成当前集规划"}</button> : <button className="primary" disabled={busy} onClick={() => run(generate)}><Sparkles size={15} />生成整个工作台</button> : <button className="primary" disabled={busy} onClick={onOpenSource}>先提取原著事件</button>}</footer>
   </section>;
 }
 

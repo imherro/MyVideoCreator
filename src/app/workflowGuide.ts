@@ -1,5 +1,5 @@
 import type { WorkflowStage } from "./workflow";
-import { adaptationReviewSummary } from "../adaptation.ts";
+import { adaptationReviewSummary, sharedPlanningReady, episodePlanningReady, scriptReady } from "../adaptation.ts";
 
 export type WorkflowStageState =
   | "unstarted"
@@ -65,12 +65,12 @@ export function deriveWorkflowGuide(input: {
   const jobs = input.jobs || [];
   const shots: Value[] = document.shots || [];
   const sourceEventCount = Number(adaptation.sourceEventCount || 0);
-  const adaptationStatus = adaptation.adaptationPlan?.status;
   const adaptationReview = adaptationReviewSummary(adaptation);
   const currentScript = scripts.find((item) => item.projectId === project.id || item.episodeNo === project.episode_no)?.script;
   const quickCanvasScript = currentScript?.metadata?.origin === "canvas" && Boolean(String(currentScript?.body || "").trim());
-  const scriptApproved = currentScript?.status === "approved";
-  const approvedScripts = scripts.filter((item) => item.script?.status === "approved").length;
+  const currentScriptReady = scriptReady(currentScript);
+  const readyScripts = scripts.filter((item) => scriptReady(item.script)).length;
+  const canGenerateScripts = sharedPlanningReady(adaptation.adaptationPlan) && (adaptation.episodePlans || []).some(episodePlanningReady);
   const requiredVersionIds = bindingIds(shots);
   const visual = document.filmBible?.visual || { cards: {}, versions: {} };
   const hasVisualCards = Object.values(visual.cards || {}).some((card: any) => !card.deletedAt);
@@ -92,43 +92,37 @@ export function deriveWorkflowGuide(input: {
       : sourceEventCount
       ? { stage: "source", state: "complete", headline: `已提取 ${sourceEventCount} 条原著事件`, reasons: [], action: { label: "进入改编策划", stage: "adaptation" } }
       : { stage: "source", state: "ready", headline: "导入原著并提取事件", reasons: ["改编策划需要可追溯的原著事件。"] },
-    adaptation: quickCanvasScript && adaptationStatus !== "approved"
+    adaptation: quickCanvasScript && !sharedPlanningReady(adaptation.adaptationPlan)
       ? { stage: "adaptation", state: "skipped", headline: "画布快速创作已跳过改编策划", reasons: ["可以直接完善本集正式剧本，也可以稍后补充改编策划。"] }
       : activeJob(jobs, (job) => ["adaptation_generation", "adaptation_episode_generation"].includes(job.input?.stage))
-      ? { stage: "adaptation", state: "running", headline: "改编规划正在生成", reasons: ["完成后自动刷新，再审核生成的规划。"] }
-      : adaptationReview.status === "approved"
-      ? { stage: "adaptation", state: "complete", headline: "改编策划已批准", reasons: [], action: { label: "进入剧本", stage: "script" } }
-      : adaptationReview.status === "review"
-        ? { stage: "adaptation", state: "review", headline: adaptationReview.headline, reasons: [adaptationReview.reason] }
-        : adaptationReview.status === "stale"
+      ? { stage: "adaptation", state: "running", headline: "改编规划正在生成", reasons: ["完成后自动刷新，可继续生成剧本。"] }
+      : adaptationReview.status === "ready"
+      ? { stage: "adaptation", state: "complete", headline: "改编策划已保存，可进入剧本", reasons: [], action: { label: "进入剧本", stage: "script" } }
+      : adaptationReview.status === "stale"
           ? { stage: "adaptation", state: "stale", headline: adaptationReview.headline, reasons: [adaptationReview.reason] }
           : sourceEventCount
             ? { stage: "adaptation", state: "ready", headline: adaptationReview.headline, reasons: adaptationReview.reason ? [adaptationReview.reason] : [] }
             : { stage: "adaptation", state: "blocked", headline: "先完成原著事件提取", reasons: ["当前没有可供改编引用的原著事件。"], action: { label: "前往原著", stage: "source" } },
     script: activeJob(jobs, (job) => job.input?.stage === "script_generation")
       ? { stage: "script", state: "running", headline: "剧本正在生成", reasons: ["生成中的分集不可重复提交，完成后自动刷新。"] }
-      : quickCanvasScript && currentScript?.status === "approved"
-      ? { stage: "script", state: "complete", headline: "本集画布剧本已批准", reasons: [] }
-      : quickCanvasScript && currentScript?.status === "review"
-        ? { stage: "script", state: "review", headline: "本集画布剧本等待审核", reasons: ["批准后即可进入分镜规划。"] }
-        : quickCanvasScript
-          ? { stage: "script", state: "ready", headline: "画布剧本已进入剧本室", reasons: ["继续修订并提交审核，画布将同步同一份正式剧本。"] }
-          : approvedScripts === scripts.length && scripts.length
-      ? { stage: "script", state: "complete", headline: `${approvedScripts} 集剧本已批准`, reasons: [] }
-      : scripts.some((item) => item.script?.status === "review")
-        ? { stage: "script", state: "review", headline: "有剧本等待审核", reasons: ["逐集批准后即可进入该集制作。"] }
-        : adaptationStatus === "approved"
-          ? { stage: "script", state: "ready", headline: "生成、修订并批准逐集剧本", reasons: [] }
-          : { stage: "script", state: "blocked", headline: "先批准改编策划", reasons: ["未批准的策划不能生成正式剧本。"], action: { label: "前往改编策划", stage: "adaptation" } },
+      : currentScript?.status === "stale"
+        ? { stage: "script", state: "stale", headline: "本集剧本需要更新", reasons: ["原著或分集规划已改变，请修订或重新生成；已有结果仍保留。"] }
+        : currentScriptReady
+          ? { stage: "script", state: "complete", headline: "本集剧本已保存，可进入分镜规划", reasons: [], action: { label: "进入分镜规划", stage: "storyboard" } }
+          : readyScripts === scripts.length && scripts.length
+            ? { stage: "script", state: "complete", headline: `${readyScripts} 集剧本已保存`, reasons: [] }
+            : canGenerateScripts
+              ? { stage: "script", state: "ready", headline: "生成或修订本集剧本", reasons: [] }
+              : { stage: "script", state: "blocked", headline: "先完善本集改编策划", reasons: ["保存故事骨架和本集规划后即可生成剧本。"], action: { label: "前往改编策划", stage: "adaptation" } },
     storyboard: storyboardRunning
       ? { stage: "storyboard", state: "running", headline: "分镜规划正在生成", reasons: ["可在任务中心查看提示词、阶段和返回结果。"] }
       : shots.length
         ? hasVisualCards && !requiredVersionIds.length
           ? { stage: "storyboard", state: "review", headline: `本集已有 ${shots.length} 个镜头，请确认资产绑定`, reasons: ["当前 Film Bible 已有视觉资产，但分镜尚未绑定任何版本。"] }
           : { stage: "storyboard", state: "complete", headline: `本集已有 ${shots.length} 个镜头`, reasons: [], action: { label: "确认视觉资产", stage: "art" } }
-        : scriptApproved
-          ? { stage: "storyboard", state: "ready", headline: "从已批准剧本建立分镜规划", reasons: [] }
-          : { stage: "storyboard", state: "blocked", headline: "先批准本集剧本", reasons: ["分镜规划只能从本集已批准剧本开始。"], action: { label: "前往剧本", stage: "script" } },
+        : currentScriptReady
+          ? { stage: "storyboard", state: "ready", headline: "从已保存剧本建立分镜规划", reasons: [] }
+          : { stage: "storyboard", state: "blocked", headline: "先完成本集剧本", reasons: ["请先填写并保存本集剧本，过期内容需先修订。"], action: { label: "前往剧本", stage: "script" } },
     art: artRunning
       ? { stage: "art", state: "running", headline: "资产参考图正在生成", reasons: [] }
       : !shots.length

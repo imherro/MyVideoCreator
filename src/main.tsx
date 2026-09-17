@@ -1413,7 +1413,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     );
     setWorkflowDataRevision((value) => ({ ...value, script: value.script + 1 }));
     await openProject(snapshot.project.id);
-    setNotice("画布剧本已保存为本集正式剧本；可进入剧本页继续修订和审核");
+    setNotice("画布剧本已保存为本集正式剧本；可进入剧本页继续修订或开始分镜规划");
   }
   function startStoryboardPlanning() {
     if (!doc) return;
@@ -1424,10 +1424,10 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       return;
     }
     const scriptNode = doc.nodes.find((node) =>
-      node.data?.canonicalScriptProjection && node.data?.scriptStatus === "approved" && String(node.data?.text || "").trim(),
+      node.data?.canonicalScriptProjection && node.data?.scriptStatus !== "stale" && String(node.data?.text || "").trim(),
     );
     if (!scriptNode) {
-      report(new Error("请先在剧本页批准本集剧本，再开始分镜规划"));
+      report(new Error("请先在剧本页填写并保存本集剧本；如提示需要更新，请先修订"));
       activateWorkflowStage("script");
       return;
     }
@@ -2829,6 +2829,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             notify={setNotice}
             report={report}
             onOpenSource={() => activateWorkflowStage("source")}
+            onOpenScript={() => activateWorkflowStage("script")}
             onRevision={(nextRevision) => {
               productionRevision.current = nextRevision;
               setProject((currentProject) => currentProject ? { ...currentProject, production_revision: nextRevision } : currentProject);
@@ -3748,7 +3749,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                     <button className="secondary full" onClick={() => activateWorkflowStage("script")}>
                       <FileText size={15} />编辑正式剧本
                     </button>
-                    {data.scriptStatus === "approved" && (
+                    {data.scriptStatus !== "stale" && String(data.text || "").trim() && (
                       <button className="secondary full" disabled={busy} onClick={() => generateStoryboardFromScript(node)}>
                         <Layers size={15} />生成分镜规划
                       </button>

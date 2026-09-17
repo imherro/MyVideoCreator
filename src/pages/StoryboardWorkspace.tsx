@@ -131,7 +131,7 @@ export function StoryboardWorkspace(props: Props) {
     {error && <p className="error">{error}</p>}
   </>;
 
-  if (!shots.length) return <section className="storyboard-workspace">{header}<div className="empty-state"><Layers/><h3>还没有分镜</h3><p>{props.purpose === "planning" ? "从已批准的正式剧本生成分镜规划，也可以手工新建镜头。" : "请先到“分镜规划”建立本集镜头。"}</p>{props.purpose === "planning" && <button className="primary" disabled={props.busy || planningActive} onClick={props.onCreatePlan}>{planningActive ? "分镜规划进行中" : "开始分镜规划"}</button>}</div></section>;
+  if (!shots.length) return <section className="storyboard-workspace">{header}<div className="empty-state"><Layers/><h3>还没有分镜</h3><p>{props.purpose === "planning" ? "从已保存的正式剧本生成分镜规划，也可以手工新建镜头。" : "请先到“分镜规划”建立本集镜头。"}</p>{props.purpose === "planning" && <button className="primary" disabled={props.busy || planningActive} onClick={props.onCreatePlan}>{planningActive ? "分镜规划进行中" : "开始分镜规划"}</button>}</div></section>;
 
   if (props.mode === "grid") return <section className="storyboard-workspace">{header}
     <div className="storyboard-grid-toolbar"><label>布局<select value={columns} onChange={(event) => setColumns(Number(event.target.value))}><option value="3">三列宫格</option><option value="2">两列图板</option></select></label><button onClick={() => void props.onExport(columns, currentPage)}><Download size={15}/>下载当前页 PNG</button></div>

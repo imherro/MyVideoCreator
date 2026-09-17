@@ -2,7 +2,7 @@ import { AlertCircle, ArrowRight, CheckCircle2, Clock3, LoaderCircle } from "luc
 import type { WorkflowStageGuide } from "./workflowGuide";
 
 const labels: Record<string, string> = {
-  unstarted: "未开始", ready: "可开始", running: "进行中", review: "待审核",
+  unstarted: "未开始", ready: "可开始", running: "进行中", review: "待确认",
   complete: "已完成", skipped: "已跳过", stale: "需更新", blocked: "前置条件未完成",
 };
 

@@ -325,7 +325,7 @@ def _stale_scripts(connection, production_id, episode_nos=None):
         episode_filter = ' AND p.episode_no IN (' + ','.join('?' for _ in numbers) + ')'
         params.extend(numbers)
     rows = connection.execute('''SELECT sc.* FROM episode_scripts sc JOIN projects p ON p.id=sc.project_id
-        WHERE p.production_id=? AND sc.status IN ('review','approved')''' + episode_filter, params).fetchall()
+        WHERE p.production_id=? AND sc.status IN ('draft','review','approved') AND length(trim(sc.body))>0''' + episode_filter, params).fetchall()
     for row in rows:
         connection.execute(
             'INSERT INTO episode_script_revisions VALUES(?,?,?,?,?)',
@@ -370,10 +370,10 @@ def mark_adaptation_stale(connection, production_id, *, chapter_ids=(), event_id
         if plan['episodeNo'] not in protected and (
             not (chapter_ids or event_ids) or set(plan['sourceChapterRefs']).intersection(changed_chapters))}
     changed = False
-    if not protected and adaptation['status'] in ('review', 'approved'):
+    if not protected and adaptation['status'] != 'stale':
         adaptation['status'] = 'stale'; changed = True
     for plan in context['episodePlans']:
-        if plan['episodeNo'] in affected and plan.get('status') in ('review', 'approved'):
+        if plan['episodeNo'] in affected and plan.get('status') != 'stale':
             plan['status'] = 'stale'; changed = True
     _stale_scripts(connection, production_id, affected)
     return _persist_production_context(connection, production, context) if changed else None
@@ -640,18 +640,18 @@ SCRIPT_SCHEMA = {
 
 
 ADAPTATION_SYSTEM_PROMPT = (
-    '你是短剧总编剧。只依据提供的原著事件创建可人工审核的故事骨架、改编策略、连续分集规划和剧情商业卡点。'
+    '你是短剧总编剧。只依据提供的原著事件创建可编辑的故事骨架、改编策略、连续分集规划和剧情商业卡点。'
     '不得编造 sourceEventIds 或 sourceChapterRefs；分集编号必须连续，数量和时长严格服从 format。'
 )
 EPISODE_PLAN_SYSTEM_PROMPT = (
-    '你是中文短剧分集策划。只为指定的单集生成可人工审核的分集规划，严格依据作品级故事骨架、改编策略和指定原著事件。'
-    '先阅读只读连续性资料：已拍摄或已批准的前集剧本代表已经发生的剧情，优先于旧分集规划；未批准的规划只是参考，不得当成既成事实。'
+    '你是中文短剧分集策划。只为指定的单集生成可编辑的分集规划，严格依据作品级故事骨架、改编策略和指定原著事件。'
+    '先阅读只读连续性资料：已拍摄的前集代表已发生的剧情；未过期的已保存前集剧本作为当前连续性依据，优先于旧分集规划。仅有规划时不得当成已拍摄事实。'
     '承接前集结尾的时间地点、人物关系、情绪、伤势、持有道具和未解决悬念，避免重复已经完成的剧情或无依据重置人物状态。'
     '遵守 Film Bible 的固定设定；本集原著明确要求的状态变化可以发展，但必须交代过渡。资料缺失或矛盾时不得编造前集事实。'
     '不得修改其他集，不得编造 sourceChapterRefs；episodeNo 和 targetDuration 必须严格服从输入。'
 )
 SCRIPT_SYSTEM_PROMPT = (
-    '你是中文短剧编剧。严格依据给定的已批准分集规划、原著章节和付费卡点，写本集可拍摄剧本。'
+    '你是中文短剧编剧。严格依据给定的已保存分集规划、原著章节和付费卡点，写本集可拍摄剧本。'
     '以场景标题、可见动作和对白推进，保持角色与状态连续，不写分析过程。'
 )
 
@@ -676,8 +676,9 @@ def episode_continuity_context(connection, production_id, episode_no, context):
             continue
         script = scripts.get(number)
         item = {'episodeNo': number, 'plan': copy.deepcopy(plan), 'evidence': 'planning_only'}
-        if script and script['body'].strip() and (script['status'] == 'approved' or number in completed):
-            item['evidence'] = 'completed_script' if number in completed else 'approved_script'
+        if script and script['body'].strip() and (script['status'] != 'stale' or number in completed):
+            item['evidence'] = ('completed_script' if number in completed else
+                                'approved_script' if script['status'] == 'approved' else 'saved_script')
             item['script'] = {key: script[key] for key in ('revision', 'status', 'title', 'synopsis', 'story_goal')}
             item['script'].update({key: json.loads(script[key]) for key in ('characters', 'scenes', 'props')})
             if number == episode_no - 1:
@@ -803,6 +804,23 @@ def validate_episode_plan_ready(connection, production_id, plan):
             raise ValueError(f'当前集的 {key} 尚未完成')
     validate_source_references(connection, production_id, plan['sourceChapterRefs'])
     return plan
+
+
+def validate_script_generation_ready(connection, production_id, context, plan):
+    """Single-user readiness is based on saved content, never approval status.
+
+    Validate only the requested episode: an unfinished sibling must not block it.
+    Keep legacy statuses/snapshots intact for existing projects and running jobs.
+    """
+    adaptation = context['adaptationPlan']
+    if adaptation.get('status') == 'stale':
+        raise ValueError('原著已改变，请先更新并保存全剧故事骨架')
+    for key, label in (('storyCore', '故事核心'), ('storyArc', '故事弧'), ('adaptationStrategy', '改编策略')):
+        if not any(str(value).strip() for value in (adaptation.get(key) or {}).values()):
+            raise ValueError(f'{label}尚未完成，请先完善并保存改编策划')
+    if plan and plan.get('status') == 'stale':
+        raise ValueError(f'第 {plan["episodeNo"]:02d} 集规划需要更新，请先修订或重新生成')
+    validate_episode_plan_ready(connection, production_id, plan)
 
 
 def apply_adaptation_generation(job, generated):
@@ -964,6 +982,11 @@ def script_default_from_plan(project_id, plan):
 def save_script_row(connection, row, value, *, status='draft', generation_job_id=None):
     from . import store as s
     normalized = validate_script(value)
+    if generation_job_id is None and status == 'draft':
+        previous = script_to_api(row)
+        if all(previous[key] == normalized[key] for key in SCRIPT_FIELDS):
+            # Navigation saves must not clear stale state or churn revisions.
+            return previous
     now = time.time()
     connection.execute(
         'INSERT INTO episode_script_revisions VALUES(?,?,?,?,?)',
@@ -1002,9 +1025,7 @@ def apply_episode_script_generation(job, generated):
         if adaptation_fingerprint(context) != marker.get('adaptationFingerprint'):
             raise ValueError('分集规划已在生成期间更新，旧剧本结果未写入')
         plan = next((item for item in context['episodePlans'] if item['episodeNo']==episode_no),None)
-        if context['adaptationPlan']['status'] != 'approved' or not plan or plan['status'] != 'approved':
-            raise ValueError('改编策划或目标分集已不再是已批准状态')
-        validate_source_references(connection, production_id, plan['sourceChapterRefs'])
+        validate_script_generation_ready(connection, production_id, context, plan)
         merged = {
             **result,
             'sourceChapterRefs': list(plan['sourceChapterRefs']),

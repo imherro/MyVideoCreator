@@ -4,10 +4,10 @@ export const RATIO_OPTIONS = ["16:9", "9:16", "1:1"] as const;
 export const PLATFORM_OPTIONS = ["通用短视频", "抖音", "快手", "红果短剧", "微信视频号", "小红书", "B站", "YouTube"] as const;
 
 export const STATUS_LABELS: Record<string, string> = {
-  draft: "草稿",
-  review: "待审核",
-  approved: "已批准",
-  stale: "已过期",
+  draft: "已保存",
+  review: "已保存",
+  approved: "已保存",
+  stale: "需要更新",
 };
 
 export const PAYWALL_LABELS: Record<string, string> = {
@@ -66,19 +66,34 @@ export function normalizeEpisodeSelection(values: Iterable<number>, episodeCount
 export function splitList(value: string) {
   return [...new Set(value.split(/[，,\n]/).map((item) => item.trim()).filter(Boolean))];
 }
-// Shared story approval and individual episode approval have separate lifecycles.
+// Legacy review/approved values stay in storage; readiness uses saved content.
+export function scriptReady(script?: Record<string, any> | null) {
+  return Boolean(script && script.status !== "stale" && String(script.body || "").trim());
+}
+
+export function sharedPlanningReady(plan?: Record<string, any>) {
+  return Boolean(plan && plan.status !== "stale" && ["storyCore", "storyArc", "adaptationStrategy"].every(
+    (key) => Object.values(plan[key] || {}).some((value) => String(value || "").trim()),
+  ));
+}
+
+export function episodePlanningReady(plan?: Record<string, any>) {
+  return Boolean(plan && plan.status !== "stale" && plan.sourceChapterRefs?.length &&
+    ["logline", "coreConflict", "hook", "cliffhanger"].every((key) => String(plan[key] || "").trim()));
+}
+
 export function adaptationReviewSummary(value: Record<string, any>) {
-  const shared = value.adaptationPlan?.status;
+  const shared = value.adaptationPlan;
   const protectedEpisodes = new Set<number>(value.protectedEpisodeNos || []);
-  const pending = (value.episodePlans || []).filter((plan: EpisodePlan) => !protectedEpisodes.has(plan.episodeNo) && plan.status !== "approved");
-  if (shared === "stale") return { status: "stale", headline: "全剧故事骨架需要更新", reason: "共享策划已过期，单集重新生成不会自动批准全剧故事骨架。" };
-  if (shared === "approved" && pending.length) {
-    const status = pending.some((plan: EpisodePlan) => plan.status === "stale") ? "stale" : pending.some((plan: EpisodePlan) => plan.status === "review") ? "review" : "draft";
-    const labels = pending.filter((plan: EpisodePlan) => plan.status === status).map((plan: EpisodePlan) => `EP${String(plan.episodeNo).padStart(2, "0")}`).join("、");
-    return { status, headline: `${labels} ${status === "review" ? "规划已生成，待审核" : status === "stale" ? "规划需要更新" : "规划待完善"}`,
-      reason: status === "review" ? "检查当前集规划后点击右上角“批准当前集”，再进入剧本；无需重复生成。" : "全剧故事骨架沿用已批准版本，仅需处理对应分集。" };
+  const pending = (value.episodePlans || []).filter((plan: EpisodePlan) => !protectedEpisodes.has(plan.episodeNo) && !episodePlanningReady(plan));
+  if (shared?.status === "stale") return { status: "stale", headline: "全剧故事骨架需要更新", reason: "原著已改变，请修订或重新生成故事骨架；已有结果仍保留。" };
+  if (!sharedPlanningReady(shared)) return { status: "draft", headline: "请完善故事骨架和改编策略", reason: "保存后即可生成内容完整的分集剧本。" };
+  if (pending.length) {
+    const status = pending.some((plan: EpisodePlan) => plan.status === "stale") ? "stale" : "draft";
+    const labels = pending.filter((plan: EpisodePlan) => status !== "stale" || plan.status === "stale").map((plan: EpisodePlan) => `EP${String(plan.episodeNo).padStart(2, "0")}`).join("、");
+    return { status, headline: `${labels} ${status === "stale" ? "规划需要更新" : "规划待完善"}`, reason: "仅需处理对应分集，其他内容完整的分集可以继续生成剧本。" };
   }
-  return { status: shared, headline: shared === "approved" ? "改编策划已批准" : shared === "review" ? "改编策划等待审核" : "可以建立改编策划", reason: shared === "review" ? "批准后才可生成逐集剧本。" : "" };
+  return { status: "ready", headline: "改编策划已保存，可进入剧本", reason: "" };
 }
 
 // Planning selection is independent of whether an episode production project exists yet.

@@ -158,20 +158,15 @@ def test_60_episode_plan_and_paywall_are_canonical_editable_and_no_job_is_automa
     assert client.get(f'/api/projects/{episode["id"]}/jobs').json() == []
 
 
-def test_script_generation_requires_explicit_approval_and_selected_set_isolated(adaptation_client, monkeypatch):
+def test_script_generation_uses_saved_plans_without_approval_and_selected_set_isolated(adaptation_client, monkeypatch):
     client = adaptation_client
     production, episode, _, adaptation = setup_production(client)
     saved = client.put(
         f'/api/productions/{production["id"]}/adaptation',
         json={key: adaptation[key] for key in ("revision", "adaptationPlan", "episodePlans", "monetizationPlan")},
     ).json()
-    blocked = client.post(
-        f'/api/productions/{production["id"]}/script-generations',
-        json={"episode_nos": [5], "provider": "local", "model": "", "allow_cloud": False, "submission_id": "phase3-before-approval"},
-    )
-    assert blocked.status_code == 400
-    reviewed = client.post(f'/api/productions/{production["id"]}/adaptation/review',json={"revision": saved["revision"]}).json()
-    approved = client.post(f'/api/productions/{production["id"]}/adaptation/approve',json={"revision": reviewed["revision"]}).json()
+    # No review/approve call: saved draft plans are immediately usable.
+    assert saved["adaptationPlan"]["status"] == "draft"
 
     body = {"episode_nos": [5, 8, 12], "provider": "local", "model": "", "allow_cloud": False, "submission_id": "phase3-selected-batch"}
     first = client.post(f'/api/productions/{production["id"]}/script-generations',json=body)
@@ -311,6 +306,24 @@ def test_canvas_script_becomes_the_canonical_episode_script_and_can_bypass_plann
     projection=next(node for node in projected['document']['nodes'] if node['id']==node_id)
     assert projection['data']['canonicalScriptProjection'] is True
     assert projection['data']['scriptOrigin']=='canvas'
+    # A saved canvas-origin draft can generate a storyboard immediately.
+    projected['document']['nodes'].append({
+        'id':'single-user-storyboard','type':'media','position':{'x':400,'y':80},
+        'data':{'kind':'storyboard','label':'分镜规划','provider':'local','model':'','prompt':'将已保存剧本拆成分镜'},
+    })
+    projected['document']['edges'].append({'id':'script-to-board','source':node_id,'target':'single-user-storyboard'})
+    stored=client.put(f'/api/projects/{project["id"]}',json={
+        'name':projected['name'],'revision':projected['revision'],
+        'production_revision':projected['production_revision'],'document':projected['document'],
+    })
+    assert stored.status_code==200,stored.text
+    queued=client.post(f'/api/projects/{project["id"]}/run',json={
+        'node_ids':['single-user-storyboard'],'exact':True,'submission_id':'single-user-canvas-storyboard',
+    })
+    assert queued.status_code==200,queued.text
+    assert queued.json()['count']==1
+    s.job_update(queued.json()['job_ids'][0],status='cancelled')
+    # Old clients can still use the historical endpoints; the new UI never does.
     reviewed=client.post(f'/api/productions/{project["production_id"]}/episode-scripts/1/review',json={'revision':saved.json()['revision']})
     assert reviewed.status_code==200,reviewed.text
     approved=client.post(f'/api/productions/{project["production_id"]}/episode-scripts/1/approve',json={'revision':reviewed.json()['revision']})
@@ -568,3 +581,86 @@ def test_production_job_statuses_include_old_active_sibling_jobs_without_large_p
     assert other_id not in {job['id'] for job in jobs}
     assert next(job for job in jobs if job['id'] == active_id)['input'] == marker
     assert all('prompt' not in job['input'] and 'result' not in job for job in jobs)
+
+
+def test_saved_draft_scripts_supply_continuity_and_noop_save_keeps_stale(adaptation_client):
+    from backend.adaptation import episode_continuity_context
+    client = adaptation_client
+    production, episode, chapter, adaptation = setup_production(client, count=2)
+    saved_plan = client.put(f'/api/productions/{production["id"]}/adaptation', json={
+        key: adaptation[key] for key in ("revision", "adaptationPlan", "episodePlans", "monetizationPlan")
+    })
+    assert saved_plan.status_code == 200
+    original = client.get(f'/api/productions/{production["id"]}/episode-scripts/1').json()
+    payload = {"revision": original["revision"], "title": "第一集", "synopsis": "门外来客",
+        "body": "阿青：请进。", "estimatedDuration": 15, "sourceChapterRefs": [chapter["id"]],
+        "storyGoal": "开门", "paywallBeat": {}, "characters": ["阿青"], "scenes": ["门口"], "props": []}
+    saved = client.put(f'/api/productions/{production["id"]}/episode-scripts/1', json=payload).json()
+    with s.db() as c:
+        context = json.loads(c.execute('SELECT shared_context FROM productions WHERE id=?', (production['id'],)).fetchone()[0])
+        evidence = episode_continuity_context(c, production['id'], 2, context)
+    assert evidence['previousEpisodes'][0]['evidence'] == 'saved_script'
+    assert evidence['previousEpisodes'][0]['script']['body'] == payload['body']
+    noop = client.put(f'/api/productions/{production["id"]}/episode-scripts/1', json={**payload, 'revision': saved['revision']}).json()
+    assert noop['revision'] == saved['revision']
+    # A source change invalidates draft content too, not just old approved work.
+    from backend.adaptation import mark_adaptation_stale
+    with s.db() as c:
+        mark_adaptation_stale(c, production['id'], chapter_ids=[chapter['id']])
+    stale = client.get(f'/api/productions/{production["id"]}/episode-scripts/1').json()
+    assert stale['status'] == 'stale'
+    noop = client.put(f'/api/productions/{production["id"]}/episode-scripts/1', json={**payload, 'revision': stale['revision']}).json()
+    assert noop['status'] == 'stale' and noop['revision'] == stale['revision']
+    updated = client.put(f'/api/productions/{production["id"]}/episode-scripts/1', json={**payload, 'revision': stale['revision'], 'body': '阿青打开门，发现来者是父亲。'}).json()
+    assert updated['status'] == 'draft' and updated['revision'] > stale['revision']
+    with s.db() as c:
+        assert c.execute('SELECT count(*) FROM episode_script_revisions WHERE project_id=?', (episode['id'],)).fetchone()[0] >= 2
+    assert client.get(f'/api/projects/{episode["id"]}/jobs').json() == []
+
+
+@pytest.mark.parametrize('fault,message', [('shared', '故事核心'), ('episode', 'hook'), ('stale', '规划需要更新'), ('reference', '引用')])
+def test_single_user_generation_still_validates_saved_content(adaptation_client, fault, message):
+    client = adaptation_client
+    production, episode, chapter, adaptation = setup_production(client, count=2)
+    saved = client.put(f'/api/productions/{production["id"]}/adaptation', json={
+        key: adaptation[key] for key in ("revision", "adaptationPlan", "episodePlans", "monetizationPlan")
+    })
+    assert saved.status_code == 200
+    with s.db() as c:
+        row = c.execute('SELECT shared_context FROM productions WHERE id=?', (production['id'],)).fetchone()
+        context = json.loads(row[0])
+        if fault == 'shared': context['adaptationPlan']['storyCore'] = {}
+        if fault == 'episode': context['episodePlans'][0]['hook'] = ''
+        if fault == 'stale': context['episodePlans'][0]['status'] = 'stale'
+        if fault == 'reference': context['episodePlans'][0]['sourceChapterRefs'] = ['missing-chapter']
+        c.execute('UPDATE productions SET shared_context=? WHERE id=?', (s.dumps(context), production['id']))
+    result = client.post(f'/api/productions/{production["id"]}/script-generations', json={
+        'episode_nos': [1], 'provider': 'local', 'model': '', 'submission_id': 'single-user-validation-' + fault,
+    })
+    assert result.status_code == 400, result.text
+    assert message in result.json()['detail']
+    assert client.get(f'/api/projects/{episode["id"]}/jobs').json() == []
+
+
+def test_single_user_ready_episode_ignores_incomplete_sibling_and_protects_finished(adaptation_client):
+    client = adaptation_client
+    production, episode, chapter, adaptation = setup_production(client, count=2)
+    adaptation['episodePlans'][1]['hook'] = ''
+    saved = client.put(f'/api/productions/{production["id"]}/adaptation', json={
+        key: adaptation[key] for key in ("revision", "adaptationPlan", "episodePlans", "monetizationPlan")
+    })
+    assert saved.status_code == 200
+    result = client.post(f'/api/productions/{production["id"]}/script-generations', json={
+        'episode_nos': [1], 'provider': 'local', 'model': '', 'submission_id': 'single-user-sibling-ready',
+    })
+    assert result.status_code == 200, result.text
+    s.job_update(result.json()['jobs'][0]['id'], status='cancelled')
+    with s.db() as c:
+        row = c.execute('SELECT document FROM projects WHERE id=?', (episode['id'],)).fetchone()
+        doc = json.loads(row[0])
+        doc['nodes'].append({'id':'finished-video','data':{'kind':'video','assetId':'finished-asset'}})
+        c.execute('UPDATE projects SET document=? WHERE id=?', (s.dumps(doc), episode['id']))
+    result = client.post(f'/api/productions/{production["id"]}/script-generations', json={
+        'episode_nos': [1], 'provider': 'local', 'model': '', 'submission_id': 'single-user-finished-protected',
+    })
+    assert result.status_code == 400 and '已有成片' in result.json()['detail']

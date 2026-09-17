@@ -1867,19 +1867,19 @@ def revise_episode_script(production_id:str,episode_no:int,body:RevisionAction):
 
 @app.post('/api/productions/{production_id}/script-generations')
 def generate_episode_scripts(production_id:str,body:ScriptGenerationCreate):
-    from .adaptation import adaptation_fingerprint,ensure_episode_for_plan,script_to_api,validate_source_references
+    from .adaptation import adaptation_fingerprint,ensure_episode_for_plan,script_to_api,validate_script_generation_ready,protected_episode_nos
     if len(set(body.episode_nos))!=len(body.episode_nos):raise ValueError('不能重复选择同一集')
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
         production_row,context,_=episode_plan_context(c,production_id,body.episode_nos[0])
-        if context['adaptationPlan']['status']!='approved':raise ValueError('请先批准改编策划，再生成逐集剧本')
+        protected=set(protected_episode_nos(c,production_id))
         plan_map={item['episodeNo']:item for item in context['episodePlans']}
         fingerprint=adaptation_fingerprint(context);created=[]
         for episode_no in body.episode_nos:
             plan=plan_map.get(episode_no)
             if not plan:raise ValueError(f'第 {episode_no:02d} 集不在分集规划中')
-            if plan['status']!='approved':raise ValueError(f'第 {episode_no:02d} 集规划尚未批准')
-            validate_source_references(c,production_id,plan['sourceChapterRefs'])
+            if episode_no in protected:raise ValueError(f'第 {episode_no:02d} 集已有成片视频，不能重新生成剧本')
+            validate_script_generation_ready(c,production_id,context,plan)
             project_row=ensure_episode_for_plan(c,production_id,episode_no)
             script=c.execute('SELECT * FROM episode_scripts WHERE project_id=?',(project_row['id'],)).fetchone()
             placeholders=','.join('?' for _ in plan['sourceChapterRefs'])
@@ -1887,7 +1887,7 @@ def generate_episode_scripts(production_id:str,body:ScriptGenerationCreate):
             if plan['sourceChapterRefs']:
                 chapters=[dict(row) for row in c.execute(f'''SELECT id,title,content,revision FROM source_chapters
                     WHERE id IN ({placeholders})''',plan['sourceChapterRefs']).fetchall()]
-            prompt='''请生成且只生成目标单集剧本。\n已批准分集规划：'''+s.dumps(plan)+\
+            prompt='''请生成且只生成目标单集剧本。\n已保存分集规划：'''+s.dumps(plan)+\
                 '\n原著章节：'+s.dumps(chapters)+'\n本集现有剧本（为空则首次生成）：'+s.dumps(script_to_api(script))
             job_body=JobCreate(node_id='episode-script:'+project_row['id'],kind='text',
                 submission_id=body.submission_id+f':{episode_no:03d}',input={
