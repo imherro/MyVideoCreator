@@ -100,3 +100,14 @@
   .bible-voice-section .voice-dialogue-select,.bible-voice-section .voice-text-heading,.bible-voice-section .voice-text-editor,.bible-voice-section .film-bible-collapsible-body>.two-fields{grid-column:span 2}
   .voice-picker-results{grid-template-columns:repeat(4,minmax(0,1fr))}
 }
+
+.art-generation-waiting{margin:0 0 10px;padding:8px 11px;border:1px solid #4b5144;border-radius:8px;background:#242920;color:#c7cfb7;font-size:12px}
+.art-generation-waiting summary{cursor:pointer;line-height:1.6}
+.art-generation-waiting summary small{margin-left:10px;color:#98a18e;font-size:11px}
+.art-generation-waiting p{margin:7px 0;color:#aab4a0;font-size:11px;line-height:1.6}
+.art-generation-waiting>div{max-height:240px;overflow:auto}
+.art-generation-dependency{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:6px 0;border-top:1px solid #3b4336}
+.art-generation-dependency>span{display:grid;gap:3px;min-width:0}
+.art-generation-dependency b{font-size:12px;overflow-wrap:anywhere;font-weight:500}
+.art-generation-dependency small{font-size:11px;color:#98a18e}
+.art-generation-dependency button{max-width:50%;white-space:normal;font-size:11px;padding:5px 8px}

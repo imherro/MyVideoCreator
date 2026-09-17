@@ -11,6 +11,7 @@ import { canvasRunInput } from "./canvasRunInput";
 import { imageSizeForRatio, VIDEO_FORMATS, VIDEO_RATIOS, VIDEO_RESOLUTIONS } from "./mediaSpecs";
 import {
   planBatchGeneration,
+  assetBatchFeedback,
   type BatchGenerationKind,
 } from "./batchGeneration";
 import { nodeDefaults } from "./nodeDefaults";
@@ -652,6 +653,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     [revisions, setRevisions] = useState<Any[]>([]),
     [trashItems, setTrashItems] = useState<Any>({ productions: [], projects: [], assets: [], sources: [], chapters: [] }),
     [preview, setPreview] = useState<Asset | null>(null);
+  const batchSubmissionRef = useRef(false);
   const [workflowDataRevision, setWorkflowDataRevision] = useState({ source: 0, adaptation: 0, script: 0 });
   const [previewTimeline, setPreviewTimeline] = useState(false);
   const [exportSource, setExportSource] = useState<"legacy" | "editor">("legacy");
@@ -2134,7 +2136,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   }
   async function runSmartBatch(kind: BatchGenerationKind) {
     const snapshot = current.current;
-    if (!snapshot.project || !snapshot.doc || busy) return;
+    if (!snapshot.project || !snapshot.doc || busy || batchSubmissionRef.current) return;
     const plan = planBatchGeneration(
       snapshot.doc,
       jobs,
@@ -2148,10 +2150,17 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       shot_videos: "视频",
     };
     if (!plan.readyIds.length) {
+      if (kind === "assets") {
+        const feedback = assetBatchFeedback(plan, 0);
+        setNotice(feedback.notice);
+        setError(feedback.error);
+        return;
+      }
       const detail = plan.blocked.slice(0, 3).map((item) => `${item.label}：${item.reason}`).join("；");
       report(new Error(detail || `没有需要生成的${names[kind]}`));
       return;
     }
+    batchSubmissionRef.current = true;
     setBusy(true);
     setError("");
     try {
@@ -2159,11 +2168,14 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       const failed: string[] = [];
       if (kind === "assets") {
         for (const versionId of plan.readyIds) {
+          if (current.current.project?.id !== snapshot.project.id) break;
           try {
             await generateVisualReference(versionId);
             submitted += 1;
           } catch (reason: any) {
-            failed.push(reason?.message || String(reason));
+            const version = visualBibleOf(snapshot.doc).versions[versionId];
+            const label = visualBibleOf(snapshot.doc).cards[version?.cardId]?.name || versionId;
+            failed.push(`${label}：${reason?.message || String(reason)}`);
           }
         }
       } else {
@@ -2179,6 +2191,13 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
         );
         submitted = result.count;
         await refresh(snapshot.project.id);
+      }
+      if (current.current.project?.id !== snapshot.project.id) return;
+      if (kind === "assets") {
+        const feedback = assetBatchFeedback(plan, submitted, failed);
+        setNotice(feedback.notice);
+        setError(feedback.error);
+        return;
       }
       if (!submitted && failed.length) throw new Error(failed[0]);
       if (kind === "shot_videos") setPanel("jobs");
@@ -2199,6 +2218,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     } catch (reason) {
       report(reason);
     } finally {
+      batchSubmissionRef.current = false;
       setBusy(false);
     }
   }
@@ -2865,10 +2885,10 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 className="quiet"
                 disabled={busy}
                 onClick={() => void runSmartBatch("assets")}
-                title={`智能生成缺失的资产参考图；${assetBatchPlan.blocked.length} 项尚未满足条件`}
+                title={`仅生成缺失且满足条件的资产；${assetBatchPlan.waiting.length} 个状态资产等待基础图锁定，${assetBatchPlan.blocked.length} 项需要处理`}
               >
                 <BookOpen size={15} />
-                生成全部资产 <b>{assetBatchPlan.readyIds.length}</b>
+                生成全部资产 <b>{assetBatchPlan.readyIds.length}</b>{assetBatchPlan.waiting.length > 0 && <small> · {assetBatchPlan.waiting.length} 项等待锁定</small>}
               </button>}
               {["images", "canvas"].includes(workflowStage) && <button
                 className="quiet"
@@ -3000,6 +3020,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             {...filmBiblePanelProps}
             productionName={currentProduction?.name || project.name}
             usage={visualUsage}
+            batchPlan={assetBatchPlan}
           />
         ) : ["storyboard", "images"].includes(workflowStage) && (view === "shots" || view === "grid") ? (
           <StoryboardWorkspace

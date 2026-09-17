@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Boxes, GitBranch, ImagePlus, Layers3, LockKeyhole, Sparkles } from "lucide-react";
 import { FilmBiblePanel } from "../filmBible/FilmBiblePanel";
 import { primaryReference, resolveVisualGenerationTarget } from "../filmBible/references";
 import { visualKindLabels, type VisualKind } from "../filmBible/types";
 import { deriveArtStatus, usageLabels } from "../artDepartment";
+import type { BatchGenerationPlan } from "../batchGeneration";
 
 type PanelProps = React.ComponentProps<typeof FilmBiblePanel>;
 type Usage = {
@@ -24,12 +25,15 @@ const filters: Array<{ id: "all" | VisualKind; label: string }> = [
 export function ArtDepartmentPage({
   productionName,
   usage,
+  batchPlan,
   ...panelProps
-}: PanelProps & { productionName: string; usage: Usage[] }) {
+}: PanelProps & { productionName: string; usage: Usage[]; batchPlan?: BatchGenerationPlan }) {
   const [filter, setFilter] = useState<"all" | VisualKind>("all");
   const [scope, setScope] = useState<"episode" | "production">("episode");
   const [activeVersionId, setActiveVersionId] = useState(panelProps.focusVersionId || "");
   const [busyVersionId, setBusyVersionId] = useState("");
+  const detailRef = useRef<HTMLDivElement>(null);
+  const [revealVersionId, setRevealVersionId] = useState("");
   const requiredVersionIds = useMemo(() => {
     const ids = new Set<string>();
     for (const shot of panelProps.shots || []) {
@@ -53,6 +57,12 @@ export function ArtDepartmentPage({
   useEffect(() => {
     if (cards[0] && !cards.some((card) => Object.values(panelProps.visual.versions).some((version) => version.cardId === card.id && version.id === activeVersionId))) setActiveVersionId(cards[0].currentVersionId);
   }, [activeVersionId, cards]);
+  useEffect(() => {
+    if (revealVersionId && activeVersionId === revealVersionId && detailRef.current) {
+      detailRef.current.scrollIntoView({ block: "start" });
+      setRevealVersionId("");
+    }
+  }, [revealVersionId, activeVersionId, cards]);
   const usageByVersion = useMemo(
     () => new Map(usage.map((item) => [item.version_id, item])),
     [usage],
@@ -78,6 +88,14 @@ export function ArtDepartmentPage({
           <b>{Object.values(panelProps.visual.versions).filter((item) => item.status === "locked").length}</b><span>已锁定版本</span>
         </div>
       </header>
+      {!!batchPlan?.waiting.length && <details className="art-generation-waiting">
+        <summary>{batchPlan.waiting.length} 个状态资产等待基础图锁定 <small>本次可生成 {batchPlan.readyIds.length} 项 · 查看依赖</small></summary>
+        <p>先生成并确认基础角色／场景图，再次点击“生成全部资产”即可补齐状态图；已有结果不会重复生成。</p>
+        <div>{batchPlan.waiting.map(item => <div key={item.id} className="art-generation-dependency">
+          <span><b>{item.label}</b><small>{item.reason}</small></span>
+          <button type="button" onClick={() => { setScope("production"); setFilter("all"); select(item.parentVersionId); setRevealVersionId(item.parentVersionId); }}>查看 {item.parentLabel}</button>
+        </div>)}</div>
+      </details>}
       <div className="art-filterbar">
         <nav className="art-scope-switch" aria-label="资产范围">
           <button className={scope === "episode" ? "active" : ""} onClick={() => setScope("episode")}>本集需要 <small>{requiredCardIds.size}</small></button>
@@ -151,7 +169,7 @@ export function ArtDepartmentPage({
         </div>
       )}
       {!!cards.length && (
-        <div className="art-department-detail">
+        <div className="art-department-detail" ref={detailRef}>
           <div className="art-detail-heading"><div><span className="eyebrow">CANONICAL VERSION</span><h3>版本详情与参考图</h3></div><p>下方操作直接修改 Production Film Bible。</p></div>
           <FilmBiblePanel {...panelProps} compactSingleSelection visual={panelProps.visual} focusVersionId={activeVersionId || panelProps.focusVersionId} onFocusVersion={select} />
         </div>

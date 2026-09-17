@@ -16,6 +16,7 @@ export type BatchGenerationPlan = {
   kind: BatchGenerationKind;
   readyIds: string[];
   blocked: Array<{ id: string; label: string; reason: string }>;
+  waiting: Array<{ id: string; label: string; reason: string; parentVersionId: string; parentLabel: string }>;
   skipped: Array<{ id: string; label: string; reason: string }>;
   cloudCount: number;
 };
@@ -48,12 +49,14 @@ function planVisualAssets(
     kind: "assets",
     readyIds: [],
     blocked: [],
+    waiting: [],
     skipped: [],
     cloudCount: 0,
   };
   const visual = visualBibleOf(document as any);
-  for (const card of Object.values(visual.cards)) {
-    if (card.status === "deprecated") continue;
+  const cards = Object.values(visual.cards).sort((a, b) => Number(isStateCard(a)) - Number(isStateCard(b)));
+  for (const card of cards) {
+    if (card.status === "deprecated" || card.deletedAt) continue;
     const version = visual.versions[card.currentVersionId];
     if (!version) {
       result.blocked.push({ id: card.id, label: card.name, reason: "当前版本不存在" });
@@ -65,16 +68,16 @@ function planVisualAssets(
       result.skipped.push({ id: version.id, label: card.name, reason: "任务已在队列中" });
       continue;
     }
-    if (job?.status === "succeeded" && job.result?.assets?.length) {
-      result.skipped.push({ id: version.id, label: card.name, reason: "结果正在同步" });
-      continue;
-    }
     if (primaryReference(version)) {
       result.skipped.push({
         id: version.id,
         label: card.name,
         reason: version.status === "locked" ? "参考图已确认" : "参考图等待人工确认",
       });
+      continue;
+    }
+    if (job?.status === "succeeded" && job.result?.assets?.length) {
+      result.skipped.push({ id: version.id, label: card.name, reason: "结果正在同步" });
       continue;
     }
     if (version.status === "locked" || version.status === "deprecated") {
@@ -85,12 +88,27 @@ function planVisualAssets(
       const parent = version.parentVersionId
         ? visual.versions[version.parentVersionId]
         : undefined;
-      if (!parent || parent.status !== "locked" || !primaryReference(parent)) {
+      const parentCard = parent && visual.cards[parent.cardId];
+      if (!parent || !parentCard || parentCard.deletedAt || parentCard.status === "deprecated" || parent.status === "deprecated" || parent.cardId !== card.parentCardId) {
         result.blocked.push({
           id: version.id,
           label: card.name,
-          reason: "需要先确认并锁定父版本参考图",
+          reason: "所依赖的基础版本不存在、已弃用或归属不匹配，请检查资产关系",
         });
+        continue;
+      }
+      if (parent.status !== "locked") {
+        const parentJob = currentJob(jobs, `visual-version:${parent.id}`);
+        const reason = primaryReference(parent) ? "等待确认并锁定基础图"
+          : ["queued", "running"].includes(parentJob?.status) ? "基础图正在生成，完成后请确认锁定"
+          : parentJob?.status === "failed" ? "基础图生成失败，请重试并确认锁定"
+          : "等待生成并锁定基础图";
+        result.waiting.push({ id: version.id, label: card.name, reason,
+          parentVersionId: parent.id, parentLabel: `${parentCard.name} · V${parent.version || 1}` });
+        continue;
+      }
+      if (!primaryReference(parent)) {
+        result.blocked.push({ id: version.id, label: card.name, reason: "已锁定的基础版本缺少主参考图，请检查基础资产" });
         continue;
       }
     }
@@ -126,6 +144,7 @@ function planShotNodes(
     kind,
     readyIds: [],
     blocked: [],
+    waiting: [],
     skipped: [],
     cloudCount: 0,
   };
@@ -209,6 +228,17 @@ function planShotNodes(
     if (isCloud(provider)) result.cloudCount += 1;
   }
   return result;
+}
+
+export function assetBatchFeedback(plan: BatchGenerationPlan, submitted: number, failures: string[] = []) {
+  const parts = [submitted ? `已提交 ${submitted} 个资产参考图任务` : "本次没有新增资产任务"];
+  if (plan.waiting.length) parts.push(`${plan.waiting.length} 个状态资产等待基础图锁定，确认后再次点击“生成全部资产”即可补齐`);
+  if (plan.skipped.length) parts.push(`已跳过 ${plan.skipped.length} 项已有结果或处理中任务`);
+  const problems = [...plan.blocked.map(item => `${item.label}：${item.reason}`), ...failures];
+  return {
+    notice: parts.join("；"),
+    error: problems.length ? `${problems.length} 项未提交：${problems.slice(0, 3).join("；")}` : "",
+  };
 }
 
 export function planBatchGeneration(
