@@ -95,9 +95,11 @@ def test_text_reuses_runninghub_openai_stream(monkeypatch):
 
 def test_image_reference_upload_submit_poll_and_download(monkeypatch):
     configured = provider(); configured['parameters']['image']['size'] = '1024x1024'
+    configured['parameters']['image']['resolution'] = '1k'
     item = stored_job('image', configured)
     item['input']['asset_ids'] = [add_image(item)]
     item['input']['size'] = '2048x1152'
+    item['input']['image_spec'] = {'version': 'image-settings/v1', 'size': '2048x1152'}
     paths = []
     original = httpx.Client
 
@@ -110,6 +112,7 @@ def test_image_reference_upload_submit_poll_and_download(monkeypatch):
             body = json.loads(request.read())
             assert body['imageUrls'] == ['https://input.example/reference.png']
             assert (body['width'], body['height']) == (2048, 1152)
+            assert body['resolution'] == '2k'
             return httpx.Response(200, json={'taskId': 'image-task', 'status': 'RUNNING'})
         return httpx.Response(200, json={'taskId': 'image-task', 'status': 'SUCCESS', 'results': [{'fileUrl': 'https://result.example/result.png'}]})
 

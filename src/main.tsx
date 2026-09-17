@@ -135,6 +135,7 @@ import type { VoiceProfile } from "./filmBible/types";
 import { voiceIdentity, requireTtsVoice, chooseVoiceVersion, effectiveVoiceProfile, acceptVoiceResult, saveVoiceProfile, setVoiceLocked, voiceProfilesOf } from "./filmBible/voices";
 import { catalogVoice, CUSTOM_VOICE_ID, DOUBAO_TTS2_VOICES } from "./filmBible/voiceCatalog";
 import { StoryboardWorkspace } from "./pages/StoryboardWorkspace";
+import { ImageGenerationSettings } from "./ImageGenerationSettings";
 import { MotionReferenceEditor } from "./components/MotionReferenceEditor";
 import { videoGenerationMode } from "./motionReference";
 import { VideoProductionWorkspace } from "./pages/VideoProductionWorkspace";
@@ -1777,14 +1778,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     const nodeIds = selectedShotImageNodeIds(prepared, shotUids);
     if (nodeIds.length !== targetShots.length)
       throw new Error("部分镜头缺少分镜图生成节点");
-    const selectedNodeIds = new Set(nodeIds);
-    const storyboardSize = imageSizeForRatio(snapshot.doc.ratio || "16:9");
-    prepared = {
-      ...prepared,
-      nodes: prepared.nodes.map((item) => selectedNodeIds.has(item.id)
-        ? { ...item, data: { ...item.data, resolution: storyboardSize } }
-        : item),
-    };
     for (const nodeId of nodeIds) {
       const imageNode = prepared.nodes.find((item) => item.id === nodeId);
       if (!String(imageNode?.data?.prompt || "").trim())
@@ -2880,6 +2873,15 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           />
         ) : ["storyboard", "images"].includes(workflowStage) && (view === "shots" || view === "grid") ? (
           <StoryboardWorkspace
+            renderImageSettings={(shot) => {
+              const imageNode = doc.nodes.find(item => item.id === (shot.imageNode || shot.pipeline?.imageNodeId));
+              const target = doc.generationPolicy?.image;
+              return <ImageGenerationSettings document={doc} data={imageNode?.data || { provider: target?.providerId, model: target?.modelId }} providers={config.providers} projectId={project.id} request={api} onChange={patch => update(document => {
+                const prepared = ensureShotNodes(document, config.providers, system.models, id, [shot.id], storyboardContextId(document));
+                const preparedShot = prepared.shots.find(item => shotIdentity(item) === shotIdentity(shot));
+                return patchNode(prepared, preparedShot?.imageNode || preparedShot?.pipeline?.imageNodeId, patch);
+              })}/>;
+            }}
             purpose={workflowStage === "images" ? "images" : "planning"}
             mode={view === "grid" ? "grid" : "table"}
             document={doc}
@@ -3519,14 +3521,14 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 <small>生成后校验总时长，不合格时自动修正一次。</small>
               </label>
             )}
-            <ModelSelector
+            {data.kind === "image" ? <ImageGenerationSettings document={doc} data={data} providers={config.providers} projectId={project.id} request={api} onChange={changeModel}/> : <ModelSelector
               data={data}
               providers={config.providers}
               localModels={system.models}
               allowedTargets={effectiveProjectTargets(doc.modelPool || undefined, config.providers, data.kind === "storyboard" ? "text" : data.kind, system.models)}
               request={api}
               onChange={changeModel}
-            />
+            />}
             {data.kind === "video" && selectedVideoShot && <MotionReferenceEditor shot={selectedVideoShot} document={doc} assets={assets} provider={config.providers.find((p:Any)=>p.id===data.provider)} node={node} busy={busy} onPatch={patch=>update(document=>updateStoryboardShot(document,shotIdentity(selectedVideoShot),patch))} onUpload={uploadMotionReference} onCompile={()=>previewVideoSubmission(node.id)}/>}
             {data.kind === "video" && selectedVideoMode === "multimodal" && <p className="muted">多模态参考：关联分镜图作为起始构图参考，角色、场景、道具按绑定追加，不是严格首帧。</p>}
             {data.kind === "video" && selectedVideoMode !== "multimodal" &&
@@ -3597,7 +3599,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   </small>
                 </label>
               )}
-            {["image", "video"].includes(data.kind) &&
+            {data.kind === "video" &&
               !(
                 data.kind === "video" &&
                 ["minimax", "volcengine_ark"].includes(

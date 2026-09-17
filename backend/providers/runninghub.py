@@ -227,7 +227,7 @@ def generate_image(worker, job, provider):
                 raise InterruptedError()
             body = {
                 'prompt': job['input']['prompt'], 'width': width, 'height': height,
-                'resolution': str(params.get('resolution') or '2k'),
+                'resolution': '2k' if job['input'].get('image_spec') else str(params.get('resolution') or '2k'),
                 'outputFormat': str(params.get('outputFormat') or 'jpeg'),
             }
             endpoint = '/openapi/v2/seedream-v5-pro/text-to-image'

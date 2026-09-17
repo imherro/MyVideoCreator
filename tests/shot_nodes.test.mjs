@@ -1,6 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {ensureShotNodes,importStoryboardShots} from '../src/shotNodes.ts';
+import {patchNode,acceptResult} from '../src/graph.ts';
+
+test('image settings survive pipeline preparation and invalidate an in-flight result',()=>{
+ const imageSettings={sizeMode:'custom',size:'1536x864',seed:23};
+ const doc={nodes:[{id:'image',data:{kind:'image',prompt:'frame',assetId:'old',generation_revision:0}},{id:'video',data:{kind:'video',assetId:'old-video'}}],edges:[{id:'link',source:'image',target:'video'}],shots:[{id:'s1',imageNode:'image',videoNode:'video'}]};
+ const edited=patchNode(doc,'image',{imageSettings});
+ assert.ok(edited.nodes.every(node=>node.data.stale));
+ const prepared=ensureShotNodes(edited,[],[],()=>{throw new Error('must reuse nodes')});
+ assert.deepEqual(prepared.nodes[0].data.imageSettings,imageSettings);
+ const stale=acceptResult(prepared,{id:'old-job',node_id:'image',status:'succeeded',input:{prompt:'frame',generation_revision:0},result:{assets:[{id:'old-result'}]}},[]);
+ assert.ok(stale.nodes[0].data.stale);
+ const current=acceptResult(prepared,{id:'new-job',node_id:'image',status:'succeeded',input:{prompt:'frame',generation_revision:1},result:{assets:[{id:'new-result'}]}},[]);
+ assert.equal(current.nodes[0].data.stale,false);
+});
 test('batch preparation repairs missing nodes without duplicating existing work',()=>{
  let i=0;const id=()=>String(++i);const providers=[{id:'v',kind:'video',local:true,model:'minimax_h3'}];
  const image={id:'existing',data:{kind:'image',prompt:'manually edited'}};

@@ -969,19 +969,22 @@ def save_prompt_template(tid:str,body:PromptTemplateSave):
         c.execute('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',('prompt_library',s.dumps(library)))
     return library
 
-def _project_image_spec(c, pid):
+def _image_spec(c, pid, value, project_fields=None):
+    from .image_settings import resolve_image_settings
     row = c.execute('SELECT document FROM projects WHERE id=?', (pid,)).fetchone()
-    document = json.loads(row['document']) if row else {}
-    ratio = str(document.get('ratio') or '16:9')
-    size = {
-        '21:9': '2048x864',
-        '16:9': '2048x1152',
-        '4:3': '2048x1536',
-        '1:1': '2048x2048',
-        '3:4': '1536x2048',
-        '9:16': '1152x2048',
-    }.get(ratio, '2048x2048')
-    return ratio, size
+    if not row: raise HTTPException(404, '项目不存在')
+    document = json.loads(row['document'])
+    if project_fields:
+        document.update({k: project_fields[k] for k in ('ratio', 'videoResolution') if k in project_fields})
+    provider = next((p for p in s.get_setting('providers', []) if p['id'] == value.get('provider')), {})
+    return resolve_image_settings(document, value, provider)
+
+
+@app.post('/api/projects/{pid}/image-spec')
+def preview_image_spec(pid: str, body: dict):
+    # Pure, local preview. No model discovery, provider request or paid job.
+    with s.db() as c:
+        return _image_spec(c, pid, body.get('input') or {}, body.get('project'))
 
 
 def create_job_record(c,pid,body):
@@ -1000,11 +1003,16 @@ def create_job_record(c,pid,body):
                 'visual':(state['document'].get('filmBible') or {}).get('visual') or {'cards':{},'versions':{}},
             }}
     if body.kind == 'image':
-        # The project owns the output frame. Do not let a stale browser, a
-        # canvas-node default, or a provider-wide "2K" preset silently turn an
-        # episode image into a different aspect ratio.
-        ratio, size = _project_image_spec(c, pid)
-        body.input = {**body.input, 'ratio': ratio, 'size': size}
+        spec = _image_spec(c, pid, body.input)
+        body.input = {**body.input, 'ratio': spec['ratio'], 'size': spec['size'],
+                      'resolution': spec['size'], 'image_spec': spec}
+        if spec['seedSupported']:
+            body.input['seed'] = spec['seed']
+            if spec['seed'] == -1:
+                previous = c.execute('SELECT project_id,input FROM jobs WHERE submission_id=?', (body.submission_id,)).fetchone()
+                frozen = json.loads(previous['input']) if previous and previous['project_id'] == pid else {}
+                body.input['seed'] = (frozen.get('image_spec') or {}).get('actualSeed', secrets.randbelow(2147483648))
+            spec['actualSeed'] = body.input['seed']
     body.input=freeze_prompt_contract(body.kind,body.input)
     if body.kind not in ('text','storyboard','image','video','audio','export'): raise ValueError('不支持的任务类型')
     old=c.execute('SELECT * FROM jobs WHERE submission_id=?',(body.submission_id,)).fetchone()

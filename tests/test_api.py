@@ -33,6 +33,61 @@ def test_first_setup_is_available_to_remote_browsers(client):
     with TestClient(app,client=('192.0.2.10',43120)) as remote:
         assert remote.get('/api/auth/status').json()['can_setup'] is True
 
+
+def test_image_preview_single_and_batch_share_explicit_node_settings(authenticated):
+    c = authenticated
+    old = s.get_setting('providers', [])
+    provider = {'id': 'image-settings-test', 'type': 'maestro', 'name': 'Test',
+                'kind': 'image', 'local': True, 'url': 'http://127.0.0.1:1', 'model': 'flux-test'}
+    s.set_setting('providers', [*old, provider])
+    try:
+        p = project(c)
+        doc = p['document']
+        doc['ratio'] = '16:9'
+        doc['videoResolution'] = '720p'
+        target = {'providerId': provider['id'], 'modelId': provider['model']}
+        doc['modelPool'] = {'text': [], 'image': [target], 'video': [], 'audio': []}
+        doc['generationPolicy'] = {'text': None, 'image': target, 'video': None}
+        value = {'kind': 'image', 'provider': provider['id'], 'model': provider['model'],
+                 'prompt': 'test frame', 'resolution': '512x512',
+                 'imageSettings': {'sizeMode': 'custom', 'size': '1536x864', 'seed': 23}}
+        doc['nodes'] = [{'id': 'image-settings-node', 'type': 'media', 'position': {'x': 0, 'y': 0}, 'data': value}]
+        doc['edges'] = []
+        doc['shots'] = []
+        saved = c.put(f'/api/projects/{p["id"]}', json={'name': p['name'], 'revision': p['revision'], 'document': doc})
+        assert saved.status_code == 200, saved.text
+        path = f'/api/projects/{p["id"]}'
+        before = c.get(path + '/jobs').json()
+        preview = c.post(path + '/image-spec', json={'input': value})
+        assert preview.status_code == 200, preview.text
+        assert preview.json()['size'] == '1536x864'
+        assert c.get(path + '/jobs').json() == before
+        payload = {'node_id': 'image-settings-node', 'kind': 'image', 'submission_id': 'image-settings-single', 'input': value}
+        single = c.post(path + '/jobs', json=payload)
+        assert single.status_code == 200, single.text
+        duplicate = c.post(path + '/jobs', json=payload)
+        assert duplicate.status_code == 200 and duplicate.json()['id'] == single.json()['id']
+        c.post('/api/jobs/' + single.json()['id'] + '/cancel')
+        batch = c.post(path + '/run', json={'submission_id': 'image-settings-batch', 'node_ids': ['image-settings-node']})
+        assert batch.status_code == 200, batch.text
+        batch_job = c.get('/api/jobs/' + batch.json()['job_ids'][0]).json()
+        for job in (single.json(), batch_job):
+            assert job['input']['size'] == job['input']['resolution'] == preview.json()['size']
+            assert job['input']['seed'] == 23
+            assert job['input']['image_spec'] == {**preview.json(), 'actualSeed': 23}
+            c.post('/api/jobs/' + job['id'] + '/cancel')
+        # A random request freezes one concrete seed; a network retry reuses it.
+        payload['submission_id'] = 'image-settings-random'
+        payload['input'] = {**value, 'imageSettings': {'sizeMode': 'project', 'seed': -1}}
+        random_job = c.post(path + '/jobs', json=payload)
+        assert random_job.status_code == 200, random_job.text
+        retry = c.post(path + '/jobs', json=payload)
+        assert retry.status_code == 200, retry.text
+        assert retry.json()['input']['seed'] == random_job.json()['input']['seed'] >= 0
+        c.post('/api/jobs/' + random_job.json()['id'] + '/cancel')
+    finally:
+        s.set_setting('providers', old)
+
 def test_production_can_own_multiple_episode_projects(authenticated):
     c=authenticated
     created=c.post('/api/productions',json={'name':'六十集测试剧'})

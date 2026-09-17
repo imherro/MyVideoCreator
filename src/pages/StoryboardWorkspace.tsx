@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -32,6 +33,7 @@ type Props = {
   assets: PreviewAsset[];
   jobs: Value[];
   busy: boolean;
+  renderImageSettings: (shot: Value) => ReactNode;
   onPatch: (uid: string, patch: Value) => void;
   onMove: (uid: string, offset: -1 | 1) => void;
   onCreate: () => void;
@@ -147,6 +149,7 @@ export function StoryboardWorkspace(props: Props) {
       return <article key={uid} className={`storyboard-tile ${selected.includes(uid) ? "selected" : ""}`}>
         <button className="storyboard-picture" onClick={() => asset ? props.onPreview(asset) : void generate([uid])}>{asset ? <img src={asset.url} alt={shot.scene || `镜头 ${index + 1}`}/> : <span><ImageIcon/>等待分镜图</span>}<em>{state}</em></button>
         <div><label className="check-label"><input type="checkbox" checked={selected.includes(uid)} onChange={() => toggle(uid)}/>SHOT {String(index + 1).padStart(2,"0")} · {shot.duration || 0} 秒</label><b>{shot.scene || "未命名场景"}</b><p className={props.purpose === "images" ? "storyboard-action-summary" : undefined}>{shot.action || "尚未填写动作"}</p>{props.purpose === "images" ? <details className="storyboard-grid-details"><summary>镜头详情</summary><dl><dt>动作</dt><dd>{shot.action || "未填写"}</dd><dt>角色</dt><dd>{stringList(shot.characters) || "未填写"}</dd><dt>情绪</dt><dd>{shot.emotion || "未填写"}</dd><dt>机位</dt><dd>{shot.camera || "未设置"}</dd><dt>声音</dt><dd>{shot.audio || "未填写"}</dd></dl></details> : <small>{shot.camera || "未设置机位"}</small>}{props.purpose === "images" && (node?.data?.stale || shot.prompts_need_review) && <small className="storyboard-reference-warning">{node?.data?.stale ? "依赖已变化，请检查后更新" : "镜头内容已改变，请核对提示词"}</small>}{props.purpose === "images" && references.some((item) => !item.primaryAssetId) && <small className="storyboard-reference-warning">部分引用资产缺少主参考图</small>}<div className="storyboard-grid-refs">{references.map(referenceChip)}</div><div className="storyboard-grid-actions"><button onClick={() => void generate([uid])}>{asset ? "重新生成" : "生成分镜图"}</button><button className="quiet" onClick={() => props.onOpenCanvas(shot,index)}>高级画布<ArrowUpRight size={13}/></button></div></div>
+        {props.purpose === "images" && props.renderImageSettings(shot)}
       </article>;
     })}</div>
     {pages > 1 && <div className="settings-actions"><button disabled={currentPage===1} onClick={() => setPage(currentPage-1)}>上一页</button><span>{currentPage} / {pages}</span><button disabled={currentPage===pages} onClick={() => setPage(currentPage+1)}>下一页</button></div>}
@@ -185,6 +188,7 @@ export function StoryboardWorkspace(props: Props) {
           {references.some((item) => !item.primaryAssetId) && <small className="storyboard-reference-warning">部分引用资产缺少主参考图</small>}
         </div>}
       </div>
+      {props.purpose === "images" && props.renderImageSettings(shot)}
       {props.purpose === "planning" ? <>{bindingEditor}{promptEditor}</> : <details className="storyboard-image-details">
         <summary>镜头详情与设置</summary>
         <div className="storyboard-image-fields">{shotFields}</div>
