@@ -69,7 +69,7 @@ export function defaultProjectSetupDraft(providers: Value[], _localModels: Value
     episodeTitle: "第 01 集",
     style: "电影写实",
     ratio: "16:9",
-    duration: 15,
+    duration: 120,
     videoResolution: "720p",
     videoRatio: "16:9",
     videoDuration: -1,

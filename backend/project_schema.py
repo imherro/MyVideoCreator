@@ -27,7 +27,7 @@ def new_document(generation_policy=None, model_pool=None):
         'generationPolicy': copy.deepcopy(generation_policy or empty_generation_policy()),
         'modelPool': copy.deepcopy(model_pool),
         'nodes': [], 'edges': [], 'shots': [], 'timeline': [], 'characters': [],
-        'brief': '', 'style': '电影写实', 'ratio': '16:9', 'duration': 15,
+        'brief': '', 'style': '电影写实', 'ratio': '16:9', 'duration': 120,
         'videoResolution': '720p',
         'videoReferenceMode': 'multimodal',
         'dialogueMode': 'voice_sample',
