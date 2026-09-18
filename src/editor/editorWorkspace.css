@@ -58,3 +58,4 @@
 .mvc-editor-asset-scope{display:flex;align-items:center;gap:8px;margin:10px 12px 0;font-size:11px;color:#899397}
 .mvc-editor-asset-scope>span{flex-shrink:0}
 .mvc-editor-asset-scope select{flex:1;min-width:0;width:100%;padding:7px 8px;font-size:12px}
+.mvc-editor-workspace{position:relative;isolation:isolate;z-index:0}
