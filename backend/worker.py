@@ -239,37 +239,48 @@ class Worker:
         if schema and (inp.get('provider','local')=='local' or p.get('structured')):
             body['response_format']={'type':'json_schema','json_schema':{'name':'structured_result','strict':True,'schema':schema}}
         self.progress(job,phase)
-        chunks=[]; last=0; finish_reason=None
-        with httpx.Client(timeout=httpx.Timeout(3600,connect=10),trust_env=not p.get('local',False)) as client:
-            with client.stream('POST',p['url'].rstrip('/')+'/chat/completions',headers=headers,json=body) as response:
-                if not response.is_success:
-                    response.read(); checked(response)
-                for line in response.iter_lines():
-                    if self.cancelled(job):
-                        if inp.get('provider','local')=='local': runtime.unload()
-                        raise InterruptedError()
-                    if not line.startswith('data:'): continue
-                    data=line[5:].strip()
-                    if data=='[DONE]': break
-                    try:
-                        packet=json.loads(data)
-                        if packet.get('usage'):attempt['usage']=packet['usage']
-                        choice=(packet.get('choices') or [{}])[0]
-                        if choice.get('finish_reason'):finish_reason=choice['finish_reason']
-                        part=choice.get('delta',{}).get('content')
-                        if part: chunks.append(part)
-                    except (ValueError,IndexError,AttributeError): continue
-                    if time.time()-last>1:
-                        s.job_update(job['id'],result={'text':''.join(chunks)})
-                        last=time.time()
-        text=''.join(chunks).strip()
-        attempt.update(finished=time.time(),finish_reason=finish_reason,output_chars=len(text))
-        s.job_update(job['id'],result={'text':text})
-        if trace is not None:job['_publish_trace']()
-        if finish_reason in ('length','max_tokens'):
-            raise TextOutputTruncated(f'模型输出达到长度上限（{budget} tokens），结果被截断；请缩短本次剧本或拆分规划后重试。')
-        if not text: raise ValueError('文本模型没有返回正文，请检查模型聊天模板或切换模型。')
-        return text
+        from .chat_response import ChatResponse, redact
+        parser=ChatResponse(attempt,str(p.get('api_key') or '').strip())
+        last=0
+        try:
+            with httpx.Client(timeout=httpx.Timeout(3600,connect=10),trust_env=not p.get('local',False)) as client:
+                with client.stream('POST',p['url'].rstrip('/')+'/chat/completions',headers=headers,json=body) as response:
+                    response_headers=getattr(response,'headers',{})
+                    attempt.update(http_status=getattr(response,'status_code',None),content_type=redact(response_headers.get('content-type',''),parser.secret),request_id=redact(response_headers.get('x-request-id') or response_headers.get('x-tt-logid') or '',parser.secret))
+                    if not response.is_success:
+                        chunks=[];size=0
+                        for chunk in response.iter_bytes():
+                            chunks.append(chunk[:4096-size]);size+=len(chunks[-1])
+                            if size>=4096:break
+                        parser.fail('upstream_error',f'上游 HTTP {response.status_code}：'+redact(b''.join(chunks).decode('utf-8',errors='replace'),parser.secret))
+                    for line in response.iter_lines():
+                        if self.cancelled(job):
+                            if inp.get('provider','local')=='local':runtime.unload()
+                            raise InterruptedError()
+                        parser.line(line)
+                        if time.time()-last>1:
+                            s.job_update(job['id'],result={'text':''.join(parser.parts)})
+                            last=time.time()
+            text=parser.finish()
+            if attempt.get('finish_reason') in ('length','max_tokens'):
+                attempt['category']='truncated'
+                raise TextOutputTruncated(f'模型输出达到长度上限（{budget} tokens），结果被截断；请缩短本次输入或拆分后重试。')
+            return text
+        except httpx.HTTPError as exc:
+            attempt.update(category='transport_error',error=redact(str(exc),parser.secret))
+            if isinstance(exc,httpx.TransportError):raise type(exc)(attempt['error']) from None
+            raise ValueError(attempt['error']) from None
+        finally:
+            text=''.join(parser.parts).strip()
+            attempt.update(finished=time.time(),output_chars=len(text))
+            s.job_update(job['id'],result={'text':text})
+            if trace is not None:job['_publish_trace']()
+            else:
+                telemetry=job.get('telemetry') or {}
+                job['telemetry']=telemetry
+                telemetry.setdefault('text_requests',[]).append(attempt)
+                s.job_update(job['id'],telemetry=telemetry)
+
 
     def text(self,job,p):
         inp=job['input']; kind=job['kind']

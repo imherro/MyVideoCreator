@@ -106,6 +106,7 @@ export function TaskDetailPage({ jobId, request }: { jobId: string; request: (pa
       </section>
       <section className="task-detail-card">
         <h2>模型请求契约</h2>
+        {!!job.telemetry?.text_requests?.length && <><h3>文本响应诊断</h3><pre className="debug-block">{JSON.stringify(job.telemetry.text_requests,null,2)}</pre></>}
         {job.input?.source_event_extraction && runtimePromptStages.map((stage: Value) => <article className="prompt-stage" key={stage.id}>
           <h3>{stage.phase} · {stage.status === "validated" ? `已完成 · ${stage.event_count} 条事件` : stage.status === "request_failed" ? "失败" : "进行中"}</h3>
           {stage.recovery && <p>{stage.recovery}</p>}
