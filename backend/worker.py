@@ -287,6 +287,10 @@ class Worker:
 
     def text(self,job,p):
         inp=job['input']; kind=job['kind']
+        if kind=='text' and inp.get('stage')=='creative_constraints':
+            from .creative_constraints import validate_draft
+            raw=self._chat_text(job,p,inp['system_prompt'],inp['prompt'],inp['response_schema'],'起草创作约束')
+            return {'text':raw,'creativeConstraints':validate_draft(raw)}
         if kind=='text' and inp.get('adaptation_generation'):
             from .adaptation import ADAPTATION_SCHEMA, ADAPTATION_SYSTEM_PROMPT, apply_adaptation_generation
             raw=self._chat_text(job,p,inp.get('system_prompt') or ADAPTATION_SYSTEM_PROMPT,inp['prompt'],inp.get('response_schema') or ADAPTATION_SCHEMA,'生成改编策划')

@@ -2034,6 +2034,28 @@ def approve_episode_script(production_id:str,episode_no:int,body:RevisionAction)
 def revise_episode_script(production_id:str,episode_no:int,body:RevisionAction):
     return transition_script(production_id,episode_no,body.revision,'draft')
 
+class CreativeConstraintsCreate(BaseModel):
+    submission_id:str=Field(min_length=8,max_length=100)
+
+@app.post('/api/projects/{pid}/creative-constraints/draft')
+def draft_creative_constraints(pid:str,body:CreativeConstraintsCreate):
+    from .creative_constraints import context_for_draft
+    with s.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        state=read_project_state(c,pid)
+        if not state:raise HTTPException(404,'项目不存在')
+        active=c.execute("SELECT j.id FROM jobs j JOIN projects p ON p.id=j.project_id WHERE p.production_id=? AND j.node_id='creative-constraints' AND j.status IN ('queued','running')",(state['project']['production_id'],)).fetchone()
+        if active:raise HTTPException(409,'创作约束正在起草，请等待任务完成')
+        target=(state['document'].get('generationPolicy') or {}).get('text') or {}
+        provider=target.get('providerId');model=target.get('modelId','')
+        if not provider:raise ValueError('请先设置项目默认文本模型')
+        result=create_job_record(c,pid,JobCreate(node_id='creative-constraints',kind='text',submission_id=body.submission_id,input={
+            'stage':'creative_constraints','provider':provider,'model':model,'prompt':'根据以下资料起草全作品创作约束：\n'+context_for_draft(c,state),
+            'max_tokens':8192,'bible_snapshot':{k:(state['document'].get('filmBible') or {}).get(k,{}) for k in ('story','style','continuity')},
+        }))
+    s.event(pid,{'type':'job','id':result['id']})
+    return result
+
 class DirectScriptGeneration(BaseModel):
     provider:str
     model:str=''
@@ -2084,7 +2106,7 @@ def generate_episode_scripts(production_id:str,body:ScriptGenerationCreate):
                 chapters=[dict(row) for row in c.execute(f'''SELECT id,title,content,revision FROM source_chapters
                     WHERE id IN ({placeholders})''',plan['sourceChapterRefs']).fetchall()]
             prompt='''请生成且只生成目标单集剧本。\n已保存分集规划：'''+s.dumps(plan)+\
-                '\n原著章节：'+s.dumps(chapters)+'\n本集现有剧本（为空则首次生成）：'+s.dumps(script_to_api(script))
+                '\n全作品创作约束：'+s.dumps({k:(context.get('filmBible') or {}).get(k,{}) for k in ('story','style','continuity')})+'\n原著章节：'+s.dumps(chapters)+'\n本集现有剧本（为空则首次生成）：'+s.dumps(script_to_api(script))
             job_body=JobCreate(node_id='episode-script:'+project_row['id'],kind='text',
                 submission_id=body.submission_id+f':{episode_no:03d}',input={
                     'provider':body.provider,'model':body.model,

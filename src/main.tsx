@@ -1,3 +1,4 @@
+import {CreativeConstraintsCard} from "./components/CreativeConstraintsCard";
 import { AssistantPanel } from "./components/AssistantPanel";
 import type { AssistantAction } from "./assistantChat";
 import { TrashConfirmDialog } from "./components/TrashConfirmDialog";
@@ -3033,6 +3034,10 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           />
         ) : workflowStage === "script" ? (
           <ScriptRoomPage
+            constraintsCard={<CreativeConstraintsCard key={project.production_id} document={doc} productionId={project.production_id} projectId={project.id} jobs={productionJobs} request={api} notify={setNotice} report={report}
+              onPrepare={async()=>{await save();if(dirty.current)throw new Error("请先保存当前项目后重试");}}
+              onApply={async fields=>{update(document=>mergeBibleFields(document,fields));await save();if(dirty.current||Object.entries(fields).some(([key,value])=>(bibleFields(current.current.doc!) as Any)[key]!==value))throw new Error("创作约束未保存成功，请刷新核对后重试");}}
+              onJob={submitted=>setProductionJobs(known=>mergeTaskSnapshots(known,submitted))}/>}
             projectId={project.id}
             onScriptsImported={finishScriptImport}
             onAddEpisode={()=>{if(currentProduction)setEpisodeSetupProduction(currentProduction);}}

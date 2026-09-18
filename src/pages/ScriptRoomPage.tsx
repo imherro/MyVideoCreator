@@ -8,8 +8,9 @@ import {ImportResumeNotice} from '../components/ImportResumeNotice';
 type Value = Record<string, any>;
 
 export function ScriptRoomPage({
-  productionId, projectId, onScriptsImported, currentEpisodeNo, onFocusEpisode, onAddEpisode, providers, defaultTarget, refreshKey = 0, jobs, onJobsSubmitted, request, notify, report, onChanged, onSelectEpisode, onEnterEpisode,
+  constraintsCard, productionId, projectId, onScriptsImported, currentEpisodeNo, onFocusEpisode, onAddEpisode, providers, defaultTarget, refreshKey = 0, jobs, onJobsSubmitted, request, notify, report, onChanged, onSelectEpisode, onEnterEpisode,
 }: {
+  constraintsCard?: import("react").ReactNode;
   onAddEpisode: () => void;
   projectId:string;onScriptsImported:(result:Value)=>Promise<void>;
   productionId: string; currentEpisodeNo: number; providers: Value[]; defaultTarget?: Value; refreshKey?: number;
@@ -149,6 +150,7 @@ export function ScriptRoomPage({
       <button disabled={busy || !draft} onClick={() => run(async () => { await save(); })}><Save size={15} />{unsavedDrafts.current.has(active) ? "保存（未保存）" : "保存"}</button>
       <button className="primary" disabled={busy || activeGenerating || !String(draft?.body || "").trim()} onClick={() => run(enterStoryboard)}>进入分镜规划<ArrowRight size={15}/></button>
     </div></header>
+    {constraintsCard}
     <div className="script-room-layout">
       <aside className="script-episode-list"><header><b>分集</b><button className="quiet" disabled={busy} onClick={()=>run(async()=>{if(draft) await save(false);onAddEpisode();})}>新增一集</button></header>{items.map((value) => <div className={active === value.episodeNo ? "active" : ""} key={value.episodeNo}>
         <input type="checkbox" disabled={!episodePlanningReady(value.plan) || (runningEpisodes.has(value.episodeNo) && !selected.has(value.episodeNo))} checked={selected.has(value.episodeNo)} onChange={(e) => setSelected((current) => { const next = new Set(current); e.target.checked ? next.add(value.episodeNo) : next.delete(value.episodeNo); return next; })} />

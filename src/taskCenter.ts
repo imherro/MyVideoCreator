@@ -81,7 +81,7 @@ export function deriveTaskCenterRows(
       const provider = providerMap.get(providerId);
       return {
         job,
-        scope: job.scope === "production" || ["source_analysis", "adaptation_generation", "adaptation_episode_generation"].includes(job.input?.stage)
+        scope: job.scope === "production" || ["source_analysis", "adaptation_generation", "adaptation_episode_generation", "creative_constraints"].includes(job.input?.stage)
           ? "production"
           : "episode",
         episode: episodeMap.get(job.project_id),
@@ -102,6 +102,7 @@ export function filterTaskCenterRows(rows: TaskCenterRow[], filters: TaskCenterF
 }
 
 export function taskShotLabel(row: TaskCenterRow) {
+  if (row.job.input?.stage === "creative_constraints") return "全作品创作约束 · AI 起草";
   if (row.job.input?.stage === "script_import_analysis") return `文档智能导入 · ${row.job.input?.script_import_analysis?.filename || "结构识别"}`;
   if (row.job.input?.stage === "source_analysis") {
     const title = String(row.job.input?.prompt || "").match(/^章节标题：([^\n]+)/)?.[1]?.trim();
