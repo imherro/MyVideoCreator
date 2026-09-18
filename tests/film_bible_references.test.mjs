@@ -76,7 +76,9 @@ test('state generation requires and sends the locked parent reference',()=>{
   assert.deepEqual(plan.assetIds,['asset-parent']);
   assert.equal(plan.parentVersionId,'hero-v1');
   assert.equal(plan.parentReferenceAssetId,'asset-parent');
-  assert.match(plan.prompt,/必须以输入参考图中的身份/);
+  assert.match(plan.prompt,/保持未变化的身份与结构/);
+  assert.match(plan.prompt,/本状态明确描述.*变化必须生效/);
+  assert.match(plan.prompt,/遵守指定画幅/);
 });
 
 test('generated primary reference preserves immutable job and parent provenance',()=>{

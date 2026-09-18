@@ -245,7 +245,11 @@ def compile_motion_input(document, node_id, kind, input_value, project_id, provi
         if not aid:
             raise ValueError('视觉绑定缺少主参考图')
         index = image(aid, cardId=card['id'], versionId=version['id'], purpose=group)
-        image_lines.append(f"@图片{index}：{card.get('name', card['id'])}的外观、服装及状态参考。")
+        purpose = {'character': '身份、体型结构、服装和当前持续状态', 'scene': '空间布局、建筑结构、固定物体及当前环境状态', 'prop': '外形、材质、尺度和当前状态'}.get(group, '外观与状态')
+        image_lines.append(f"@图片{index}：{card.get('name', card['id'])}的{purpose}参考；不复制参考图的姿态、机位或无关背景。")
+        invariants = list(dict.fromkeys(str(rule).strip() for _, linked in chain for rule in linked.get('invariants', []) if str(rule).strip()))
+        if invariants:
+            image_lines.append(f"@图片{index}对应资产的不可改变项：" + '；'.join(invariants))
         if group == 'character':
             for linked_card, _ in chain:
                 actor_indices[linked_card['id']] = index

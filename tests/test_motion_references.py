@@ -361,7 +361,7 @@ def test_direct_composition_skips_frame_but_keeps_bound_assets(sample_video):
     shot['assetBindings']['characters'] = [{'versionId': 'cv'}]
     doc['filmBible']['visual'] = {
         'cards': {'c': {'id': 'c', 'name': '角色', 'kind': 'character'}},
-        'versions': {'cv': {'id': 'cv', 'cardId': 'c', 'status': 'locked',
+        'versions': {'cv': {'id': 'cv', 'cardId': 'c', 'status': 'locked', 'invariants':['没有手臂'],
                           'references': [{'role': 'primary', 'assetId': frame_id}]}}}
     # The asset may be the same file as an obsolete composition: its explicit
     # character binding must still survive without inheriting composition role.
@@ -370,6 +370,8 @@ def test_direct_composition_skips_frame_but_keeps_bound_assets(sample_video):
     assert result['composition_mode'] == 'direct'
     assert result['asset_ids'] == [frame_id]
     assert result['reference_manifest'][0]['purpose'] == 'character'
+    assert '没有手臂' in result['prompt']
+    assert '不复制参考图的姿态' in result['prompt']
     assert result['generation_mode']['actual'] == 'multimodal'
     assert [n['id'] for n, _ in execution_plan(doc, ['v'])] == ['v']
     assert [n['id'] for n, _ in execution_plan(doc)] == ['v']

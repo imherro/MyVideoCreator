@@ -209,10 +209,10 @@ def opening_hint(context, actions):
             headline='先完善本集剧本';detail='可以直接编写、粘贴，或使用 AI 辅助创作。';questions=['我可以直接粘贴剧本吗','如何使用 AI 写剧本','剧本写好后下一步是什么']
     elif any((i.get('needsComposition', True) and i['image']['stale']) or i['video']['stale'] for i in shots):
         headline='部分生成结果需要更新';detail='旧素材仍保留；先核对提示词、参考绑定或生成参数的变化。';questions=['为什么显示待更新','哪些镜头需要更新','是否必须重新生成']
-    elif any(not i['image']['exists'] for i in shots):
+    elif any(i.get('needsComposition',True) and not i['image']['exists'] for i in shots):
         headline='可以继续制作分镜图';detail='先检查资产绑定和主参考图，再生成所需镜头。';questions=['怎么批量生成分镜图','如何保持人物一致','可以修改图像提示词吗']
     elif any(not i['video']['exists'] for i in shots):
-        headline='分镜图已有结果，继续生成视频';detail='核对镜头时长、生成模式及最终参考清单。';questions=['视频生成前检查什么','如何使用动作参考','怎么保持角色音色一致']
+        headline='参考素材已就绪，继续生成视频';detail='核对镜头时长、生成模式及最终参考清单。';questions=['视频生成前检查什么','如何使用动作参考','怎么保持角色音色一致']
     else:
         headline='本集视频已有结果，可以进入剪辑';detail='生成初剪后预览，或使用连续预览导出样片。';questions=['如何生成初剪','两种预览有什么区别','在哪里导出成片']
     return {'headline':headline,'detail':clean(detail,280),'progress':progress,'questions':questions,'action':action}

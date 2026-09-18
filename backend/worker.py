@@ -1,3 +1,4 @@
+from .prompt_policy import repair_context
 """A durable queue: local inference is serialized while Ark jobs may run concurrently."""
 import base64
 import json
@@ -229,8 +230,10 @@ class Worker:
             user_prompt+='\n\n必须严格输出以下 JSON Schema 对应的单个 JSON 值，不要输出 Markdown 或解释：\n'+json.dumps(schema,ensure_ascii=False)
         trace=job.get('_text_trace')
         budget=output_budget({**inp,'kind':job['kind']},local=bool(p.get('local') or inp.get('provider','local')=='local'),stage_id=job.get('_text_stage',''),expanded=job.get('_text_expanded',False))
-        body={'model':inp.get('model') or p.get('model','local'),'messages':[{'role':'system','content':system_prompt},{'role':'user','content':user_prompt}], 'temperature':0.6,'max_tokens':budget,'stream':True}
-        attempt={'max_tokens':budget,'started':time.time(),'finish_reason':None}
+        from .prompt_policy import text_parameters
+        sampling=text_parameters(inp, job.get('_text_stage',''), bool(p.get('local') or inp.get('provider','local')=='local'))
+        body={'model':inp.get('model') or p.get('model','local'),'messages':[{'role':'system','content':system_prompt},{'role':'user','content':user_prompt}], **sampling,'max_tokens':budget,'stream':True}
+        attempt={'prompt_policy_version':inp.get('prompt_policy_version','legacy'),'sampling':sampling,'max_tokens':budget,'started':time.time(),'finish_reason':None}
         if trace is not None:
             trace.setdefault('attempts',[]).append(attempt)
             job['_publish_trace']()
@@ -364,7 +367,7 @@ class Worker:
                 f'\n\n成片目标总时长严格为 {duration_label} 秒。'
                 f'剧本必须能在 0:00–{end_time} 内完整拍完，'
                 '从开场、发展到结尾都不得超出该时长；控制人物、场景、对白和动作数量，'
-                '不要扩写成长片、分钟级短片或完整系列故事。请在标题下明确标注目标总时长。'
+                '不要扩写为超过本次目标时长的故事或完整系列。请在标题下明确标注目标总时长。'
             )
         if kind=='storyboard' and inp.get('target_duration'):
             prompt+=f'\n镜头总时长必须为 {inp["target_duration"]} 秒，误差不超过 0.5 秒。'
@@ -379,7 +382,7 @@ class Worker:
             except (ValueError,TypeError) as exc:
                 if inp.get('_repair_attempt'):raise ValueError('分镜修正后仍不符合要求：'+str(exc)) from exc
                 self.progress(job,'校验分镜并修正一次')
-                repaired={**inp,'_repair_attempt':True,'prompt':inp['prompt']+'\n\n上次结果未通过校验：'+str(exc)+'\n请保持故事内容，修正后重新输出完整 JSON。上次结果：\n'+text[:24000]}
+                repaired={**inp,'_repair_attempt':True,'prompt':inp['prompt']+'\n\n上次结果未通过校验：'+str(exc)+'\n请保持故事内容，修正后重新输出完整 JSON。上次结果：\n'+repair_context(text,local=bool(p.get('local') or inp.get('provider','local')=='local'))}
                 return self.text({**job,'input':repaired},p)
             return {'text':s.dumps(result),**result,'repair_count':int(bool(inp.get('_repair_attempt')))}
         return {'text':text}

@@ -30,5 +30,9 @@ kind 只允许 character、character_state、scene、scene_state、prop。基础
 key 使用简短稳定的英文或拼音语义键。description 和 attributes 描述可见特征，invariants 写不可改变项。同一人物、场景或道具只能建立一个语义基础卡。本阶段只生成文字数据，禁止要求生成图片。'''
 
 STORYBOARD_DIRECTOR_PROMPT='''你是短片分镜导演。根据剧本和已校验的视觉圣经生成连续镜头，只输出符合 Schema 的 JSON。
-character_keys、scene_key、prop_keys 只能引用提供的视觉 key；不能新建近义角色、场景或状态。每镜一个主要动作，总时长符合要求。
-emotion、动作、姿态、视线属于镜头变量。dialogues 逐条填写本镜对白，character_key 必须引用本镜角色基础卡或角色状态卡对应的 key；没有对白时使用空数组。image_prompt 描述动作发生前的首帧。video_prompt 描述随后动作、最终状态、环境声与动作声；有对白时还必须逐字写入“角色名（情绪）说：\"台词原文\"”，不得只写“说出相应内容”或对白概要。不要在镜头提示词中重新设计人物、服装或场景。没有场景或道具绑定时使用空字符串或空数组。'''
+character_keys、scene_key、prop_keys 只能引用提供的视觉 key；不能新建近义角色、场景或状态。每镜围绕一个叙事目的，总时长符合要求。
+emotion、动作、姿态、视线属于镜头变量。dialogues 逐条填写本镜对白，character_key 必须引用本镜角色基础卡或角色状态卡对应的 key；没有对白时使用空数组。image_prompt 描述可选构图预览的开场画面。video_prompt 独立描述开场状态、随后动作、最终状态、环境声与动作声；有对白时还必须逐字写入“角色名（情绪）说：\"台词原文\"”，不得只写“说出相应内容”或对白概要。不要在镜头提示词中重新设计人物、服装或场景。没有场景或道具绑定时使用空字符串或空数组。'''
+
+from ..prompt_policy import VISUAL, STORYBOARD
+VISUAL_EXTRACTOR_PROMPT += VISUAL
+STORYBOARD_DIRECTOR_PROMPT += STORYBOARD

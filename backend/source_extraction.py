@@ -4,13 +4,15 @@ import time
 
 from .source_library import EVENT_SCHEMA, SYSTEM_PROMPT, validate_events, replace_events
 from .text_output import TextOutputTruncated
+from .prompt_policy import source_chunk_limit, VERSION
 from . import store as s
 
 
 def split_input(text, limit=6000):
     parts=[]
     while len(text)>limit:
-        end=max(text.rfind('\n',limit//2,limit),text.rfind('。',limit//2,limit))
+        end=text.rfind('\n\n',limit//2,limit)
+        if end < 0: end=max(text.rfind('\n',limit//2,limit),text.rfind('。',limit//2,limit))
         end=end+1 if end>=0 else limit
         parts.append(text[:end]);text=text[end:]
     if text:parts.append(text)
@@ -18,12 +20,14 @@ def split_input(text, limit=6000):
 
 
 def extract(worker, job, provider):
-    inp=job['input'];parts=split_input(inp['prompt']);stages=[];rows=[]
+    inp=job['input'];limit=source_chunk_limit(inp,provider);parts=split_input(inp['prompt'],limit);stages=[];rows=[]
     def publish():s.job_update(job['id'],telemetry={'prompt_stages':stages})
     for index,part in enumerate(parts,1):
         system=inp.get('system_prompt') or SYSTEM_PROMPT
         user=(f'本章第 {index}/{len(parts)} 段。只提取本段明确发生的事件，按顺序，摘要精炼，不逐句复述，不补写段外情节。\n'+part)
-        stage={'id':f'source_events_{index}','phase':f'提取原著事件 {index}/{len(parts)}','system_prompt':system,'user_prompt':user,'response_schema':inp.get('response_schema') or EVENT_SCHEMA,'status':'running','started':time.time()}
+        if index > 1 and inp.get('prompt_policy_version') == VERSION:
+            user = '上一段末尾（仅供指代与因果衔接，不再提取其中事件）：\n' + parts[index-2][-800:] + '\n\n本次提取正文：\n' + user
+        stage={'chunk_character_limit':limit,'id':f'source_events_{index}','phase':f'提取原著事件 {index}/{len(parts)}','system_prompt':system,'user_prompt':user,'response_schema':inp.get('response_schema') or EVENT_SCHEMA,'status':'running','started':time.time()}
         stages.append(stage);publish()
         stage_job={**job,'_text_stage':stage['id'],'_text_trace':stage,'_publish_trace':publish}
         try:

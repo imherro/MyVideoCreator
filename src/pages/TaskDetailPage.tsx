@@ -106,6 +106,7 @@ export function TaskDetailPage({ jobId, request }: { jobId: string; request: (pa
       </section>
       <section className="task-detail-card">
         <h2>模型请求契约</h2>
+        {job.input?.prompt_policy_version && <p className="muted">提示词策略：{job.input.prompt_policy_version}</p>}
         {job.telemetry?.image_prompt && <details><summary>图片提示词长度检查 · {job.telemetry.image_prompt.original_characters} → {job.telemetry.image_prompt.submitted_characters} 字符（上限 {job.telemetry.image_prompt.limit}）</summary><p>{job.telemetry.image_prompt.strategy}</p><pre className="debug-block">{job.telemetry.image_prompt.prompt}</pre></details>}
         {!!job.telemetry?.text_requests?.length && <><h3>文本响应诊断</h3><pre className="debug-block">{JSON.stringify(job.telemetry.text_requests,null,2)}</pre></>}
         {job.input?.source_event_extraction && runtimePromptStages.map((stage: Value) => <article className="prompt-stage" key={stage.id}>

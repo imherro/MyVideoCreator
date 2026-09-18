@@ -674,6 +674,11 @@ SCRIPT_SYSTEM_PROMPT = (
 )
 
 
+from .prompt_policy import SCRIPT, ADAPTATION
+SCRIPT_SYSTEM_PROMPT += SCRIPT
+ADAPTATION_SYSTEM_PROMPT += ADAPTATION
+EPISODE_PLAN_SYSTEM_PROMPT += ADAPTATION
+
 def adaptation_bundle(context):
     normalized = normalize_adaptation_context(context)
     return {key: normalized[key] for key in ('adaptationPlan', 'episodePlans', 'monetizationPlan')}

@@ -30,6 +30,9 @@ SYSTEM_PROMPT = (
 )
 
 
+from .prompt_policy import SOURCE
+SYSTEM_PROMPT += SOURCE
+
 def split_chapters(content: str):
     text = content.replace('\r\n', '\n').strip()
     if not text:

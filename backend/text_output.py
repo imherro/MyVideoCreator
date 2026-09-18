@@ -24,6 +24,8 @@ def output_budget(inp, *, local=False, stage_id='', expanded=False):
     elif inp.get('kind') == 'storyboard' or inp.get('film_bible'):
         duration = max(1, float(inp.get('target_duration') or 120))
         budget = 8192 if stage_id.startswith('visual_bible') else max(8192, math.ceil(duration / 8) * 1000 + 2000)
+    elif not local and inp.get('prompt_policy_version'):
+        budget = commercial_text_budget(inp.get('provider','cloud'), inp.get('model',''), inp.get('stage',''))
     else:
         model=str(inp.get('model') or '').lower()
         budget = 16384 if not local and 'doubao' in model else 4096

@@ -2,16 +2,19 @@
 from __future__ import annotations
 
 import copy
+from .prompt_policy import VERSION, SCRIPT
 
 IMAGE_SYSTEM_PROMPT = """你是安影的影视分镜美术生成器。严格依据用户提示词、项目视觉风格和按顺序提供的独立参考图生成单张画面。参考图用于锁定角色身份、服装、场景结构和道具外观；只改变镜头明确要求的动作、表情、构图与光线。不要添加提示词未要求的文字、水印或拼贴。"""
 
-VIDEO_SYSTEM_PROMPT = """你是安影的影视镜头生成器。严格依据用户提示词和首帧/尾帧参考生成连续视频，保持人物身份、服装、场景、道具和空间关系稳定。提示词中的对白必须由指定角色按原文说出，声音、开口时机、情绪和口型自然同步，不得改词、漏词或增加额外对白；没有台词的角色保持闭嘴。动作与摄影机运动应符合镜头描述，避免闪烁、形变、身份漂移、额外人物、字幕、文字和水印。"""
+VIDEO_SYSTEM_PROMPT = """你是安影的影视镜头生成器。严格依据用户提示词和实际参考用途生成连续视频；多模态图片提供身份、环境或构图参考，只有显式首帧/首尾帧模式才施加对应帧约束，保持人物身份、服装、场景、道具和空间关系稳定。提示词中的对白必须由指定角色按原文说出，声音、开口时机、情绪和口型自然同步，不得改词、漏词或增加额外对白；没有台词的角色保持闭嘴。动作与摄影机运动应符合镜头描述，避免闪烁、形变、身份漂移、额外人物、字幕、文字和水印。"""
 
 AUDIO_SYSTEM_PROMPT = """你是安影的角色对白合成器。严格使用角色 Film Bible 中已选择的固定音色和本次台词参数生成音频，不改变台词内容，不在前后添加说明、音乐或额外对白。"""
 
 
 def freeze_prompt_contract(kind: str, value: dict, *, origin: str = 'submission') -> dict:
     result = copy.deepcopy(value)
+    if origin == 'submission' and not any(key in value for key in ('system_prompt', 'prompt_stages', 'prompt_contract_origin')):
+        result.setdefault('prompt_policy_version', VERSION)
     stage = result.get('stage')
     system_prompt = None
     response_schema = None
@@ -40,6 +43,7 @@ def freeze_prompt_contract(kind: str, value: dict, *, origin: str = 'submission'
         system_prompt, response_schema, schema_version = SCRIPT_SYSTEM_PROMPT, SCRIPT_SCHEMA, 'episode-script/v1'
         if (result.get('episode_script_generation') or {}).get('mode') == 'direct':
             system_prompt = '你是影视编剧。根据用户创作要求、目标时长、项目 Bible 与已有剧本，写可拍摄的本集剧本。无需原著或改编规划。使用场景标题、可见动作与明确角色对白，保持前集人物与情节连续，不编造缺失的前集事实，不输出分析过程。严格遵守目标时长，只生成本集。'
+            system_prompt += SCRIPT
             schema_version = 'direct-episode-script/v1'
     elif kind == 'storyboard' and result.get('film_bible'):
         from .film_bible.reuse import visual_user_prompt

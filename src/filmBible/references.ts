@@ -125,6 +125,7 @@ function promptFor(
   const invariants = version.invariants.join("；");
   const lines = [
     "生成一张影视视觉圣经主参考图。画面只用于固定后续镜头的一致性，不要添加文字、水印、分镜框或拼贴。",
+    card.kind.startsWith("character") ? "角色辨识特征、身体结构与服饰应清楚可见，姿态自然，背景不抢主体；遵守指定画幅，不因人物是全身而擅自改为竖图。" : card.kind.startsWith("scene") ? "展示可复用的场景空间布局、主要出入口、固定物体和材质，景物位置明确；不要额外添加剧情人物。" : "清楚展示道具的完整轮廓、比例、材质与关键结构，避免遮挡和多件重复拼贴。",
     `资产类型：${card.kind}`,
     `资产名称：${card.name}`,
     `可见外观：${version.spec.description}`,
@@ -133,7 +134,7 @@ function promptFor(
   ].filter(Boolean);
   if (parent) {
     lines.push(
-      `这是“${parent.card.name}”的状态版本。必须以输入参考图中的身份、脸型、服装主体、材质与场景结构为准，只表现本状态的可见变化。`,
+      `这是“${parent.card.name}”的状态版本。输入参考图用于保持未变化的身份与结构；本状态明确描述的服装、身体形态、光照或环境变化必须生效，其余特征保持父版本一致。`,
       `父版本外观：${parent.version.spec.description}`,
     );
   }

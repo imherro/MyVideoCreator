@@ -1,3 +1,4 @@
+from ..prompt_policy import repair_context
 import json
 from .models import VISUAL_BIBLE_SCHEMA,BOUND_STORYBOARD_SCHEMA,VISUAL_EXTRACTOR_PROMPT,STORYBOARD_DIRECTOR_PROMPT
 from .validate import normalize_bound_storyboard
@@ -36,7 +37,7 @@ def extract_storyboard(script,target_duration,provider_id,model_id,request,contr
         if report:report('visual_bible','validated')
     except (ValueError,TypeError) as exc:
         if report:report('visual_bible','needs_repair',str(exc))
-        repair=visual_user+'\n\n上次视觉圣经未通过校验：'+str(exc)+'\n请修正并输出完整 JSON。上次结果：\n'+visual_text[:24000]
+        repair=visual_user+'\n\n上次视觉圣经未通过校验：'+str(exc)+'\n请修正并输出完整 JSON。上次结果：\n'+repair_context(visual_text,local=provider_id=='local')
         visual_text=request(visual_system,repair,visual_schema,'修正视觉圣经','visual_bible_repair')
         try:
             bible,key_ids=normalize_reusable_visual(_visual(_json(visual_text,'视觉圣经')),existing_visual,provider_id,model_id);visual_repair_count=1
@@ -51,7 +52,7 @@ def extract_storyboard(script,target_duration,provider_id,model_id,request,contr
         if report:report('bound_storyboard','validated')
     except (ValueError,TypeError) as exc:
         if report:report('bound_storyboard','needs_repair',str(exc))
-        repair=user+'\n\n上次分镜未通过绑定校验：'+str(exc)+'\n请保持剧情并修正完整 JSON。上次结果：\n'+text[:24000]
+        repair=user+'\n\n上次分镜未通过绑定校验：'+str(exc)+'\n请保持剧情并修正完整 JSON。上次结果：\n'+repair_context(text,local=provider_id=='local')
         text=request(storyboard_system,repair,storyboard_schema,'修正分镜视觉绑定','bound_storyboard_repair')
         try:
             storyboard=normalize_bound_storyboard(_json(text,'分镜'),bible,key_ids,target_duration);repair_count=1
