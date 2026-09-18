@@ -1212,7 +1212,7 @@ def video_submission_preview(pid:str,node_id:str):
     data=compile_motion_input(document,node_id,'video',data,pid,provider)
     from .visual_style import compile_visual_style
     data=compile_visual_style(document,'video',data)
-    return {key:data.get(key) for key in ('visual_style','prompt','reference_manifest','motion_reference','motion_warnings','planned_shot_duration','shot_duration','motion_compiler','generation_mode','dialogue_mode','voice_samples')}
+    return {key:data.get(key) for key in ('composition_mode','visual_style','prompt','reference_manifest','motion_reference','motion_warnings','planned_shot_duration','shot_duration','motion_compiler','generation_mode','dialogue_mode','voice_samples')}
 
 @app.get('/api/projects/{pid}/nodes/{node_id}/video-result-status')
 def video_result_status(pid:str,node_id:str):

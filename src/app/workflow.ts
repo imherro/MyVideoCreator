@@ -5,7 +5,7 @@ export const WORKFLOW_STAGES = [
   { id: "script", label: "剧本", description: "剧本生成与修订", group: "planning", step: 3 },
   { id: "storyboard", label: "分镜规划", description: "拆解镜头并绑定视觉资产", group: "episode", step: 4 },
   { id: "art", label: "塑角造景", description: "确认本集需要的角色、场景与道具", group: "episode", step: 5 },
-  { id: "images", label: "分镜图", description: "生成和审核镜头首帧", group: "episode", step: 6 },
+  { id: "images", label: "分镜图", description: "可选：先看构图再拍视频", group: "episode", step: 6 },
   { id: "video", label: "视频", description: "镜头视频生成", group: "episode", step: 7 },
   { id: "editor", label: "剪辑", description: "时间线与多轨剪辑", group: "episode", step: 8 },
   { id: "canvas", label: "高级画布", description: "完整节点工作流", group: "advanced", step: null },

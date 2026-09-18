@@ -213,17 +213,26 @@ def compile_motion_input(document, node_id, kind, input_value, project_id, provi
         return ids.index(aid) + 1
 
     frame = nodes.get(shot.get('imageNode') or (shot.get('pipeline') or {}).get('imageNodeId'), {}).get('data', {})
-    image(frame.get('assetId'), purpose='构图参考（非硬首帧）')
+    from .shot_composition import needs_composition, execution_edges
+    use_composition = needs_composition(document, shot)
+    if use_composition and (not frame.get('assetId') or frame.get('stale')):
+        raise ValueError('本镜选择先看构图，请先生成或更新分镜图；也可改为直接生成视频')
+    result['composition_mode'] = 'preview' if use_composition else 'direct'
+    if use_composition:
+        image(frame.get('assetId'), purpose='构图参考（非硬首帧）')
     image(node.get('end_asset_id') or result.get('end_asset_id'), purpose='结束构图参考（非硬尾帧）')
     for aid in dict.fromkeys([*node.get('asset_ids', []), *input_value.get('asset_ids', [])]):
-        image(aid)
-    for edge in document.get('edges', []):
+        if use_composition or aid != frame.get('assetId') or aid in node.get('asset_ids', []):
+            image(aid)
+    for edge in execution_edges(document):
         if edge.get('target') == node_id:
             parent = nodes.get(edge.get('source'), {}).get('data', {})
             if parent.get('kind') == 'image':
                 image(parent.get('assetId'))
     visual = (document.get('filmBible') or {}).get('visual') or {}
     cards, versions = visual.get('cards') or {}, visual.get('versions') or {}
+    if any(not c.get('deletedAt') and c.get('status') != 'deprecated' for c in cards.values()) and not list(_binding_rows(shot)):
+        raise ValueError('本镜尚未绑定视觉资产，请先绑定角色、场景或道具并确认主参考图')
     actor_indices = {}
     image_lines = []
     for group, binding in _binding_rows(shot):
@@ -304,7 +313,7 @@ def compile_motion_input(document, node_id, kind, input_value, project_id, provi
                   asset_ids=ids, image_reference_sources=[{'type': 'asset', 'asset_id': aid} for aid in ids],
                   motion_reference=frozen, reference_manifest=manifest, motion_warnings=warnings,
                   motion_compiler={'version': VERSION, 'mode': 'multimodal',
-                                   'fingerprint': hashlib.sha256(s.dumps([mode, frozen, manifest, result.get('dialogue_mode'), result.get('voice_samples')]).encode()).hexdigest()},
+                                   'fingerprint': hashlib.sha256(s.dumps([mode, frozen, manifest, result.get('dialogue_mode'), result.get('voice_samples')] + ([shot['compositionMode']] if shot.get('compositionMode') else [])).encode()).hexdigest()},
                   generation_revision=node.get('generation_revision', 0))
     # Explicit multimodal choice changes the protocol role, never drops the image.
     result.pop('end_asset_id', None)
@@ -365,6 +374,10 @@ def invalidate_motion_changes(previous, incoming):
     for shot in incoming.get('shots', []):
         if (shot.get('uid') or shot.get('id')) not in old_shots and not shot.get('videoReferenceMode') and incoming.get('videoReferenceMode', 'legacy') == 'legacy':
             shot['videoReferenceMode'] = 'multimodal'
+        if (shot.get('uid') or shot.get('id')) not in old_shots:
+            shot.setdefault('compositionMode', 'direct')
+        if shot.get('compositionMode') not in (None, 'direct', 'preview'):
+            raise ValueError('镜头制作方式无效')
         old = old_shots.get(shot.get('uid') or shot.get('id'), {})
         from .voice_resolution import resolved_voice
         def signatures(doc, item):
@@ -376,7 +389,7 @@ def invalidate_motion_changes(previous, incoming):
             return result
         resolved_voice_changed = signatures(previous, old) != signatures(incoming, shot)
 
-        if (resolved_voice_changed or any(old.get(key) != shot.get(key) for key in ('motionReference', 'videoReferenceMode', 'dialogueMode'))
+        if (resolved_voice_changed or any(old.get(key) != shot.get(key) for key in ('motionReference', 'videoReferenceMode', 'dialogueMode', 'compositionMode'))
                 or (not shot.get('videoReferenceMode') and previous.get('videoReferenceMode') != incoming.get('videoReferenceMode'))
                 or (not shot.get('dialogueMode') and previous.get('dialogueMode', 'full_dialogue') != incoming.get('dialogueMode', 'full_dialogue'))):
             affected.add(shot.get('videoNode') or (shot.get('pipeline') or {}).get('videoNodeId'))

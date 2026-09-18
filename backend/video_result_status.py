@@ -29,11 +29,13 @@ def matches_video_result(document,node,job,current_input):
     compiler=old.get('motion_compiler') or {}
     if not compiler.get('version') or compiler.get('version')!=(current_input.get('motion_compiler') or {}).get('version'):
         return False
+    from .shot_composition import execution_edges
     ancestors=set();pending=[node['id']]
     while pending:
         target=pending.pop()
-        for edge in document.get('edges') or []:
+        for edge in execution_edges(document):
             if edge.get('target')==target and edge.get('source') not in ancestors:
                 ancestors.add(edge['source']);pending.append(edge['source'])
     if any(n['id'] in ancestors and n.get('data',{}).get('stale') for n in document.get('nodes') or []):return False
+    if old.get('composition_mode') and old['composition_mode'] != current_input.get('composition_mode'): return False
     return video_signature(old)==video_signature(current_input)

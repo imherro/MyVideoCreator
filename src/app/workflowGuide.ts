@@ -1,3 +1,4 @@
+import { needsComposition } from '../shotComposition.ts';
 import type { WorkflowStage } from "./workflow";
 import { adaptationReviewSummary, sharedPlanningReady, episodePlanningReady, scriptReady } from "../adaptation.ts";
 
@@ -79,7 +80,8 @@ export function deriveWorkflowGuide(input: {
     const version = visual.versions?.[id];
     return !version || version.status !== "locked" || !version.references?.some((ref: Value) => ref.role === "primary" && ref.assetId);
   });
-  const imageState = generatedState(document, shots, "image");
+  const compositionShots = shots.filter(shot => needsComposition(document, shot));
+  const imageState = generatedState(document, compositionShots, "image");
   const videoState = generatedState(document, shots, "video");
   const imageRunning = activeJob(jobs, (job) => job.kind === "image" && job.input?.stage !== "visual_reference" && !job.input?.visual_reference);
   const videoRunning = activeJob(jobs, (job) => job.kind === "video");
@@ -131,9 +133,11 @@ export function deriveWorkflowGuide(input: {
         : hasVisualCards && !requiredVersionIds.length
           ? { stage: "art", state: "blocked", headline: "先在分镜规划中绑定本集资产", reasons: ["“本集需要”清单来自镜头的 VisualVersion 绑定。"], action: { label: "前往分镜规划", stage: "storyboard" } }
           : missingReferences.length
-          ? { stage: "art", state: "ready", headline: `${missingReferences.length} 个本集视觉版本待确认`, reasons: ["生成主参考图并锁定版本后，才能稳定生成分镜图。"] }
-          : { stage: "art", state: "complete", headline: requiredVersionIds.length ? "本集视觉资产已就绪" : "本集没有待确认的共享视觉资产", reasons: [], action: { label: "生成分镜图", stage: "images" } },
-    images: imageRunning
+          ? { stage: "art", state: "ready", headline: `${missingReferences.length} 个本集视觉版本待确认`, reasons: ["生成主参考图并锁定版本后，即可生成镜头视频，也可先看构图。"] }
+          : { stage: "art", state: "complete", headline: requiredVersionIds.length ? "本集视觉资产已就绪" : "本集没有待确认的共享视觉资产", reasons: [], action: compositionShots.length ? { label: "先看构图", stage: "images" } : { label: "生成镜头视频", stage: "video" } },
+    images: !compositionShots.length && shots.length
+      ? { stage: "images", state: "skipped", headline: "构图预览为可选步骤", reasons: ["当前镜头直接生成视频；需要时可为单个镜头选择先看构图。"], action: { label: "生成镜头视频", stage: "video" } }
+      : imageRunning
       ? { stage: "images", state: "running", headline: "分镜图正在生成", reasons: [`已完成 ${imageState.complete}/${imageState.total} 镜。`] }
       : imageState.stale
         ? { stage: "images", state: "stale", headline: "部分分镜图需要更新", reasons: ["镜头提示词或视觉绑定已经改变。"] }
@@ -148,6 +152,8 @@ export function deriveWorkflowGuide(input: {
         ? { stage: "video", state: "stale", headline: "部分视频需要更新", reasons: ["上游分镜图或生成参数已经改变。"] }
         : videoState.total && videoState.complete === videoState.total
           ? { stage: "video", state: "complete", headline: `本集 ${videoState.total} 条视频已就绪`, reasons: [], action: { label: "进入剪辑", stage: "editor" } }
+          : !shots.length || missingReferences.length || (hasVisualCards && !requiredVersionIds.length)
+            ? { stage: "video", state: "blocked", headline: !shots.length ? "先建立本集分镜" : "先确认本集视觉资产与绑定", reasons: [], action: { label: !shots.length ? "前往分镜规划" : "前往塑角造景", stage: !shots.length ? "storyboard" : "art" } }
           : imageState.complete < imageState.total
             ? { stage: "video", state: "blocked", headline: "先完成所需分镜图", reasons: [`当前分镜图完成 ${imageState.complete}/${imageState.total}。`], action: { label: "前往分镜图", stage: "images" } }
             : { stage: "video", state: "ready", headline: `可生成 ${videoState.total - videoState.complete} 条镜头视频`, reasons: [] },

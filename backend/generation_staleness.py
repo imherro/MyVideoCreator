@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+from .shot_composition import needs_composition, execution_edges
 
 from .production_context import compose_project_document
 
@@ -78,7 +79,7 @@ def reconcile_generation_staleness(
             data['stale'] = True
             data['staleReason'] = 'generation-fingerprint-mismatch'
             stale_roots.add(image_id)
-            stale_shot_outputs.update(filter(None, (image_id, _video_node_id(shot))))
+            stale_shot_outputs.update(filter(None, (image_id, _video_node_id(shot) if needs_composition(value, shot) else None)))
         else:
             # The fingerprint is the canonical comparison of shot variables,
             # visual bindings, style version, provider, and model. Clear stale
@@ -86,7 +87,7 @@ def reconcile_generation_staleness(
             # the shorter editable node prompt.
             data['stale'] = False
             data.pop('staleReason', None)
-    affected = _descendants(value.get('edges') or [], stale_roots) | stale_shot_outputs
+    affected = _descendants(execution_edges(value), stale_roots) | stale_shot_outputs
     for node_id in affected - stale_roots:
         node = nodes.get(node_id)
         data = (node or {}).get('data') or {}

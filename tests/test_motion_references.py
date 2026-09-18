@@ -350,3 +350,49 @@ def test_wan_h3_compiler_keeps_explicit_mode_when_motion_added_or_removed(sample
     assert with_motion['generation_mode']==first['generation_mode']
     assert with_motion['asset_ids']==first['asset_ids']
     assert with_motion['motion_reference']['assetId']==aid
+
+
+def test_direct_composition_skips_frame_but_keeps_bound_assets(sample_video):
+    from backend.workflows import execution_plan
+    doc, provider, job = fixture(sample_video, motion=False)
+    frame_id = doc['nodes'][0]['data']['assetId']
+    shot = doc['shots'][0]
+    shot['compositionMode'] = 'direct'
+    shot['assetBindings']['characters'] = [{'versionId': 'cv'}]
+    doc['filmBible']['visual'] = {
+        'cards': {'c': {'id': 'c', 'name': '角色', 'kind': 'character'}},
+        'versions': {'cv': {'id': 'cv', 'cardId': 'c', 'status': 'locked',
+                          'references': [{'role': 'primary', 'assetId': frame_id}]}}}
+    # The asset may be the same file as an obsolete composition: its explicit
+    # character binding must still survive without inheriting composition role.
+    doc['nodes'][0]['data']['stale'] = True
+    result = compile_fixture(doc, provider, job)
+    assert result['composition_mode'] == 'direct'
+    assert result['asset_ids'] == [frame_id]
+    assert result['reference_manifest'][0]['purpose'] == 'character'
+    assert result['generation_mode']['actual'] == 'multimodal'
+    assert [n['id'] for n, _ in execution_plan(doc, ['v'])] == ['v']
+    assert [n['id'] for n, _ in execution_plan(doc)] == ['v']
+    assert [n['id'] for n, _ in execution_plan(doc, ['i'])] == ['i']
+    shot['compositionMode'] = 'preview'
+    with pytest.raises(ValueError, match='先看构图'):
+        compile_fixture(doc, provider, job)
+    doc['nodes'][0]['data']['stale'] = False
+    assert compile_fixture(doc, provider, job)['reference_manifest'][0]['purpose'] == '构图参考（非硬首帧）'
+
+
+def test_direct_without_references_is_not_text_only_fallback(sample_video):
+    doc, provider, job = fixture(sample_video, motion=False)
+    doc['shots'][0]['compositionMode'] = 'direct'
+    with pytest.raises(ValueError, match='至少需要'):
+        compile_fixture(doc, provider, job)
+
+
+def test_composition_mode_change_invalidates_only_video_and_preserves_media():
+    doc={'videoReferenceMode':'multimodal','shots':[{'id':'s','imageNode':'i','videoNode':'v','compositionMode':'preview'}],
+         'nodes':[{'id':'i','data':{'kind':'image','assetId':'img'}},{'id':'v','data':{'kind':'video','assetId':'vid'}}], 'edges':[]}
+    after=copy.deepcopy(doc);after['shots'][0]['compositionMode']='direct'
+    result=invalidate_motion_changes(doc,after)
+    assert result['nodes'][1]['data']['stale']
+    assert result['nodes'][1]['data']['assetId']=='vid'
+    assert not result['nodes'][0]['data'].get('stale')

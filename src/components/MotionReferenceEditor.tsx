@@ -1,3 +1,4 @@
+import { needsComposition } from '../shotComposition.ts';
 import { ChevronDown, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from 'react';
 import { motionCharacters, supportsMotionReference, videoGenerationMode, type MotionReference } from '../motionReference.ts';
@@ -60,6 +61,7 @@ export function MotionReferenceEditor(props: Props) {
   const patch = (value: Partial<MotionReference>) => props.onPatch({ motionReference: { ...reference, ...value } });
   return <section className="motion-reference-editor" aria-label="镜头动作参考">
     <div className="motion-reference-actions">
+    <label>镜头制作方式<select disabled={props.busy || mode !== 'multimodal'} value={needsComposition(props.document, props.shot) ? 'preview' : 'direct'} onChange={event=>props.onPatch({compositionMode:event.target.value})}><option value="direct">直接生成视频（默认）</option><option value="preview">先看构图再拍视频</option></select></label>
     <label>本镜头生成模式<select value={props.shot.videoReferenceMode || ''} onChange={event=>props.onPatch({videoReferenceMode:event.target.value || undefined})}><option value="">继承项目设置（{({multimodal:'多模态参考',first_frame:'严格首帧',first_last_frame:'严格首尾帧',legacy:'兼容历史'} as Value)[props.document.videoReferenceMode || 'legacy']}）</option><option value="multimodal">多模态参考</option><option value="first_frame">严格首帧（高级）</option><option value="first_last_frame">严格首尾帧（高级）</option></select></label>
     <label>本镜对白方式<select value={props.shot.dialogueMode || ''} onChange={event=>props.onPatch({dialogueMode:event.target.value || undefined})}><option value="">继承项目设置（{dialogueModeLabels[props.document.dialogueMode || 'full_dialogue']}）</option><option value="voice_sample">音色样本参考（无需逐句合成）</option><option value="full_dialogue">完整对白参考（先合成本镜对白）</option></select></label>
       <label>从项目素材选择动作参考（支持白模）<select aria-label="动作参考视频" disabled={working || props.busy} value={reference?.assetId || ''} onChange={e => bind(e.target.value)}>
@@ -96,6 +98,7 @@ export function MotionReferenceEditor(props: Props) {
           <span>镜头计划 <b>{preview.planned_shot_duration} 秒</b></span>
           <span>实际提交 <b>{preview.shot_duration} 秒</b></span>
           {preview.motion_reference && <span>动作参考 <b>{Number(preview.motion_reference.media?.duration).toFixed(2)} 秒</b></span>}
+          {preview.composition_mode && <span>制作方式 <b>{preview.composition_mode === "direct" ? "直接生成视频" : "先看构图再拍视频"}</b></span>}
           <span>生成模式 <b>{({multimodal:'多模态参考',first_frame:'严格首帧',first_last_frame:'严格首尾帧',legacy:'兼容历史'} as Value)[preview.generation_mode?.actual] || preview.generation_mode?.actual}</b></span>
           {preview.generation_mode?.requested !== preview.generation_mode?.actual && <span>选择模式 <b>{preview.generation_mode?.requested}</b></span>}
           {preview.dialogue_mode && <span>对白 <b>{dialogueModeLabels[preview.dialogue_mode.actual]}</b></span>}

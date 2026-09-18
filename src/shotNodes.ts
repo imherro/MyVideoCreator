@@ -19,6 +19,8 @@ export function importStoryboardShots<
     const previous = existing.get(shot.id);
     return {
       ...shot,
+      compositionMode: previous ? previous.compositionMode : 'direct',
+      videoReferenceMode: previous ? previous.videoReferenceMode : (shot.videoReferenceMode || ((doc as Value).videoReferenceMode && (doc as Value).videoReferenceMode !== 'legacy' ? (doc as Value).videoReferenceMode : 'multimodal')),
       storyboardNode: storyboardNodeId || previous?.storyboardNode || shot.storyboardNode,
       imageNode: previous?.imageNode,
       videoNode: previous?.videoNode,

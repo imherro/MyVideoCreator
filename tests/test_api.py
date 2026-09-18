@@ -298,7 +298,7 @@ def test_film_bible_and_shot_bindings_round_trip_through_project_document(authen
     assert restored['filmBible']['visual']==doc['filmBible']['visual']
     assert restored['filmBible']['visual']['cards'][card_id]['generation']['image']['mode']=='override'
     assert restored['filmBible']['visual']['versions'][version_id]['references'][0]['assetId']=='asset-reference'
-    assert restored['shots']==doc['shots']
+    assert restored['shots']==[{**shot, 'compositionMode': 'direct'} for shot in doc['shots']]
     assert all(card['source']=={'type':'script_extraction'} for card in restored['filmBible']['visual']['cards'].values())
 
 def test_phase5_roundtrip_preserves_versions_binding_fingerprint_stale_and_media_without_jobs(authenticated):

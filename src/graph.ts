@@ -1,3 +1,4 @@
+import { compositionEdge } from './shotComposition.ts';
 import type {Node, Edge} from '@xyflow/react';
 import {canvasScriptInputMatches} from './canvasRunInput.ts';
 
@@ -24,7 +25,7 @@ export function descendants(graph:Graph, roots:string[]):Set<string>{
   while(pending.length){
     const source=pending.pop();
     for(const edge of graph.edges){
-      if(edge.source===source&&!found.has(edge.target)){
+      if(edge.source===source&&!found.has(edge.target)&&!compositionEdge(graph,edge.source,edge.target)){
         found.add(edge.target);pending.push(edge.target);
       }
     }

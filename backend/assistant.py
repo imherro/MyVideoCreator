@@ -119,7 +119,8 @@ def context_for(body, state):
             locked=v.get('status')=='locked' or (v.get('status')=='deprecated' and (v.get('provenance') or {}).get('lockedAt') is not None)
             if not locked or not any(r.get('role')=='primary' and r.get('assetId') for r in v.get('references',[])):
                 missing.append(clean(card.get('name') or binding.get('versionId'),100))
-        item={'number':index,'label':clean(shot.get('title') or shot.get('id') or shot.get('uid'),120),'missingReferences':missing}
+        from .shot_composition import needs_composition
+        item={'needsComposition':needs_composition(d,shot),'number':index,'label':clean(shot.get('title') or shot.get('id') or shot.get('uid'),120),'missingReferences':missing}
         for kind in ('image','video'):
             nd=nodes.get(shot.get(kind+'Node') or (shot.get('pipeline') or {}).get(kind+'NodeId'),{}).get('data',{})
             item[kind]={'exists':bool(nd.get('assetId')),'stale':bool(nd.get('stale'))}
@@ -155,7 +156,7 @@ def context_for(body, state):
         else:stage_action('script','完善本集剧本')
     elif not shots:stage_action('storyboard','进入分镜规划')
     elif problems:stage_action('art','检查资产主参考图')
-    elif any(not i['image']['exists'] or i['image']['stale'] for i in context['shots']):stage_action('images')
+    elif any(i.get('needsComposition', True) and (not i['image']['exists'] or i['image']['stale']) for i in context['shots']):stage_action('images')
     elif any(not i['video']['exists'] or i['video']['stale'] for i in context['shots']):stage_action('video')
     else:stage_action('editor')
     relevant=next((j for j in jobs if j['status'] in ('failed','interrupted','queued','running') and (not node or j['node_id']==node['id']) and not any(newer['node_id']==j['node_id'] and newer['created']>j['created'] and newer['status']=='succeeded' for newer in jobs)),None)
@@ -206,7 +207,7 @@ def opening_hint(context, actions):
             headline='剧本已有正文，可以拆解分镜';detail='下一步从本集剧本生成分镜规划。';questions=['如何生成分镜规划','会同时生成资产卡吗','需要手动连线吗']
         else:
             headline='先完善本集剧本';detail='可以直接编写、粘贴，或使用 AI 辅助创作。';questions=['我可以直接粘贴剧本吗','如何使用 AI 写剧本','剧本写好后下一步是什么']
-    elif any(i['image']['stale'] or i['video']['stale'] for i in shots):
+    elif any((i.get('needsComposition', True) and i['image']['stale']) or i['video']['stale'] for i in shots):
         headline='部分生成结果需要更新';detail='旧素材仍保留；先核对提示词、参考绑定或生成参数的变化。';questions=['为什么显示待更新','哪些镜头需要更新','是否必须重新生成']
     elif any(not i['image']['exists'] for i in shots):
         headline='可以继续制作分镜图';detail='先检查资产绑定和主参考图，再生成所需镜头。';questions=['怎么批量生成分镜图','如何保持人物一致','可以修改图像提示词吗']

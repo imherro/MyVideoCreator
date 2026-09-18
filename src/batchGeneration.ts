@@ -1,3 +1,4 @@
+import { needsComposition, visualVideoReadiness } from './shotComposition.ts';
 import { videoGenerationMode, supportsMotionReference } from "./motionReference.ts";
 import { requiresInitialStateReview } from "./graph.ts";
 import {
@@ -203,6 +204,8 @@ function planShotNodes(
       continue;
     }
     if (kind === "shot_videos") {
+      const referenceError = visualVideoReadiness(document, shot);
+      if (referenceError) { result.blocked.push({id:node.id,label,reason:referenceError}); continue; }
       const mode = videoGenerationMode(document,shot);
       if (mode === 'multimodal' && !supportsMotionReference(provider,String(node.data.model || ''))) {
         result.blocked.push({id:node.id,label,reason:'当前适配器尚不支持所选多模态模式'}); continue;
@@ -212,7 +215,7 @@ function planShotNodes(
       }
       const imageId = shot.imageNode || shot.pipeline?.imageNodeId;
       const image = imageId ? nodes.get(imageId) : undefined;
-      if ((!image?.data.assetId && mode !== "multimodal") || image?.data.stale) {
+      if (needsComposition(document, shot) && (!image?.data.assetId || image?.data.stale)) {
         result.blocked.push({ id: node.id, label, reason: "对应分镜图尚未生成或已经过期" });
         continue;
       }

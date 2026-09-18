@@ -17,6 +17,7 @@ def topological(nodes,edges):
     return result
 
 def execution_plan(document,selected=None,include_descendants=False,exact=False):
+    from .shot_composition import execution_edges, needs_composition
     # Visual Bible nodes and edges are a managed canvas projection. They are
     # never execution dependencies; generation reads shot.assetBindings.
     managed_visual_ids={
@@ -26,7 +27,7 @@ def execution_plan(document,selected=None,include_descendants=False,exact=False)
     }
     nodes=[node for node in document.get('nodes',[]) if node.get('id') not in managed_visual_ids]
     edges=[
-        edge for edge in document.get('edges',[])
+        edge for edge in execution_edges(document)
         if edge.get('source') not in managed_visual_ids
         and edge.get('target') not in managed_visual_ids
         and edge.get('data',{}).get('origin') not in ('composition_output','composition_source')
@@ -38,7 +39,8 @@ def execution_plan(document,selected=None,include_descendants=False,exact=False)
     order=topological(nodes,edges);mapping={n['id']:n for n in nodes}
     parents={n:[] for n in mapping}
     for edge in edges: parents[edge['target']].append(edge['source'])
-    wanted=set(selected or order)
+    optional_images={s.get('imageNode') or (s.get('pipeline') or {}).get('imageNodeId') for s in document.get('shots',[]) if not needs_composition(document,s)}
+    wanted=set(selected or [n for n in order if n not in optional_images])
     if not wanted<=mapping.keys(): raise ValueError('选中的节点不存在')
     if exact:
         if not selected: raise ValueError('精确批量执行必须指定节点')

@@ -1,3 +1,4 @@
+import { needsComposition, visualVideoReadiness } from './shotComposition.ts';
 import { effectiveVoiceProfile } from './filmBible/voices.ts';
 import { voiceCardId } from './filmBible/voiceResolution.ts';
 import { requiresInitialStateReview } from "./graph.ts";
@@ -64,7 +65,7 @@ export function deriveVideoProductionRows(
   return (document.shots || []).map((shot: Value, index: number) => {
     const imageNode = nodes.get(shotImageNodeId(shot));
     const videoNode = nodes.get(shotVideoNodeId(shot));
-    const firstFrame = imageNode?.data?.assetId ? assetMap.get(imageNode.data.assetId) : undefined;
+    const firstFrame = needsComposition(document, shot) && imageNode?.data?.assetId ? assetMap.get(imageNode.data.assetId) : undefined;
     const endFrame = videoNode?.data?.end_asset_id ? assetMap.get(videoNode.data.end_asset_id) : undefined;
     const videoAsset = videoNode?.data?.assetId ? assetMap.get(videoNode.data.assetId) : undefined;
     const job = latestJob(jobs, videoNode?.id);
@@ -131,19 +132,20 @@ export function deriveVideoProductionRows(
     else if (mode === 'first_frame' && videoNode.data?.end_asset_id) readinessReason = "单首帧模式不能提交尾帧";
     else if (mode === 'first_last_frame' && !endFrame) readinessReason = "首尾帧模式缺少尾帧";
     else if (['first_frame','first_last_frame'].includes(mode) && dialogueAudioAssets.length) readinessReason = "固定对白音频需使用多模态参考";
-    else if (!firstFrame && mode !== 'multimodal') readinessReason = "缺少已生成的首帧";
-    else if (imageNode?.data?.stale) readinessReason = "首帧已经过期，请先重新生成并核验";
+    else if (!firstFrame && needsComposition(document, shot)) readinessReason = "缺少已生成的首帧";
+    else if (needsComposition(document, shot) && imageNode?.data?.stale) readinessReason = "首帧已经过期，请先重新生成并核验";
     else if (mode !== 'multimodal' && requiresInitialStateReview(imageNode?.data?.prompt) && !imageNode?.data?.state_reviewed)
       readinessReason = "首帧包含关键初始状态，尚未人工核验";
     else if (!String(videoNode.data?.prompt || "").trim()) readinessReason = "Video Prompt 为空";
     else if (!provider || videoNode.data?.provider === "local") readinessReason = "尚未选择可用的视频 Provider";
     else if (!String(videoNode.data?.model || "").trim()) readinessReason = "尚未选择视频模型";
     else if (mode !== 'multimodal' && videoNode.data?.end_asset_id && !endFrameSupported) readinessReason = "当前模型不支持尾帧";
+    else if (visualVideoReadiness(document,shot)) readinessReason = visualVideoReadiness(document,shot);
     else if (dialogueReadinessReason) readinessReason = dialogueReadinessReason;
 
     let status: VideoProductionStatus;
     if (["queued", "running", "interrupted"].includes(job?.status)) status = "generating";
-    else if (videoNode?.data?.stale || imageNode?.data?.stale) status = "stale";
+    else if (videoNode?.data?.stale || (needsComposition(document, shot) && imageNode?.data?.stale)) status = "stale";
     else if (job?.status === "failed") status = "failed";
     else if (videoAsset) status = "complete";
     else if (readinessReason) status = "blocked";
