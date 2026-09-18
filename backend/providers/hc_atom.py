@@ -216,7 +216,8 @@ def _post_task(worker, job, client, path, body):
 
 
 def _task_value(client, path):
-    return _unwrap(_checked(client.get(path), recoverable=True))
+    value = _unwrap(_checked(client.get(path), recoverable=True))
+    return value['task'] if isinstance(value.get('task'), dict) else value
 
 
 def _wait_task(worker, job, client, path, remote, kind):
@@ -234,7 +235,7 @@ def _wait_task(worker, job, client, path, remote, kind):
         if status in ('SUCCESS', 'SUCCEEDED', 'COMPLETED'):
             urls = value.get('resultUrls') if kind == 'image' else None
             if not isinstance(urls, list):
-                urls = [value.get('resultUrl') or value.get('url') or value.get('video_url')]
+                urls = [value.get('resultUrl') or value.get('url') or value.get('video_url') or (value.get('content') or {}).get('url')]
             urls = [url for url in urls if isinstance(url, str) and url]
             if not urls:
                 raise ValueError('幻场 AI 任务成功，但没有返回媒体地址')
@@ -546,6 +547,9 @@ def generate_video(worker, job, provider):
     model = str(job['input'].get('model') or model_for(provider, 'video')).strip()
     if not model:
         raise ValueError('请填写幻场 AI 视频模型 ID')
+    from ..reference_video_models import family
+    if family(provider, model):
+        return _generate_reference_video(worker, job, provider, model)
     refs = common.assets_for(job)
     params = {**(provider.get('parameters') or {}).get('video', {}), **job['input'].get('parameters', {})}
     if _is_seedance(model):
@@ -592,3 +596,37 @@ def cancel(job, provider):
             return client.delete(path).is_success
     except httpx.HTTPError:
         return False
+
+
+def _generate_reference_video(worker, job, provider, model):
+    from ..reference_video_models import validate, prompt_for, family
+    from ..motion_references import silent_motion_asset
+    from ..voice_samples import submission_assets
+    from ..provider_assets import public_asset_url
+    from .volcengine_ark import _dialogue_reference_audio
+    path=_root(provider)+'/video/generation/tasks'
+    with httpx.Client(timeout=120,headers=_headers(provider,job.get('submission_id')),trust_env=True) as client:
+        remote=job.get('provider_job_id')
+        if not remote:
+            refs=common.assets_for(job)
+            inp={**job['input'],'model':model}
+            spec=validate(provider,inp,len(refs))
+            media=[('image', public_asset_url(provider,a['id'])) for a in refs]
+            if inp.get('motion_reference'):
+                media.append(('video',public_asset_url(provider,silent_motion_asset(job)['id'])))
+            if inp.get('voice_samples'):
+                media.extend(('audio',public_asset_url(provider,a['id'])) for a in submission_assets(job))
+            elif inp.get('dialogue_audio'):
+                media.append(('audio',_dialogue_reference_audio(job,spec['duration'],public_provider=provider)))
+            if family(provider,model)=='wan':
+                body={'model':model,'input':{'prompt':prompt_for(provider,inp),'media':[{'type':'reference_'+kind,'url':url} for kind,url in media]},
+                      'parameters':{**spec,'audio':spec['audio'] or any(kind=='audio' for kind,_ in media)}}
+            else:
+                body={'model':model,'content':[{'type':'text','text':prompt_for(provider,inp)}]+[
+                    {'type':kind+'_url',kind+'_url':{'url':url},'role':'reference_'+kind} for kind,url in media],
+                    'resolution':spec['resolution'],'duration':spec['duration'],'ratio':spec['ratio'],'aigc_watermark':spec['watermark']}
+            value=_unwrap(_post_task(worker,job,client,path,body))
+            remote=value.get('taskId') or value.get('task_id') or value.get('id')
+            if not remote: raise ValueError('幻场参考视频任务未返回任务编号')
+            s.attach_provider_job_id(job['id'],str(remote))
+        return _wait_task(worker,job,client,path,remote,'video')

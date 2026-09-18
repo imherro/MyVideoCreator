@@ -4304,7 +4304,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                     <label>目标时长（秒）<input type="number" min="5" max="3000" value={doc.duration} onChange={(event)=>update((document)=>applyTargetDuration(document,Number(event.target.value)))}/><small>策划目标，不会裁剪已有镜头或成片。</small></label>
                     <label>默认对白方式<select value={doc.dialogueMode || 'full_dialogue'} onChange={event=>update(document=>applyVideoOutputSetting(document,{dialogueMode:event.target.value}))}><option value="voice_sample">音色样本参考（无需逐句合成）</option><option value="full_dialogue">完整对白参考（先合成对白）</option></select><small>镜头可覆盖。修改保留旧结果并标记需更新；不会自动重新生成。</small></label>
                     <label>默认视频生成模式<select value={doc.videoReferenceMode || 'legacy'} onChange={event=>update(document=>applyVideoOutputSetting(document,{videoReferenceMode:event.target.value}))}><option value="multimodal">多模态参考（默认）</option><option value="first_frame">严格首帧（高级）</option><option value="first_last_frame">严格首尾帧（高级）</option>{(!doc.videoReferenceMode || doc.videoReferenceMode === 'legacy') && <option value="legacy">兼容历史模式（保持原有行为）</option>}</select><small>影响继承项目设置的镜头。模式修改后旧视频保留并标记需更新，历史任务不变。</small></label>
-                    <label>视频分辨率<select value={doc.videoResolution || "720p"} onChange={(event)=>{update((document)=>applyVideoResolution(document,event.target.value));setNotice("视频分辨率已修改；已有视频保留并标记为待更新");}}>{VIDEO_RESOLUTIONS.map((value)=><option key={value} value={value}>{value === "1080p" ? "1080p（10bit 位深）" : `${value}（8bit 位深）`}</option>)}</select><small>所有新视频任务继承该设置。</small></label>
+                    <label>视频分辨率<select value={doc.videoResolution || "720p"} onChange={(event)=>{update((document)=>applyVideoResolution(document,event.target.value));setNotice("视频分辨率已修改；已有视频保留并标记为待更新");}}>{VIDEO_RESOLUTIONS.map((value)=><option key={value} value={value}>{value.toUpperCase()}</option>)}</select><small>所有新视频任务继承该设置。</small></label>
                     <label>视频宽高比<select value={doc.videoRatio || doc.ratio || "16:9"} onChange={(event)=>update((document)=>applyVideoOutputSetting(document,{videoRatio:event.target.value}))}>{VIDEO_RATIOS.map((value)=><option key={value}>{value}</option>)}</select><small>{["first_frame","first_last_frame"].includes(doc.videoReferenceMode || "") ? "首帧／首尾帧模式下，视频比例跟随首帧图片。" : "视频的目标宽高比；adaptive 由模型决定。"}</small></label>
                     <label>视频输出时长<select value={doc.videoDuration ?? -1} onChange={(event)=>update((document)=>applyVideoOutputSetting(document,{videoDuration:Number(event.target.value)}))}><option value={-1}>-1（按分镜和对白自动）</option>{Array.from({length:27},(_,index)=>index+4).map((value)=><option key={value} value={value}>{value} 秒</option>)}</select><small>默认使用分镜时长；完整对白过长时延长，音色样本长度不影响时长。</small></label>
                     <label>视频格式<select value={doc.videoFormat || "mp4"} onChange={(event)=>update((document)=>applyVideoOutputSetting(document,{videoFormat:event.target.value}))}>{VIDEO_FORMATS.map((value)=><option key={value}>{value}</option>)}</select><small>用于输出与导出。</small></label>
@@ -5478,7 +5478,7 @@ function SettingsPanel({
                   url: "https://api-aigc.fzyinghe.com",
                   local: false,
                   models: { text: "", image: "", video: "doubao-seedance-2.5" },
-                  enabled_models: { text: [], image: [], video: ["doubao-seedance-2.5", "doubao-seedance-2.0"] },
+                  enabled_models: { text: [], image: [], video: ["doubao-seedance-2.5", "doubao-seedance-2.0", "wan3.0-video", "MiniMax-H3"] },
                   parameters: {
                     image: { size: "1024x1024", n: 1 },
                     video: { duration: 5, ratio: "16:9" },
@@ -5512,7 +5512,7 @@ function SettingsPanel({
                   enabled_models: {
                     text: [],
                     image: [],
-                    video: [],
+                    video: ["alibaba/wan-3.0", "minimax/hailuo-h3"],
                   },
                   parameters: {
                     image: { size: "1024x1024", resolution: "2k", outputFormat: "jpeg", max_references: 10 },

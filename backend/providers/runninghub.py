@@ -41,6 +41,8 @@ def model_for(provider, kind):
 
 def _media_models():
     return [
+        {'id':'alibaba/wan-3.0','name':'Wan 3.0（多模态参考）','kind':'video','capabilities':{'image_reference':True,'max_references':10,'end_frame':False}},
+        {'id':'minimax/hailuo-h3','name':'MiniMax H3（多模态参考 · 2K）','kind':'video','capabilities':{'image_reference':True,'max_references':9,'end_frame':False}},
         {
             'id': DEFAULT_IMAGE_MODEL,
             'name': 'Seedream 5 Pro（自动文生图 / 最多 10 图参考）',
@@ -270,6 +272,9 @@ def generate_video(worker, job, provider):
         with httpx.Client(timeout=120, headers=_headers(provider, False), trust_env=True) as client:
             return _wait_task(worker, job, client, _root(provider), job['provider_job_id'], 'video')
     model = str(job['input'].get('model') or model_for(provider, 'video')).strip()
+    from ..reference_video_models import family
+    if family(provider, model):
+        return _generate_reference_video(worker, job, provider, model)
     if model not in (DEFAULT_VIDEO_MODEL, 'bytedance/seedance-2.5-global-token'):
         raise ValueError('当前 RunningHub 视频适配器仅支持 Seedance 2.5 Token 配置')
     refs = common.assets_for(job)
@@ -374,3 +379,44 @@ def cancel(job, provider):
     # RunningHub Model API documents durable polling but currently exposes no
     # general cancellation endpoint for these model tasks.
     return False
+
+
+def _generate_reference_video(worker, job, provider, model):
+    from ..reference_video_models import validate, prompt_for, family
+    from ..motion_references import silent_motion_asset
+    from ..voice_samples import submission_assets
+    from .volcengine_ark import _dialogue_reference_audio
+    import base64
+    refs = common.assets_for(job)
+    inp = {**job['input'], 'model':model}
+    spec = validate(provider, inp, len(refs))
+    root = _root(provider)
+    with httpx.Client(timeout=120, headers=_headers(provider, False), trust_env=True) as client:
+        body = {'prompt':prompt_for(provider,inp),'duration':str(spec['duration']),'resolution':spec['resolution'],
+                'imageUrls':[_upload(client,root,asset) for asset in refs]}
+        if inp.get('motion_reference'):
+            body['videoUrls'] = [_upload(client,root,silent_motion_asset(job))]
+        if inp.get('voice_samples'):
+            body['audioUrls'] = [_upload(client,root,asset) for asset in submission_assets(job)]
+        elif inp.get('dialogue_audio'):
+            path=s.DATA/(s.uid('reference-dialogue-')+'.mp3')
+            try:
+                path.write_bytes(base64.b64decode(_dialogue_reference_audio(job,spec['duration']).split(',',1)[1]))
+                # Upload accepts only files inside the asset directory.
+                target=s.ASSETS/path.name
+                path.replace(target)
+                try: body['audioUrls']=[_upload(client,root,{'path':target.name,'mime':'audio/mpeg'})]
+                finally: target.unlink(missing_ok=True)
+            finally: path.unlink(missing_ok=True)
+        if family(provider,model)=='wan':
+            endpoint='/openapi/v2/alibaba/wan-3.0/reference-to-video'
+            body.update(aspectRatio=spec['ratio'],audio=spec['audio'] or bool(body.get('audioUrls')))
+        else:
+            endpoint='/openapi/v2/minimax/hailuo-h3/multimodal-to-video'
+            body.update(ratio=spec['ratio'],aigc_watermark=spec['watermark'])
+        if worker.cancelled(job): raise InterruptedError()
+        value=common.checked(client.post(root+endpoint,json=body))
+        remote=value.get('taskId')
+        if not remote: raise ValueError(str(value.get('errorMessage') or 'RunningHub 未返回 taskId'))
+        s.attach_provider_job_id(job['id'],str(remote))
+        return _wait_task(worker,job,client,root,remote,'video')

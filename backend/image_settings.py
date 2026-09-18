@@ -38,7 +38,7 @@ def resolve_image_settings(document, value, provider):
     size = '3072x1536' if panorama else IMAGE_SIZES.get(ratio, '2048x2048')
     if mode == 'video':
         # Video output uses a short-edge resolution and the project frame.
-        short = {'480p': 480, '720p': 720, '1080p': 1080}.get(document.get('videoResolution'), 720)
+        short = {'480p': 480, '720p': 720, '1080p': 1080, '768p': 768, '2k': 1440}.get(document.get('videoResolution'), 720)
         a, b = (int(part) for part in ratio.split(':'))
         width, height = (round(short * a / b), short) if a >= b else (short, round(short * b / a))
         size = f'{width // 8 * 8}x{height // 8 * 8}'

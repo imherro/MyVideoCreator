@@ -347,8 +347,8 @@ def project_create_document(body:ProjectCreate):
             raise ValueError('画幅只支持 16:9、9:16 或 1:1')
         document['ratio']=body.ratio
     if body.duration is not None:document['duration']=body.duration
-    if body.video_resolution not in ('480p','720p','1080p'):
-        raise ValueError('视频分辨率只支持 480p、720p 或 1080p')
+    if body.video_resolution not in ('480p','720p','768p','1080p','2k'):
+        raise ValueError('视频分辨率只支持 480p、720p、768p、1080p 或 2k')
     if body.video_ratio not in ('21:9','16:9','4:3','1:1','3:4','9:16','adaptive'):
         raise ValueError('视频宽高比无效')
     if body.video_duration!=-1 and not 4<=body.video_duration<=30:

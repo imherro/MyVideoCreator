@@ -332,3 +332,21 @@ def test_explicit_mode_changes_tail_role_without_dropping_it(sample_video):
     assert 'end_asset_id' not in reference
     assert reference['reference_manifest'][1]['purpose'] == '结束构图参考（非硬尾帧）'
     assert compile_motion_input(doc, 'v', 'video', reference, job['project_id'], provider) == reference
+
+
+@pytest.mark.parametrize('provider_type,model', [('hc_atom','wan3.0-video'),('hc_atom','MiniMax-H3'),('runninghub','alibaba/wan-3.0'),('runninghub','minimax/hailuo-h3')])
+def test_wan_h3_compiler_keeps_explicit_mode_when_motion_added_or_removed(sample_video,provider_type,model):
+    doc,provider,job=fixture(sample_video,provider_type,motion=False)
+    provider['models']['video']=model
+    job['input'].update(model=model,parameters={'resolution':'2k' if 'h3' in model.lower() else '720p'})
+    first=compile_fixture(doc,provider,job)
+    assert first['generation_mode']['actual']=='multimodal'
+    assert len(first['asset_ids'])==1 and not first.get('voice_samples')
+    assert compile_motion_input(doc,'v','video',first,job['project_id'],provider)==first
+    with s.db() as c:
+        aid=c.execute("SELECT id FROM assets WHERE project_id=? AND kind='video'",(job['project_id'],)).fetchone()['id']
+    doc['shots'][0]['motionReference']={'assetId':aid,'cameraMode':'use_shot_camera'}
+    with_motion=compile_fixture(doc,provider,job)
+    assert with_motion['generation_mode']==first['generation_mode']
+    assert with_motion['asset_ids']==first['asset_ids']
+    assert with_motion['motion_reference']['assetId']==aid

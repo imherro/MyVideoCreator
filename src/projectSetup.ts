@@ -22,7 +22,7 @@ export type ProjectSetupDraft = {
   style: string;
   ratio: "16:9" | "9:16" | "1:1";
   duration: number;
-  videoResolution: "480p" | "720p" | "1080p";
+  videoResolution: "480p" | "720p" | "768p" | "1080p" | "2k";
   videoRatio: "21:9" | "16:9" | "4:3" | "1:1" | "3:4" | "9:16" | "adaptive";
   videoDuration: number;
   videoFormat: "mp4" | "mov";
@@ -101,7 +101,7 @@ export function validateProjectSetupDraft(draft: ProjectSetupDraft): string[] {
   if (!(["16:9", "9:16", "1:1"] as string[]).includes(draft.ratio)) errors.push("请选择有效资产画幅");
   if (!Number.isFinite(draft.duration) || draft.duration < 5 || draft.duration > 3000)
     errors.push("目标时长应为 5–3000 秒");
-  if (!(["480p", "720p", "1080p"] as string[]).includes(draft.videoResolution))
+  if (!(["480p", "720p", "768p", "1080p", "2k"] as string[]).includes(draft.videoResolution))
     errors.push("请选择有效的视频分辨率");
   if (!(draft.videoDuration === -1 || (Number.isInteger(draft.videoDuration) && draft.videoDuration >= 4 && draft.videoDuration <= 30)))
     errors.push("视频输出时长应为 4–30 秒或 -1（按镜头自动）");

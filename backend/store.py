@@ -199,9 +199,10 @@ def init():
             from .adaptation import repair_legacy_protected_adaptation
             repaired = repair_legacy_protected_adaptation(c)
             c.execute('INSERT INTO settings VALUES(?,?)', ('migration_scoped_adaptation_v1', dumps({'repaired': repaired})))
-        from .model_migrations import enable_seedance_20, migrate_seedance_25
+        from .model_migrations import enable_seedance_20, migrate_seedance_25, enable_reference_video_models
         migrate_seedance_25(c)
         enable_seedance_20(c)
+        enable_reference_video_models(c)
 
 def get_setting(key, default=None):
     with db() as c:

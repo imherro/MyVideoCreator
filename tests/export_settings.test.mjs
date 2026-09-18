@@ -16,7 +16,7 @@ test('adaptive export ratio follows the project picture ratio', () => {
   const document={videoResolution:'480p',videoRatio:'adaptive',ratio:'1:1'};
   assert.equal(projectExportRatio(document), '1:1');
   assert.equal(defaultExportResolution(document), '480x480');
-  assert.deepEqual(exportResolutionOptions(document).map(option=>option.value), ['480x480','720x720','1080x1080']);
+  assert.deepEqual(exportResolutionOptions(document).map(option=>option.value), ['480x480','720x720','1080x1080','768x768','1440x1440']);
 });
 
 test('an explicit export resolution remains stable', () => {

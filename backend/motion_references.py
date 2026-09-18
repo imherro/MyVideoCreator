@@ -27,6 +27,10 @@ _CACHE_LOCK = threading.Lock()
 
 def capability(provider, model):
     """Only enable protocols verified in the provider's own API documentation."""
+    from .reference_video_models import caps as reference_caps
+    verified = reference_caps(provider, model)
+    if verified:
+        return verified
     kind = (provider or {}).get('type')
     model = str(model or '').lower()
     if kind == 'volcengine_ark' and re.match(r'^doubao-seedance-2-(?:0|5)(?:-|$)', model):
@@ -122,6 +126,10 @@ def compile_motion_input(document, node_id, kind, input_value, project_id, provi
             raise ValueError('未编译角色声音参考，请先确认角色样本后重新提交')
     else:
         result.pop('voice_samples', None)
+    from .reference_video_models import family, validate as validate_reference_model
+    reference_model = family(provider, result.get('model'))
+    if reference_model and mode['requested'] != 'multimodal':
+        raise ValueError('Wan 3.0 / H3 当前适配器仅支持显式多模态参考模式，请修改项目或镜头模式')
     if mode['requested'] in ('first_frame', 'first_last_frame'):
         nodes = {n['id']: n.get('data', {}) for n in document.get('nodes', [])}
         ids = list(nodes.get(node_id, {}).get('asset_ids', []))
@@ -237,7 +245,9 @@ def compile_motion_input(document, node_id, kind, input_value, project_id, provi
         raise ValueError('动作执行角色必须是本镜头已绑定的角色或其基础角色')
     if len(ids) > caps['max_images']:
         raise ValueError(f"完整参考图共 {len(ids)} 张，超出模型上限 {caps['max_images']}，不会截断提交")
-    duration = max(4, math.ceil(float((result.get('parameters') or {}).get('duration') or shot.get('duration') or 0)))
+    if reference_model and float((result.get('parameters') or {}).get('duration') or shot.get('duration') or 0) < 0:
+        raise ValueError('当前 Wan 3.0 / H3 适配器暂不支持自动时长，请指定镜头秒数')
+    duration = max(caps.get('min_duration', 4), math.ceil(float((result.get('parameters') or {}).get('duration') or shot.get('duration') or 0)))
     if duration > caps['max_duration']:
         raise ValueError(f"对白及项目策略要求 {duration} 秒，超出当前模型 {caps['max_duration']} 秒，请先调整镜头")
     from .video_dialogue import _apply_duration, TIMING_MARKER
@@ -298,6 +308,10 @@ def compile_motion_input(document, node_id, kind, input_value, project_id, provi
                   generation_revision=node.get('generation_revision', 0))
     # Explicit multimodal choice changes the protocol role, never drops the image.
     result.pop('end_asset_id', None)
+    if reference_model:
+        validate_reference_model(provider, result)
+        from .reference_video_models import prompt_for
+        result['prompt'] = prompt_for(provider, result)
     return result
 
 

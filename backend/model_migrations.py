@@ -125,3 +125,29 @@ def enable_seedance_20(connection):
     connection.execute(
         "INSERT INTO settings(key,value) VALUES('seedance_20_enabled','1') ON CONFLICT(key) DO UPDATE SET value='1'"
     )
+
+
+def enable_reference_video_models(connection):
+    """One-time additive availability update; preserve selected defaults and jobs."""
+    from .reference_video_models import MODELS
+    marker='wan3_h3_models_enabled_v1'
+    if connection.execute('SELECT 1 FROM settings WHERE key=?',(marker,)).fetchone(): return
+    row=connection.execute("SELECT value FROM settings WHERE key='providers'").fetchone()
+    providers=json.loads(row['value']) if row else []
+    targets=[]
+    for provider in providers:
+        additions=list(MODELS.get(provider.get('type'),{}))
+        if not additions: continue
+        enabled=provider.setdefault('enabled_models',{})
+        previous=enabled.get('video')
+        if previous is None: previous=[provider.get('models',{}).get('video')] if provider.get('models',{}).get('video') else []
+        enabled['video']=_append_unique(previous, additions)
+        targets.append((provider['id'],additions))
+    if not targets: return  # Wait until a relevant provider is configured.
+    connection.execute("UPDATE settings SET value=? WHERE key='providers'",(json.dumps(providers,ensure_ascii=False),))
+    for table,column in [('projects','document'),('productions','shared_context')]:
+        for item in connection.execute(f'SELECT id,{column} FROM {table} WHERE {column} IS NOT NULL').fetchall():
+            document=json.loads(item[column])
+            if _enable_in_document(document,targets):
+                connection.execute(f'UPDATE {table} SET {column}=?,revision=revision+1 WHERE id=?',(json.dumps(document,ensure_ascii=False),item['id']))
+    connection.execute('INSERT INTO settings(key,value) VALUES(?,?)',(marker,'1'))

@@ -1,5 +1,5 @@
 export const VIDEO_RATIOS = ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16", "adaptive"] as const;
-export const VIDEO_RESOLUTIONS = ["480p", "720p", "1080p"] as const;
+export const VIDEO_RESOLUTIONS = ["480p", "720p", "768p", "1080p", "2k"] as const;
 export const VIDEO_FORMATS = ["mp4", "mov"] as const;
 
 export function imageSizeForRatio(ratio: string) {

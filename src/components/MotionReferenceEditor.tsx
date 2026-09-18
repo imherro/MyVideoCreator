@@ -106,10 +106,10 @@ export function MotionReferenceEditor(props: Props) {
           if (!line.trim()) return <div className="motion-prompt-gap" key={lineIndex}/>;
           if (/^\[\/[^\]]+\]$/.test(line.trim())) return null;
           if (/^\[[^\]]+\]$/.test(line.trim())) return <h5 key={lineIndex}>{line.trim().slice(1, -1)}</h5>;
-          return <p className={/^@(?:图片|视频|音频)\d+/.test(line.trim()) ? 'motion-prompt-reference-line' : ''} key={lineIndex}>{line.split(/(@(?:图片|视频|音频)\d+)/g).map((part, index) => {
-          const match = /^@(图片|视频|音频)(\d+)$/.exec(part);
+          return <p className={/^@?(?:图片|图|视频|音频)\d+/.test(line.trim()) ? 'motion-prompt-reference-line' : ''} key={lineIndex}>{line.split(/(@?(?:图片|图|视频|音频)\d+)/g).map((part, index) => {
+          const match = /^@?(图片|图|视频|音频)(\d+)$/.exec(part);
           if (!match) return part;
-          const kind = ({图片:'image',视频:'video',音频:'audio'} as Value)[match[1]];
+          const kind = ({图片:'image',图:'image',视频:'video',音频:'audio'} as Value)[match[1]];
           const item = (preview.reference_manifest || []).find((entry: Value) => entry.kind === kind && Number(entry.index) === Number(match[2]));
           const media = item && (props.assets.find(a => a.id === item.assetId) || (kind === 'video' ? asset : undefined));
           return media?.url ? <InlineReference key={`${index}:${media.id}`} label={part} kind={kind} name={item.name || media.name} url={media.url}/> : part;
