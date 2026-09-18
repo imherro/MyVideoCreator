@@ -113,6 +113,10 @@ export function TaskDetailPage({ jobId, request }: { jobId: string; request: (pa
           const runtime = [...runtimePromptStages].reverse().find((item: Value) => item.id === stage.id || item.id === `${stage.id}_repair`);
           return <article className="prompt-stage" key={stage.id}>
             <h3>{stage.label} · {stage.schema_version}</h3>
+            {runtime?.recovery && <p>{runtime.recovery}</p>}
+            {(runtime?.attempts || []).map((attempt: Value, index: number) => <p key={index}>
+              请求 {index + 1} · 输出上限 {attempt.max_tokens} tokens · 已返回 {attempt.output_chars ?? "—"} 字符 · 结束原因：{attempt.finish_reason === "length" || attempt.finish_reason === "max_tokens" ? "达到输出上限，内容被截断" : attempt.finish_reason || (attempt.finished ? "服务未提供" : "等待返回")}
+            </p>)}
             <h4>System Prompt</h4><pre className="debug-block">{runtime?.system_prompt || stage.system_prompt}</pre>
             <h4>{runtime?.user_prompt || stage.user_prompt ? "User Prompt" : "User Prompt Template"}</h4><pre className="debug-block">{runtime?.user_prompt || stage.user_prompt || stage.user_prompt_template}</pre>
             <h4>Output Schema</h4><pre className="debug-block">{JSON.stringify(runtime?.response_schema || stage.response_schema, null, 2)}</pre>

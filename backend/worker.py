@@ -16,6 +16,7 @@ from .process_lock import ProcessLock
 from .editor_renderer import EditorRenderCompiler
 from .providers.common import RecoverableProviderError,assets_for,checked,download_result,register
 from .provider_auth import bearer_headers,clean_api_key,safe_provider_error
+from .text_output import TextOutputTruncated, output_budget
 
 class Worker:
     def __init__(self, concurrency=4):
@@ -226,13 +227,19 @@ class Worker:
         headers=bearer_headers(p)
         if schema and not (inp.get('provider','local')=='local' or p.get('structured')):
             user_prompt+='\n\n必须严格输出以下 JSON Schema 对应的单个 JSON 值，不要输出 Markdown 或解释：\n'+json.dumps(schema,ensure_ascii=False)
-        body={'model':inp.get('model') or p.get('model','local'),'messages':[{'role':'system','content':system_prompt},{'role':'user','content':user_prompt}], 'temperature':0.6,'max_tokens':min(int(inp.get('max_tokens',4096)),12000),'stream':True}
+        trace=job.get('_text_trace')
+        budget=output_budget({**inp,'kind':job['kind']},local=bool(p.get('local') or inp.get('provider','local')=='local'),stage_id=job.get('_text_stage',''),expanded=job.get('_text_expanded',False))
+        body={'model':inp.get('model') or p.get('model','local'),'messages':[{'role':'system','content':system_prompt},{'role':'user','content':user_prompt}], 'temperature':0.6,'max_tokens':budget,'stream':True}
+        attempt={'max_tokens':budget,'started':time.time(),'finish_reason':None}
+        if trace is not None:
+            trace.setdefault('attempts',[]).append(attempt)
+            job['_publish_trace']()
         if inp.get('provider','local')=='local':
             body['chat_template_kwargs']={'enable_thinking':False}
         if schema and (inp.get('provider','local')=='local' or p.get('structured')):
             body['response_format']={'type':'json_schema','json_schema':{'name':'structured_result','strict':True,'schema':schema}}
         self.progress(job,phase)
-        chunks=[]; last=0
+        chunks=[]; last=0; finish_reason=None
         with httpx.Client(timeout=httpx.Timeout(3600,connect=10),trust_env=not p.get('local',False)) as client:
             with client.stream('POST',p['url'].rstrip('/')+'/chat/completions',headers=headers,json=body) as response:
                 if not response.is_success:
@@ -245,13 +252,22 @@ class Worker:
                     data=line[5:].strip()
                     if data=='[DONE]': break
                     try:
-                        part=json.loads(data).get('choices',[{}])[0].get('delta',{}).get('content')
+                        packet=json.loads(data)
+                        if packet.get('usage'):attempt['usage']=packet['usage']
+                        choice=(packet.get('choices') or [{}])[0]
+                        if choice.get('finish_reason'):finish_reason=choice['finish_reason']
+                        part=choice.get('delta',{}).get('content')
                         if part: chunks.append(part)
                     except (ValueError,IndexError,AttributeError): continue
                     if time.time()-last>1:
                         s.job_update(job['id'],result={'text':''.join(chunks)})
                         last=time.time()
         text=''.join(chunks).strip()
+        attempt.update(finished=time.time(),finish_reason=finish_reason,output_chars=len(text))
+        s.job_update(job['id'],result={'text':text})
+        if trace is not None:job['_publish_trace']()
+        if finish_reason in ('length','max_tokens'):
+            raise TextOutputTruncated(f'模型输出达到长度上限（{budget} tokens），结果被截断；请缩短本次剧本或拆分规划后重试。')
         if not text: raise ValueError('文本模型没有返回正文，请检查模型聊天模板或切换模型。')
         return text
 
@@ -304,7 +320,16 @@ class Worker:
                     'started':time.time(),
                 }
                 prompt_trace.append(entry);publish_trace()
-                try:return self._chat_text(job,p,system,user,schema,phase)
+                stage_job={**job,'_text_trace':entry,'_text_stage':stage_id,'_publish_trace':publish_trace}
+                try:
+                    try:return self._chat_text(stage_job,p,system,user,schema,phase)
+                    except TextOutputTruncated:
+                        local=bool(p.get('local') or inp.get('provider','local')=='local')
+                        args={**inp,'kind':job['kind']}
+                        if output_budget(args,local=local,stage_id=stage_id,expanded=True)<=output_budget(args,local=local,stage_id=stage_id):raise
+                        entry['recovery']='输出被截断，提高输出额度后重试一次'
+                        publish_trace()
+                        return self._chat_text({**stage_job,'_text_expanded':True},p,system,user+'\n请精炼各字段，保留完整剧情和所有必需字段，输出完整闭合的 JSON。',schema,phase+'（扩大输出额度）')
                 except Exception as exc:
                     entry.update(status='request_failed',finished=time.time(),error=str(exc)[:1200]);publish_trace();raise
                 finally:

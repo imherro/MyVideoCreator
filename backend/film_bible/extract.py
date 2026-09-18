@@ -11,7 +11,7 @@ def _json(text,label):
     starts=[position for position in (value.find('{'),value.find('[')) if position>=0]
     if not starts:raise ValueError(label+'没有返回 JSON 值')
     try:return json.JSONDecoder().raw_decode(value[min(starts):])[0]
-    except json.JSONDecodeError as exc:raise ValueError(label+' JSON 格式无效') from exc
+    except json.JSONDecodeError as exc:raise ValueError(f'{label} JSON 格式无效（第 {exc.lineno} 行，第 {exc.colno} 列：{exc.msg}）') from exc
 
 def _visual(value):
     if isinstance(value,list):return {'cards':value}
@@ -56,6 +56,8 @@ def extract_storyboard(script,target_duration,provider_id,model_id,request,contr
         try:
             storyboard=normalize_bound_storyboard(_json(text,'分镜'),bible,key_ids,target_duration);repair_count=1
             if report:report('bound_storyboard_repair','validated')
-        except (ValueError,TypeError) as final:raise ValueError('分镜修正后仍不符合要求：'+str(final)) from final
+        except (ValueError,TypeError) as final:
+            if report:report('bound_storyboard_repair','validation_failed',str(final))
+            raise ValueError('分镜修正后仍不符合要求：'+str(final)) from final
     return {'text':json.dumps(storyboard,ensure_ascii=False),'filmBible':{'visual':bible},**storyboard,
       'repair_count':visual_repair_count+repair_count,'visual_repair_count':visual_repair_count,'storyboard_repair_count':repair_count}
