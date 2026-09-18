@@ -7,6 +7,16 @@ from backend.text_output import output_budget, TextOutputTruncated
 from backend.worker import Worker
 
 
+def test_commercial_budgets_keep_local_and_historical_limits_separate():
+    from backend.text_output import commercial_text_budget
+    assert commercial_text_budget('ark','doubao-seed-2-1-pro-260628','adaptation_generation')==32768
+    assert commercial_text_budget('ark','doubao-seed-2-1-pro-260628','script_generation')==24576
+    assert commercial_text_budget('local','','adaptation_episode_generation')==4000
+    assert commercial_text_budget('other','unknown','adaptation_generation')==12000
+    assert output_budget({'kind':'text','model':'doubao-seed-2-1-pro'})==16384
+    assert output_budget({'kind':'text','model':'doubao-seed-2-1-pro','max_tokens':4000})==4000
+
+
 def test_storyboard_budget_scales_and_repair_grows():
     inp={'kind':'storyboard','target_duration':120}
     assert output_budget(inp)==17000

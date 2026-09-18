@@ -844,8 +844,9 @@ def validate_script_generation_ready(connection, production_id, context, plan):
 def apply_adaptation_generation(job, generated):
     from . import store as s
     from .production_context import normalize_production_context
-    bundle = validate_adaptation_bundle(generated, generated=True)
     marker = job['input'].get('adaptation_generation') or {}
+    from .adaptation_references import decode_references
+    bundle = validate_adaptation_bundle(decode_references(generated,marker), generated=True)
     production_id = marker.get('productionId')
     allowed_events = set(marker.get('sourceEventIds') or [])
     if bundle['adaptationPlan']['format'] != marker.get('format'):

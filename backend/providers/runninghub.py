@@ -210,10 +210,30 @@ def _dimensions(job, params):
     return max(240, min(width, 8192)), max(240, min(height, 8192))
 
 
+def compact_image_prompt(prompt):
+    if len(prompt)<=2000:return prompt
+    # Only presentation boilerplate; do not summarise or truncate narrative.
+    lines=[]
+    for line in prompt.splitlines():
+        line=line.strip()
+        if line=='版本链（根版本→当前绑定版本）：':line='继承：'
+        line=line.replace('固定属性：','属性：').replace('不可改变：','保持：').replace('可见规格：','外观：')
+        if line:lines.append(line)
+    return '\n'.join(lines)
+
+
 def generate_image(worker, job, provider):
     model = str(job['input'].get('model') or model_for(provider, 'image')).strip()
     if model != DEFAULT_IMAGE_MODEL:
         raise ValueError('当前 RunningHub 图片适配器仅支持 Seedream 5 Pro 配置')
+    prompt=job['input']['prompt']
+    if not job.get('provider_job_id'):
+        prompt=compact_image_prompt(prompt)
+        telemetry=job.get('telemetry') or {}
+        telemetry['image_prompt']={'original_characters':len(job['input']['prompt']),'submitted_characters':len(prompt),'limit':2000,'prompt':prompt,'strategy':'仅压缩空白及系统参考格式标签，保留描述和约束'}
+        s.job_update(job['id'],telemetry=telemetry)
+        if len(prompt)>2000:
+            raise ValueError(f'RunningHub Seedream 5 Pro 提示词最多 2000 字符，格式压缩后仍有 {len(prompt)} 字符；请精简镜头描述或选择支持更长提示词的图片服务。未提交上游，未删除人物或参考约束。')
     refs = common.assets_for(job)
     if len(refs) > 10:
         raise ValueError('RunningHub Seedream 5 Pro 最多接受 10 张参考图')
@@ -226,7 +246,7 @@ def generate_image(worker, job, provider):
             if worker.cancelled(job):
                 raise InterruptedError()
             body = {
-                'prompt': job['input']['prompt'], 'width': width, 'height': height,
+                'prompt': prompt, 'width': width, 'height': height,
                 'resolution': '2k' if job['input'].get('image_spec') else str(params.get('resolution') or '2k'),
                 'outputFormat': str(params.get('outputFormat') or 'jpeg'),
             }

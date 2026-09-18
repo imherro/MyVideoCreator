@@ -52,7 +52,8 @@ def test_http_200_business_error_is_not_treated_as_created_task(monkeypatch):
         hc_atom.generate_video(worker, item, configured)
         assert False, 'business errors must fail before polling'
     except ValueError as exc:
-        assert str(exc) == '幻场 AI 返回业务错误：当前用户未分配该模型可用的厂商'
+        assert '账号未分配所选模型的可用厂商通道' in str(exc)
+        assert '未自动切换模型' in str(exc)
 
 
 def stored_job(kind, provider_value, provider_job_id=None):

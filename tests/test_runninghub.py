@@ -125,6 +125,19 @@ def test_image_reference_upload_submit_poll_and_download(monkeypatch):
     assert paths == ['/openapi/v2/media/upload/binary', '/openapi/v2/seedream-v5-pro/image-to-image', '/openapi/v2/query']
 
 
+def test_prompt_compaction_preserves_content_and_blocks_oversize_before_http(monkeypatch):
+    prompt=('  版本链（根版本→当前绑定版本）：\n    层1｜角色｜可见规格：没有手臂\n      固定属性：白袍\n      不可改变：机器人无手\n'*30)
+    compact=runninghub.compact_image_prompt(prompt)
+    assert len(compact)<len(prompt)
+    assert compact.count('没有手臂')==30 and compact.count('机器人无手')==30
+    assert runninghub.compact_image_prompt('正常短提示词')=='正常短提示词'
+    item=stored_job('image',provider());item['input']['prompt']='不可丢弃的描述'*400
+    monkeypatch.setattr(runninghub.httpx,'Client',lambda **kwargs:(_ for _ in ()).throw(AssertionError('must not submit')))
+    import pytest
+    with pytest.raises(ValueError,match='未提交上游'):
+        runninghub.generate_image(Worker(),item,provider())
+
+
 def test_video_selects_text_first_frame_and_multireference_endpoints(monkeypatch):
     original = httpx.Client
     cases = [(0, '/text-to-video'), (1, '/image-to-video'), (2, '/multimodal-video')]

@@ -63,6 +63,8 @@ def _checked(response, recoverable=False):
         code = value.get('code')
         if code not in (0, 200, '0', '200'):
             detail = value.get('msg') or value.get('message') or value.get('error') or code
+            if '未分配该模型可用的厂商' in str(detail):
+                raise ValueError('幻场 AI 账号未分配所选模型的可用厂商通道。请联系幻场为该账号开通该模型对应通道，或在项目中手动选择已开通的模型；系统未自动切换模型。上游信息：'+str(detail)[:200])
             raise ValueError('幻场 AI 返回业务错误：' + str(detail)[:500])
     return value
 

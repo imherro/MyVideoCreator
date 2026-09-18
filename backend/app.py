@@ -1,3 +1,4 @@
+from .text_output import commercial_text_budget
 import asyncio
 import hashlib
 import hmac
@@ -1467,7 +1468,7 @@ def analyze_script_import(production_id:str,import_id:str,body:ScriptImportAnaly
         if not target.get('providerId'):raise ValueError('请先在项目设置中选择默认文本模型')
         result=create_job_record(c,body.project_id,JobCreate(node_id='script-import:'+import_id,kind='text',submission_id=body.submission_id,input={
             'provider':target['providerId'],'model':target.get('modelId',''),'stage':'script_import_analysis',
-            'prompt':analysis_prompt(row,state['document'].get('duration') or 60),'max_tokens':16000,
+            'prompt':analysis_prompt(row,state['document'].get('duration') or 60),'max_tokens':commercial_text_budget(target['providerId'],target.get('modelId',''),'script_import_analysis'),
             'script_import_analysis':{'productionId':production_id,'importId':import_id,'filename':row['filename'],'targetDurationSeconds':state['document'].get('duration') or 60},
         }))
         c.execute('UPDATE script_imports SET analysis_job_id=? WHERE id=?',(result['id'],import_id))
@@ -1850,6 +1851,7 @@ def approve_episode_plan(production_id:str,episode_no:int,body:RevisionAction):
 
 @app.post('/api/productions/{production_id}/adaptation/generate')
 def generate_adaptation(production_id:str,body:TextGenerationCreate):
+    from .adaptation_references import reference_map
     from .adaptation import adaptation_fingerprint,protected_episode_nos,source_fingerprint,source_snapshot
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
@@ -1869,8 +1871,9 @@ def generate_adaptation(production_id:str,body:TextGenerationCreate):
 目标规格：'''.format(count=episode_count, after=episode_count + 1)+s.dumps(format_value)+'\n原著事件：\n'+s.dumps(sources)
         job_body=JobCreate(node_id='adaptation:'+production_id,kind='text',submission_id=body.submission_id,input={
             'provider':body.provider,'model':body.model,
-            'stage':'adaptation_generation','prompt':prompt,'max_tokens':12000,
+            'stage':'adaptation_generation','prompt':prompt,'max_tokens':commercial_text_budget(body.provider,body.model,'adaptation_generation'),
             'adaptation_generation':{
+                'referenceMap':reference_map([item['id'] for item in sources],[item['chapterId'] for item in sources]),
                 'productionId':production_id,'adaptationFingerprint':adaptation_fingerprint(context),
                 'sourceFingerprint':source_fingerprint(sources),'sourceEventIds':[item['id'] for item in sources],
                 'sourceChapterIds':list(dict.fromkeys(item['chapterId'] for item in sources)),
@@ -1906,7 +1909,7 @@ def generate_episode_plan(production_id:str,episode_no:int,body:TextGenerationCr
             '本集原著事件：\n'+s.dumps(sources))
         job_body=JobCreate(node_id=f'adaptation-episode:{production_id}:{episode_no}',kind='text',submission_id=body.submission_id,input={
             'provider':body.provider,'model':body.model,
-            'stage':'adaptation_episode_generation','prompt':prompt,'max_tokens':4000,
+            'stage':'adaptation_episode_generation','prompt':prompt,'max_tokens':commercial_text_budget(body.provider,body.model,'adaptation_episode_generation'),
             'continuity_context':continuity,
             'episode_plan_generation':{
                 'productionId':production_id,'episodeNo':episode_no,
@@ -2052,7 +2055,7 @@ def assist_episode_script(production_id:str,episode_no:int,body:DirectScriptGene
         context=direct_script_context(c,project_row)
         prompt='请根据创作要求生成或修订本集剧本，只输出本集。\n创作要求：'+body.instruction.strip()+'\n项目规格、Bible 与前集承接：'+s.dumps(context)+'\n本集现有剧本：'+s.dumps(script)
         result=create_job_record(c,project_row['id'],JobCreate(node_id='episode-script:'+project_row['id'],kind='text',submission_id=body.submission_id,input={
-            'provider':body.provider,'model':body.model,'stage':'script_generation','prompt':prompt,'max_tokens':12000,
+            'provider':body.provider,'model':body.model,'stage':'script_generation','prompt':prompt,'max_tokens':commercial_text_budget(body.provider,body.model,'script_generation'),
             'episode_script_generation':{'productionId':production_id,'episodeNo':episode_no,'scriptRevision':script['revision'],'mode':'direct','context':context},
         }))
     s.event(project_row['id'],{'type':'job','id':result['id']})
@@ -2085,7 +2088,7 @@ def generate_episode_scripts(production_id:str,body:ScriptGenerationCreate):
             job_body=JobCreate(node_id='episode-script:'+project_row['id'],kind='text',
                 submission_id=body.submission_id+f':{episode_no:03d}',input={
                     'provider':body.provider,'model':body.model,
-                    'stage':'script_generation','prompt':prompt,'max_tokens':12000,
+                    'stage':'script_generation','prompt':prompt,'max_tokens':commercial_text_budget(body.provider,body.model,'script_generation'),
                     'episode_script_generation':{
                         'productionId':production_id,'episodeNo':episode_no,
                         'scriptRevision':script['revision'],'adaptationFingerprint':fingerprint,

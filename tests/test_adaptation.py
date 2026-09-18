@@ -79,6 +79,31 @@ def save_and_approve(client, production, adaptation):
     return approved.json()
 
 
+def test_new_adaptation_job_short_refs_round_trip_to_real_database_ids(adaptation_client):
+    from backend.adaptation import apply_adaptation_generation
+    client=adaptation_client
+    production,episode,chapter,adaptation=setup_production(client,count=1)
+    saved=client.put(f'/api/productions/{production["id"]}/adaptation',json={k:adaptation[k] for k in ('revision','adaptationPlan','episodePlans','monetizationPlan')})
+    assert saved.status_code==200
+    eid=s.uid('source-event-');now=time.time()
+    with s.db() as c:
+        c.execute('INSERT INTO source_events VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',(eid,production['id'],chapter['id'],1,'[]','发现密信','high','警觉','{}',None,now,now))
+    response=client.post(f'/api/productions/{production["id"]}/adaptation/generate',json={'project_id':episode['id'],'provider':'local','model':'','submission_id':'short-ref-roundtrip'})
+    assert response.status_code==200,response.text
+    job=response.json();marker=job['input']['adaptation_generation']
+    assert marker['referenceMap']['events']=={'E001':eid}
+    assert eid not in job['input']['prompt'] and chapter['id'] not in job['input']['prompt']
+    generated={k:copy.deepcopy(adaptation[k]) for k in ('adaptationPlan','episodePlans','monetizationPlan')}
+    generated['adaptationPlan'].pop('status');generated['adaptationPlan']['sourceEventIds']=['E001']
+    for plan in generated['episodePlans']:
+        plan.pop('status');plan['sourceChapterRefs']=['C001']
+    s.job_update(job['id'],status='running')
+    apply_adaptation_generation(job,generated)
+    final=client.get(f'/api/productions/{production["id"]}/adaptation').json()
+    assert final['adaptationPlan']['sourceEventIds']==[eid]
+    assert final['episodePlans'][0]['sourceChapterRefs']==[chapter['id']]
+
+
 def test_generated_plan_repairs_optional_monetization_outside_episode_range():
     generated = {
         'adaptationPlan': {

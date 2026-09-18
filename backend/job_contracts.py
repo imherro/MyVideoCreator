@@ -26,6 +26,12 @@ def freeze_prompt_contract(kind: str, value: dict, *, origin: str = 'submission'
     elif stage == 'adaptation_generation':
         from .adaptation import ADAPTATION_SCHEMA, ADAPTATION_SYSTEM_PROMPT
         system_prompt, response_schema, schema_version = ADAPTATION_SYSTEM_PROMPT, ADAPTATION_SCHEMA, 'adaptation-plan/v1'
+        mapping=(result.get('adaptation_generation') or {}).get('referenceMap')
+        if mapping:
+            from .adaptation_references import freeze_references
+            result['prompt'],response_schema=freeze_references(result['prompt'],response_schema,mapping)
+            schema_version='adaptation-plan/v2'
+            system_prompt+=' sourceEventIds 使用本次任务的 E 短编号，sourceChapterRefs 使用 C 短编号；只能选择输入已有编号。'
     elif stage == 'adaptation_episode_generation':
         from .adaptation import EPISODE_PLAN_SCHEMA, EPISODE_PLAN_SYSTEM_PROMPT
         system_prompt, response_schema, schema_version = EPISODE_PLAN_SYSTEM_PROMPT, EPISODE_PLAN_SCHEMA, 'episode-plan/v2'
