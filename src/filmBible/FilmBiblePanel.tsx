@@ -185,6 +185,8 @@ export function FilmBiblePanel({
   const voiceJob = jobs.find(item => item.id === storedVoice?.generationJobId);
   const voiceGenerating = ["queued", "running"].includes(voiceJob?.status || "");
   const previewAsset = assets.find(item => item.id === storedVoice?.previewAssetId) || voiceJob?.result?.assets?.find((item: Record<string, any>) => item.id === storedVoice?.previewAssetId);
+  const previewDuration = Number(previewAsset?.metadata?.duration || 0);
+  const invalidPreviewDuration = storedVoice?.source?.type !== "uploaded" && previewDuration > 0 && (previewDuration < 2 || previewDuration > 30);
   const [referenceOpen, setReferenceOpen] = useState(true);
   const dialogueRows = useMemo(
     () => projectCharacterDialogueRows({
@@ -646,8 +648,8 @@ export function FilmBiblePanel({
               const row = dialogueRows.find(row => row.id === event.target.value);
               if (row) setVoiceDraft({...voiceDraft, previewText: row.text, parameters: {...voiceDraft.parameters, emotion: row.emotion}});
             }}><option value="">{dialogueRows.length ? "从本集镜头对白填入…" : "暂无本角色对白，可使用剧本节选"}</option>{dialogueRows.filter(row => row.text.trim()).map(row => <option key={row.id} value={row.id}>{row.shotId} · {row.text}</option>)}</select></label>
-            <div className="voice-text-heading full"><span>试听文本 · {previewTextSource}</span><button type="button" className="quiet" disabled={voiceDraft.status === "locked" || voiceBusy || voiceGenerating || !suggestedPreview.text} onClick={() => setVoiceDraft({...voiceDraft, previewText:suggestedPreview.text, parameters:{...voiceDraft.parameters,emotion:suggestedPreview.emotion}})}>填入{dialogueRows.some(row => row.text.trim()) ? "本集对白" : "剧本节选"}</button></div>
-            <label className="full voice-text-editor">试听台词<textarea value={voiceDraft.previewText} disabled={voiceDraft.status === "locked" || voiceBusy || voiceGenerating} onChange={(event)=>setVoiceDraft({...voiceDraft,previewText:event.target.value})}/></label>
+            <div className="voice-text-heading full"><span>试听文本 · {previewTextSource}</span><button type="button" className="quiet" disabled={voiceDraft.status === "locked" || voiceBusy || voiceGenerating || !suggestedPreview.text} onClick={() => setVoiceDraft({...voiceDraft, previewText:suggestedPreview.text, parameters:{...voiceDraft.parameters,emotion:suggestedPreview.emotion}})}>填入建议试听文本</button></div>
+            <small className="full">建议使用 8–15 秒的完整试听文本；本角色对白不足时可朗读剧本节选。锁定后请在默认声音或状态音色中选用新版本。</small><label className="full voice-text-editor">试听台词<textarea value={voiceDraft.previewText} disabled={voiceDraft.status === "locked" || voiceBusy || voiceGenerating} onChange={(event)=>setVoiceDraft({...voiceDraft,previewText:event.target.value})}/></label>
             <div className="two-fields">
               <label>语速<select value={voiceDraft.parameters.speechRate} disabled={voiceDraft.status === "locked"} onChange={(event)=>setVoiceDraft({...voiceDraft,parameters:{...voiceDraft.parameters,speechRate:Number(event.target.value)}})}><option value={-25}>较慢</option><option value={0}>正常</option><option value={25}>较快</option></select></label>
               <label>情绪<input value={voiceDraft.parameters.emotion} disabled={voiceDraft.status === "locked"} placeholder="留空自动演绎" onChange={(event)=>setVoiceDraft({...voiceDraft,parameters:{...voiceDraft.parameters,emotion:event.target.value}})}/></label>
@@ -657,7 +659,8 @@ export function FilmBiblePanel({
               {voiceDraft.status !== "locked" && <button onClick={()=>onSaveVoice(card.id,voiceDraft)}>保存声音设定</button>}
               {voiceDraft.status !== "locked" && voiceDraft.source?.type !== "uploaded" && <button className="primary" disabled={voiceBusy || voiceGenerating || !voiceDraft.previewText.trim()} title="用当前文本生成并播放试听" onClick={()=>{setAutoPreview({cardId:card.id,previousAssetId:storedVoice?.previewAssetId});setVoiceBusy(true);setVoiceError("");void onGenerateVoice(card.id,voiceDraft).catch((reason)=>{setAutoPreview(null);setVoiceError(reason?.message||String(reason));}).finally(()=>setVoiceBusy(false));}}>{voiceBusy || voiceGenerating?<LoaderCircle className="spin" size={14}/>:<Volume2 size={14}/>} {voiceGenerating ? "正在生成试听…" : "生成试听"}</button>}
 
-              {storedVoice?.status === "locked" ? <button onClick={()=>onLockVoice(card.id,false)}>创建新声音版本</button> : storedVoice?.previewAssetId ? <button disabled={voiceBusy || voiceGenerating || voiceIdentity(voiceDraft)!==voiceIdentity(storedVoice)} title="先保存设置，再试听并锁定当前样本" onClick={()=>onLockVoice(card.id,true)}>锁定为角色声音参考 V{storedVoice.version}</button> : null}
+              {invalidPreviewDuration && <small className="error">当前试听为 {previewDuration.toFixed(2)} 秒，不符合 2–30 秒要求；请使用更完整文本重新生成。</small>}
+              {storedVoice?.status === "locked" ? <button onClick={()=>onLockVoice(card.id,false)}>创建新声音版本</button> : storedVoice?.previewAssetId ? <button disabled={voiceBusy || voiceGenerating || invalidPreviewDuration || voiceIdentity(voiceDraft)!==voiceIdentity(storedVoice)} title="先保存设置，再试听并锁定当前样本" onClick={()=>onLockVoice(card.id,true)}>锁定为角色声音参考 V{storedVoice.version}</button> : null}
               {storedVoice?.status === 'locked' && !storedVoice.referenceAssetId && storedVoice.previewAssetId && <button onClick={()=>onLockVoice(card.id,true)}>将试听确认为角色声音参考</button>}
               {storedVoice?.referenceAssetId && storedVoice.referenceAssetId !== storedVoice.previewAssetId && <button onClick={()=>{const asset=assets.find(item=>item.id===storedVoice.referenceAssetId);if(asset)onPreviewAsset(asset);}}>试听已确认声音参考</button>}
               {storedVoice?.status === "locked" && <button className="primary" disabled={voiceBusy} onClick={()=>{setVoiceBusy(true);setVoiceError("");void onGenerateCharacterDialogue(card.id).catch((reason)=>setVoiceError(reason?.message||String(reason))).finally(()=>setVoiceBusy(false));}}><Volume2 size={14}/>生成本集全部对白</button>}

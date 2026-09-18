@@ -2,6 +2,7 @@ import base64
 import json
 import time
 
+import pytest
 import httpx
 
 from backend import store as s
@@ -94,3 +95,28 @@ def test_speech_v3_sse_uses_fixed_voice_and_registers_dialogue(monkeypatch):
 def test_speech_verify_does_not_make_a_paid_request():
     result = volcengine_speech.verify({'api_key': 'configured', 'resource_id': 'seed-tts-2.0'})
     assert result['status'] == 'configured'
+
+
+@pytest.mark.parametrize("duration,valid", [(1,False),(2,True),(8,True),(30,True),(31,False),(float("nan"),False)])
+def test_voice_sample_duration_checked_before_registration(monkeypatch, tmp_path, duration, valid):
+    monkeypatch.setattr(s, 'DATA', tmp_path)
+    payload = base64.b64encode(b'fake-mp3').decode()
+    original = httpx.Client
+    def respond(request):
+        return httpx.Response(200, text='data: ' + json.dumps({'code':0,'data':payload}) + '\n\n')
+    monkeypatch.setattr(httpx, 'Client', lambda **kwargs: original(**kwargs, transport=httpx.MockTransport(respond)))
+    monkeypatch.setattr(common, 'probe', lambda _: {'duration':duration,'has_audio':True})
+    registered = []
+    def register(*args, **kwargs):
+        registered.append(True)
+        return {'id':'sample'}
+    monkeypatch.setattr(common, 'register', register)
+    job = {'input':{'prompt':'用于角色声音参考的试听文本。','voice_profile':{'cardId':'role','version':2}}}
+    if valid:
+        assert volcengine_speech.synthesize(WorkerStub(),job,{'api_key':'test'})['assets'][0]['id'] == 'sample'
+        assert registered
+    else:
+        with pytest.raises(ValueError, match='角色试听样本实际'):
+            volcengine_speech.synthesize(WorkerStub(),job,{'api_key':'test'})
+        assert not registered
+    assert not list(tmp_path.iterdir())

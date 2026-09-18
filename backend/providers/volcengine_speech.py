@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import uuid
 from pathlib import Path
 
@@ -108,6 +109,11 @@ def synthesize(worker, job, provider):
         if not chunks:
             raise ValueError('豆包语音没有返回音频数据')
         path.write_bytes(b''.join(chunks))
+        if inp.get('voice_profile'):
+            metadata=common.probe(path)
+            duration=float(metadata.get('duration') or 0)
+            if not metadata.get('has_audio') or metadata.get('video_codec') or not math.isfinite(duration) or not 2<=duration<=30:
+                raise ValueError(f'角色试听样本实际为 {duration:.2f} 秒，须为 2–30 秒纯音频。请填入更完整的本角色对白或剧本节选，建议试听 8–15 秒；不会补静音或重复拼接。')
         requested_name = str(inp.get('output_name') or f'{inp.get("character_name") or "角色"} · 固定音色试听')
         name = str(Path(requested_name).with_suffix(suffix))
         asset = common.register(job, path, name, category='voice')

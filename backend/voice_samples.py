@@ -63,7 +63,8 @@ def validate_samples(job, caps):
         metadata = probe(path)
         duration = float(metadata.get('duration') or 0)
         if not metadata.get('has_audio') or metadata.get('video_codec') or not math.isfinite(duration) or not 2 <= duration <= caps['max_reference_duration']:
-            raise ValueError(f"声音样本需为 2–{caps['max_reference_duration']} 秒的有效纯音频，请重新制作试听样本")
+            owners='、'.join(f"{x.get('characterName') or '角色'} · 声音 V{x.get('voiceVersion', '?')}" for x in samples if x['assetId']==asset['id'])
+            raise ValueError(f"{owners}实际引用的声音样本为 {duration:.2f} 秒，需为 2–{caps['max_reference_duration']} 秒有效纯音频。请重新制作并锁定样本，再在角色默认声音或状态音色中选用新版本；仅创建新声音不会替换已选版本。")
         media[asset['id']] = {'duration': duration, 'sha256': file_hash(path), 'name': asset['name']}
     if sum(x['duration'] for x in media.values()) > caps['max_reference_duration']:
         raise ValueError(f"声音样本总时长超过 {caps['max_reference_duration']} 秒，请缩短样本；不会自动裁剪")

@@ -70,7 +70,9 @@ def validate_transition(c, pid, before, after):
                 if c.execute("SELECT 1 FROM deleted_items WHERE kind='asset' AND item_id=?",(aid,)).fetchone(): raise ValueError('声音试听样本已删除')
                 path=(s.ASSETS/row['path']).resolve()
                 if not path.is_relative_to(s.ASSETS.resolve()) or not path.is_file(): raise ValueError('声音试听样本文件已丢失')
-                validate_file(path)
+                sample_media=validate_file(path)
+                if not 2<=float(sample_media.get('duration') or 0)<=30:
+                    raise ValueError(f'当前试听样本为 {float(sample_media.get("duration") or 0):.2f} 秒，不能锁定为视频声音参考；需 2–30 秒，请补充试听文本后重新生成')
                 inp=s.unpack(row).get('metadata',{}).get('input',{})
                 params=inp.get('parameters') or {}
                 expected=profile.get('parameters') or {}
