@@ -4,7 +4,7 @@ import time
 
 from .source_library import EVENT_SCHEMA, SYSTEM_PROMPT, validate_events, replace_events
 from .text_output import TextOutputTruncated
-from .prompt_policy import source_chunk_limit, VERSION
+from .prompt_policy import source_chunk_limit, COMPATIBLE_VERSIONS
 from . import store as s
 
 
@@ -25,7 +25,7 @@ def extract(worker, job, provider):
     for index,part in enumerate(parts,1):
         system=inp.get('system_prompt') or SYSTEM_PROMPT
         user=(f'本章第 {index}/{len(parts)} 段。只提取本段明确发生的事件，按顺序，摘要精炼，不逐句复述，不补写段外情节。\n'+part)
-        if index > 1 and inp.get('prompt_policy_version') == VERSION:
+        if index > 1 and inp.get('prompt_policy_version') in COMPATIBLE_VERSIONS:
             user = '上一段末尾（仅供指代与因果衔接，不再提取其中事件）：\n' + parts[index-2][-800:] + '\n\n本次提取正文：\n' + user
         stage={'chunk_character_limit':limit,'id':f'source_events_{index}','phase':f'提取原著事件 {index}/{len(parts)}','system_prompt':system,'user_prompt':user,'response_schema':inp.get('response_schema') or EVENT_SCHEMA,'status':'running','started':time.time()}
         stages.append(stage);publish()

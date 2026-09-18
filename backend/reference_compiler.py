@@ -106,6 +106,9 @@ def _constraint_lines(index, group, chain):
             lines.append(f"      固定属性：{attributes}")
         if invariants:
             lines.append(f"      不可改变：{invariants}")
+    from .reference_roles import version_constraints
+    if len(chain) > 1:
+        lines.append('  ' + version_constraints(chain)[0])
     return lines
 
 

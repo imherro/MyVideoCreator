@@ -233,7 +233,8 @@ def compile_motion_input(document, node_id, kind, input_value, project_id, provi
     cards, versions = visual.get('cards') or {}, visual.get('versions') or {}
     if any(not c.get('deletedAt') and c.get('status') != 'deprecated' for c in cards.values()) and not list(_binding_rows(shot)):
         raise ValueError('本镜尚未绑定视觉资产，请先绑定角色、场景或道具并确认主参考图')
-    actor_indices = {}
+    from .reference_roles import version_constraints, actor_reference_indices, shared_identity_lines
+    actor_entries = []
     image_lines = []
     for group, binding in _binding_rows(shot):
         version = versions.get(binding.get('versionId')) or {}
@@ -247,13 +248,15 @@ def compile_motion_input(document, node_id, kind, input_value, project_id, provi
         index = image(aid, cardId=card['id'], versionId=version['id'], purpose=group)
         purpose = {'character': '身份、体型结构、服装和当前持续状态', 'scene': '空间布局、建筑结构、固定物体及当前环境状态', 'prop': '外形、材质、尺度和当前状态'}.get(group, '外观与状态')
         image_lines.append(f"@图片{index}：{card.get('name', card['id'])}的{purpose}参考；不复制参考图的姿态、机位或无关背景。")
-        invariants = list(dict.fromkeys(str(rule).strip() for _, linked in chain for rule in linked.get('invariants', []) if str(rule).strip()))
-        if invariants:
-            image_lines.append(f"@图片{index}对应资产的不可改变项：" + '；'.join(invariants))
+        for constraint in version_constraints(chain):
+            image_lines.append(f"@图片{index}：{constraint}")
         if group == 'character':
-            for linked_card, _ in chain:
-                actor_indices[linked_card['id']] = index
+            actor_entries.append((index, chain))
+    actor_indices, ambiguous_actors = actor_reference_indices(actor_entries)
+    image_lines.extend(shared_identity_lines(actor_entries))
     character = (reference or {}).get('characterCardId')
+    if character in ambiguous_actors:
+        raise ValueError('本镜绑定了同一角色的多个状态，请明确选择动作执行角色的具体状态')
     if character and character not in actor_indices:
         raise ValueError('动作执行角色必须是本镜头已绑定的角色或其基础角色')
     if len(ids) > caps['max_images']:

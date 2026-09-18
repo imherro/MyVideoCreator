@@ -3,7 +3,8 @@
 Budgets are application allowances, not advertised provider context limits.
 No extra model calls, implicit model switching, or hidden prompt translation.
 """
-VERSION = 'commercial-2026-09-v1'
+VERSION = 'commercial-2026-09-v2'
+COMPATIBLE_VERSIONS = {'commercial-2026-09-v1', VERSION}
 
 SOURCE = '''
 事件以一次有因果意义的行动、决定、信息揭示或持续状态变化为单位。同一事件的连续动作合并，不把每句对白或每个修辞拆成事件。
@@ -36,6 +37,7 @@ STORYBOARD = '''
 每镜围绕一个叙事目的，可包含因果连续的几个动作节拍；不要将一次自然动作机械拆成多镜。复杂动作留足时间，避免同时要求互相冲突的机位。
 image_prompt 仍需填写，作为可选构图预览：描述动作开始时的确定画面，保持与视频开场一致，不意味着视频一定采用严格首帧协议。
 按镜头真实发生顺序写动作与声音。对白逐字保留且注明说话角色、情绪与听者反应，不为填时长增加台词。为开口、停顿、反应和收尾留出合理时间。
+同镜多人时分别写明谁行动、谁说话、谁倾听；除非明确要求抢话，不把不同角色台词合并成同时发声。静止机位与移动机位不同时下令，动作参考与本镜运镜的优先级由用户所选模式决定。
 相邻镜头保持空间方位、视线、时间、角色状态和道具持有关系连续；已完成的事件不要无故再发生。不要让人物外观与绑定资产冲突。
 模型输出只引用视觉 key，图片/视频/音频序号由后续编译器依据真实素材清单分配，禁止凭空写 @图片1 等素材编号。
 输出前核对每镜时长及总时长、角色对白归属、资产引用和动作起止关系，只返回 Schema，不输出分析过程。'''
@@ -43,7 +45,7 @@ image_prompt 仍需填写，作为可选构图预览：描述动作开始时的�
 
 def text_parameters(inp, stage_id='', local=False):
     """Old snapshots keep the former policy. Unknown cloud models use defaults."""
-    if inp.get('prompt_policy_version') != VERSION or local:
+    if inp.get('prompt_policy_version') not in COMPATIBLE_VERSIONS or local:
         return {'temperature': 0.6}
     if 'doubao' not in str(inp.get('model') or '').lower():
         return {}  # Do not force sampling knobs on unverified reasoning models.
@@ -53,7 +55,7 @@ def text_parameters(inp, stage_id='', local=False):
 
 
 def source_chunk_limit(inp, provider):
-    if inp.get('prompt_policy_version') != VERSION or provider.get('local') or inp.get('provider', 'local') == 'local':
+    if inp.get('prompt_policy_version') not in COMPATIBLE_VERSIONS or provider.get('local') or inp.get('provider', 'local') == 'local':
         return 6000
     return 16000 if 'doubao' in str(inp.get('model') or '').lower() else 10000
 
