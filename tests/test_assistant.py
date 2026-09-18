@@ -162,3 +162,39 @@ def test_asking_about_episode_does_not_select_a_shot(client):
     state['document']['nodes']=[{'id':'im','data':{'kind':'image'}}]
     context,_=a.context_for(a.ChatRequest(**question(p,message='第1集下一步是什么')),state)
     assert 'selectedNode' not in context
+
+
+def test_new_guide_and_saved_constraints_are_visible_without_mutation(client):
+    p=project(client)
+    _,state=a.scope_state(p['id'])
+    state['document']['filmBible']['story']['summary']='不得改变身份 secret-test-key'
+    context,_=a.context_for(a.ChatRequest(**question(p,stage='script')),state)
+    assert context['creativeConstraints']['hasSavedContent']
+    assert '不得改变身份' in context['creativeConstraints']['saved']['story']['summary']
+    assert 'secret-test-key' not in json.dumps(context)
+    assert context['creativeConstraints']['scope']=='全作品共享'
+    assert context['promptAdviceTasks']==[]
+    for entry in ('AI 起草创作约束','应用提示词','撤销替换','导出选中片段','2–30 秒','wan3.0-video'):
+        assert entry in a.GUIDE
+
+
+def test_advice_status_does_not_claim_applied_and_is_episode_scoped(client):
+    p=project(client)
+    _,state=a.scope_state(p['id'])
+    state['document']['shots']=[{'videoNode':'video-one','video_prompt':'当前内容'}]
+    # Populate only explicit task fields; no provider calls or production mutation.
+    from backend.app import create_job_record,JobCreate
+    with s.db() as c:
+        job=create_job_record(c,p['id'],JobCreate(node_id='video-prompt-advice:video-one',kind='text',submission_id=s.uid('advice-test-'),input={'provider':'assistant-provider','model':'assistant-test','prompt':'测试','stage':'video_prompt_advice','target_node_id':'video-one'}))
+    s.job_update(job['id'],status='succeeded',result={'videoPromptAdvice':{'prompt':'优化建议','changes':[],'warnings':[]}})
+    context,_=a.context_for(a.ChatRequest(**question(p,stage='video')),state)
+    entry=context['promptAdviceTasks'][0]
+    assert entry['hasSuggestion'] and not entry['matchesCurrentPrompt']
+    assert 'applied' not in entry
+    state['document']['shots'][0]['video_prompt']='优化建议'
+    updated,_=a.context_for(a.ChatRequest(**question(p)),state)
+    assert updated['promptAdviceTasks'][0]['matchesCurrentPrompt']
+    other=project(client,'另一个作品')
+    _,other_state=a.scope_state(other['id'])
+    isolated,_=a.context_for(a.ChatRequest(**question(other)),other_state)
+    assert isolated['promptAdviceTasks']==[]
