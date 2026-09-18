@@ -106,6 +106,13 @@ export function TaskDetailPage({ jobId, request }: { jobId: string; request: (pa
       </section>
       <section className="task-detail-card">
         <h2>模型请求契约</h2>
+        {job.input?.source_event_extraction && runtimePromptStages.map((stage: Value) => <article className="prompt-stage" key={stage.id}>
+          <h3>{stage.phase} · {stage.status === "validated" ? `已完成 · ${stage.event_count} 条事件` : stage.status === "request_failed" ? "失败" : "进行中"}</h3>
+          {stage.recovery && <p>{stage.recovery}</p>}
+          {stage.error && <p>{stage.error}</p>}
+          {(stage.attempts || []).map((attempt: Value, index: number) => <p key={index}>请求 {index + 1} · 输出上限 {attempt.max_tokens} tokens · 返回 {attempt.output_chars ?? "—"} 字符 · 结束原因 {attempt.finish_reason || (attempt.finished ? "服务未提供" : "等待返回")}</p>)}
+          <details><summary>本段实际提示词</summary><pre className="debug-block">{stage.system_prompt}</pre><pre className="debug-block">{stage.user_prompt}</pre></details>
+        </article>)}
         {job.kind === "image" && job.input?.image_spec && <p>图像提交参数：{job.input.image_spec.size} · {job.input.image_spec.ratio} · {job.input.image_spec.seedSupported ? `种子 ${job.input.image_spec.actualSeed ?? job.input.image_spec.seed}${job.input.image_spec.seed === -1 ? "（随机选取）" : ""}` : "适配器未开放固定种子"}</p>}
         <p className="muted">{job.input?.prompt_contract_origin === "migration" ? "旧任务按当前兼容版本补齐的提示词契约。" : "任务创建时冻结的完整提示词契约；Worker 执行时读取同一份快照。"}</p>
         {["image", "video"].includes(job.kind) && <p className="muted">图片和视频服务通常只有一个 Prompt 通道；这里的 System Prompt 记录安影的生成规则，User Prompt 是实际镜头描述，参考图与其他参数在下方单独列出。</p>}

@@ -301,13 +301,8 @@ class Worker:
             except json.JSONDecodeError as exc:raise ValueError('剧本识别结果不是严格 JSON，请重试；原文保持不变') from exc
             return {'text':raw,'scriptImport':apply_analysis(job,value)}
         if kind=='text' and inp.get('source_event_extraction'):
-            from .source_library import EVENT_SCHEMA, SYSTEM_PROMPT, replace_events, validate_events
-            raw=self._chat_text(job,p,inp.get('system_prompt') or SYSTEM_PROMPT,inp['prompt'],inp.get('response_schema') or EVENT_SCHEMA,'提取原著事件')
-            try:rows=validate_events(json.loads(raw.strip()))
-            except (ValueError,TypeError,json.JSONDecodeError) as exc:
-                raise ValueError('事件提取结果校验失败：'+str(exc)) from exc
-            rows=replace_events(job,rows)
-            return {'text':s.dumps({'events':rows}),'events':rows}
+            from .source_extraction import extract
+            return extract(self,job,p)
         if kind=='storyboard' and inp.get('film_bible'):
             from .film_bible import extract_storyboard
             prompt_trace=[]
