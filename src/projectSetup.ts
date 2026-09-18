@@ -98,7 +98,7 @@ export function validateProjectSetupDraft(draft: ProjectSetupDraft): string[] {
   if (draft.name.trim().length > 100) errors.push("作品名称最多 100 个字符");
   if (draft.episodeTitle.trim().length > 100) errors.push("EP01 标题最多 100 个字符");
   if (!draft.style.trim()) errors.push("请输入视觉风格");
-  if (!(["16:9", "9:16", "1:1"] as string[]).includes(draft.ratio)) errors.push("请选择有效画幅");
+  if (!(["16:9", "9:16", "1:1"] as string[]).includes(draft.ratio)) errors.push("请选择有效资产画幅");
   if (!Number.isFinite(draft.duration) || draft.duration < 5 || draft.duration > 3000)
     errors.push("目标时长应为 5–3000 秒");
   if (!(["480p", "720p", "1080p"] as string[]).includes(draft.videoResolution))

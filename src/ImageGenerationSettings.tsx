@@ -64,7 +64,7 @@ export function ImageGenerationSettings(props: Props) {
         {models.map(t => <option key={t.modelId} value={t.modelId}>{t.modelId}</option>)}
       </select></label>
       <label>图像尺寸<select value={settings.sizeMode || "project"} onChange={event => patchSettings({ sizeMode: event.target.value, ...(event.target.value === "custom" && !settings.size ? { size: spec?.size || "2048x1152" } : {}) })}>
-        {(controls?.sizeOptions || [{ value: "project", label: "跟随项目画幅 · 推荐尺寸" }]).map((item: Value) => <option key={item.value} value={item.value}>{item.label}</option>)}
+        {(controls?.sizeOptions || [{ value: "project", label: "跟随项目资产画幅 · 推荐尺寸" }]).map((item: Value) => <option key={item.value} value={item.value}>{item.label}</option>)}
         {settings.sizeMode && !controls?.sizeOptions?.some((item: Value) => item.value === settings.sizeMode) && settings.sizeMode !== "project" && <option value={settings.sizeMode}>{settings.sizeMode === "custom" ? "自定义像素尺寸" : "与项目视频像素一致"}</option>}
       </select></label>
     </div>
