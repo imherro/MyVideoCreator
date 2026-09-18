@@ -139,6 +139,11 @@ export function ProjectAssetPanel({ assets, shots, currentProjectId, episodes, o
               <span>{subtitle}</span>
               <small>{details}</small>
             </div>
+            {asset.kind === "video" && <a href={asset.url} download={asset.name} draggable={false}
+              className="mvc-editor-asset-download" title={`下载原视频：${asset.name}`}
+              onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}>
+              下载
+            </a>}
             <button title="加入时间线" onClick={() => void add(asset)}>
               <Plus size={15} />
             </button>

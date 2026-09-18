@@ -131,3 +131,20 @@ export function editorResolution(ratio: string) {
   if (ratio === "1:1") return { width: 1080, height: 1080 };
   return { width: 1280, height: 720 };
 }
+
+/** A detached single-clip export; never mutate the editing timeline. */
+export function selectedVideoTimeline(timeline: ProjectJSON, elementId: string, assets: EditorAsset[]): ProjectJSON {
+  const snapshot = attachAssetReferences(structuredClone(timeline), assets);
+  const track = snapshot.tracks.find(track => track.elements.some(element => element.id === elementId));
+  const element = track?.elements.find(element => element.id === elementId);
+  if (!track || !element || element.type !== "video") throw new Error("请先选中时间线上的单条视频");
+  const duration = element.e - element.s;
+  if (!Number.isFinite(duration) || duration <= 0) throw new Error("选中片段的时长无效");
+  element.s = 0;
+  element.e = duration;
+  delete element.transition;
+  if (element.props) delete element.props.transition;
+  snapshot.tracks = [{ ...track, elements: [element] }];
+  snapshot.metadata = { ...snapshot.metadata, custom: { ...snapshot.metadata?.custom, selectedClipName: element.name || "选中视频片段" } };
+  return attachAssetReferences(snapshot, assets);
+}

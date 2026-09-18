@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  selectedVideoTimeline,
   attachAssetReferences,
   editorResolution,
   readEditorTimeline,
@@ -117,4 +118,24 @@ test("editor resolution follows the project aspect ratio", () => {
   assert.deepEqual(editorResolution("16:9"), { width: 1280, height: 720 });
   assert.deepEqual(editorResolution("9:16"), { width: 720, height: 1280 });
   assert.deepEqual(editorResolution("1:1"), { width: 1080, height: 1080 });
+});
+
+
+test("single video export rebases the clip without losing trim, rate or audio and leaves the edit intact", () => {
+  const assets = [{id:"a",url:"/api/assets/a/file",kind:"video",name:"镜头02.mp4",metadata:{duration:12}}];
+  const timeline = {version:1,tracks:[{id:"track",name:"V1",elements:[
+    {id:"selected",name:"镜头02",type:"video",s:10,e:14,props:{src:assets[0].url,startAt:3,playbackRate:2,volume:0.6,transition:{toElementId:"other"}},transition:{toElementId:"other"}},
+    {id:"other",type:"video",s:14,e:20,props:{src:assets[0].url}}
+  ]},{id:"audio",elements:[{id:"music",type:"audio",s:0,e:30}]}]};
+  const before=structuredClone(timeline);
+  const result=selectedVideoTimeline(timeline,"selected",assets);
+  assert.equal(result.tracks.length,1);
+  const [clip]=result.tracks[0].elements;
+  assert.equal(result.tracks[0].elements.length,1);
+  assert.equal(clip.s,0); assert.equal(clip.e,4);
+  assert.equal(clip.props.startAt,3); assert.equal(clip.props.playbackRate,2); assert.equal(clip.props.volume,0.6);
+  assert.equal(clip.metadata.assetId,"a");
+  assert.equal(clip.transition,undefined); assert.equal(clip.props.transition,undefined);
+  assert.deepEqual(timeline,before);
+  assert.throws(()=>selectedVideoTimeline(timeline,"music",assets),/单条视频/);
 });

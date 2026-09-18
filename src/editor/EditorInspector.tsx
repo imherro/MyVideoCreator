@@ -1,4 +1,8 @@
 import { useRef, useState } from "react";
+import { useLivePlayerContext } from "@twick/live-player";
+import { Download, Scissors } from "lucide-react";
+import type { ProjectJSON } from "@twick/timeline";
+import { selectedVideoTimeline } from "./editorDocument";
 import {
   AudioElement,
   CaptionElement,
@@ -9,6 +13,7 @@ import {
   useTimelineContext,
 } from "@twick/timeline";
 import {
+  splitElement,
   getElementFade,
   getVolumeAutomation,
   moveElement,
@@ -30,7 +35,8 @@ import type { EditorAsset } from "./editorDocument";
 
 const visualTypes = new Set(["video", "image"]);
 
-export function EditorInspector({ assets }: { assets: EditorAsset[] }) {
+export function EditorInspector({ assets, onExport }: { assets: EditorAsset[]; onExport: (timeline: ProjectJSON) => void }) {
+  const { getCurrentTime } = useLivePlayerContext();
   const { editor, selectedItem, changeLog, present } = useTimelineContext();
   const [error, setError] = useState("");
   const transitionTargetRef = useRef<HTMLSelectElement>(null);
@@ -59,6 +65,7 @@ export function EditorInspector({ assets }: { assets: EditorAsset[] }) {
     .filter((candidate) => candidate.id !== element.getId() && visualTypes.has(candidate.type))
     .sort((a, b) => a.s - b.s);
   const defaultTarget = transition?.toElementId || candidates.find((candidate) => candidate.s >= element.getStart())?.id || "";
+  const sourceAsset = assets.find(asset => asset.id === element.getMetadata()?.assetId || asset.id === element.getProps().srcAssetId || asset.url === element.getProps().src);
   const matchingAssets = assets.filter((asset) => asset.kind === element.getType());
 
   const commit = async (action: () => unknown | Promise<unknown>) => {
@@ -74,6 +81,17 @@ export function EditorInspector({ assets }: { assets: EditorAsset[] }) {
     <aside className="mvc-editor-inspector" key={`${element.getId()}-${changeLog}`}>
       <strong>剪辑属性</strong>
       <small>{element.getName() || element.getType()}</small>
+
+      {element instanceof VideoElement && <section className="mvc-clip-actions">
+        <button onClick={() => void commit(() => splitElement(editor, element.getId(), getCurrentTime()))}>
+          <Scissors size={14} /> 在播放头分割
+        </button>
+        <button className="primary" onClick={() => void commit(() => onExport(selectedVideoTimeline(editor.getProject(), element.getId(), assets)))}>
+          <Download size={14} /> 导出选中片段
+        </button>
+        {sourceAsset && <a href={sourceAsset.url} download={sourceAsset.name}>下载原视频</a>}
+        <small>拖动片段两端可裁剪，或修改下方素材入点和长度。选中片段单独导出，不含其他轨道与跨片段转场；完成后在导出任务中下载。</small>
+      </section>}
 
       <div className="mvc-editor-inspector-grid">
         <label>

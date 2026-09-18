@@ -59,3 +59,7 @@
 .mvc-editor-asset-scope>span{flex-shrink:0}
 .mvc-editor-asset-scope select{flex:1;min-width:0;width:100%;padding:7px 8px;font-size:12px}
 .mvc-editor-workspace{position:relative;isolation:isolate;z-index:0}
+
+.mvc-clip-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0;padding:10px;border:1px solid #364047;border-radius:8px}.mvc-clip-actions button{display:flex;align-items:center;justify-content:center;gap:5px;font-size:12px;padding:7px 5px}.mvc-clip-actions small{grid-column:1/-1;line-height:1.6;color:#aeb7bb}.mvc-clip-actions a{font-size:12px;align-self:center}
+
+.mvc-editor-asset-download{font-size:12px;white-space:nowrap;padding:6px;border:1px solid #46535c;border-radius:5px;flex-shrink:0}

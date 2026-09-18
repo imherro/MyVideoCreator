@@ -4471,7 +4471,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 </button>
                 <p className="muted">
                   {exportSource === "editor"
-                    ? "当前导出 Twick 多轨工程。配乐、字幕、转场和音量请在剪辑工作区中调整。输出为 24fps H.264/AAC MP4。"
+                    ? exportEditorTimeline?.metadata?.custom?.selectedClipName
+                      ? `仅导出选中片段：${exportEditorTimeline.metadata.custom.selectedClipName}。保留裁剪、速度和音量，不包含其他轨道或跨片段转场。完成后可在任务结果中下载。`
+                      : "当前导出 Twick 多轨工程。配乐、字幕、转场和音量请在剪辑工作区中调整。输出为 24fps H.264/AAC MP4。"
                     : "MP4 / H.264 / 24fps。保留镜头原声，配乐循环填充时间线。高于源素材分辨率时会由 FFmpeg 缩放插值并适配画布，输出像素会增加，但不会恢复真实细节。"}
                 </p>
                 <button

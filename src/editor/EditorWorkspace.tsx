@@ -304,7 +304,7 @@ function EditorSurface({
       <div className="mvc-editor-surface" ref={surfaceRef} onDragOverCapture={handleDragOver} onDropCapture={handleDrop}>
         <VideoEditor
           leftPanel={<ProjectAssetPanel currentProjectId={projectId} episodes={episodes} assets={assets} shots={shots} onMessage={showMessage} />}
-          rightPanel={<EditorInspector assets={assets} />}
+          rightPanel={<EditorInspector assets={assets} onExport={onExport} />}
           editorConfig={{
             canvasMode: true,
             videoProps: { ...videoResolution, backgroundColor: "#000000" },
