@@ -1,3 +1,4 @@
+import {VideoPromptAdvice} from "../components/VideoPromptAdvice";
 import { needsComposition } from '../shotComposition.ts';
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, ArrowUpRight, CheckSquare2, Film, Image as ImageIcon, Play, RefreshCw, Scissors } from "lucide-react";
@@ -9,12 +10,15 @@ import { MotionReferenceEditor } from "../components/MotionReferenceEditor.tsx";
 type Value = Record<string, any>;
 type Asset = { id: string; name: string; kind: string; url: string; metadata: Value; category: string; source: string };
 type Props = {
+  projectId:string;
+  onPrepareAdvice:()=>Promise<void>;
+  onAdviceJob:(job:Value)=>void;
   document: Value;
   assets: Asset[];
   jobs: Value[];
   providers: Value[];
   busy: boolean;
-  request: (path: string) => Promise<any>;
+  request: (path: string,options?:RequestInit) => Promise<any>;
   onPatchShot: (uid: string, patch: Value) => void;
   onPatchVideoNode: (nodeId: string, patch: Value) => void;
   onGenerate: (uids: string[]) => Promise<void>;
@@ -131,7 +135,7 @@ export function VideoProductionWorkspace(props: Props) {
           <div className="video-frame-column"><small>{videoGenerationMode(props.document,row.shot) === "multimodal" ? (needsComposition(props.document,row.shot) ? "构图参考 · 非硬首帧" : "直接生成 · 无需分镜图") : "FIRST FRAME"}</small><button className="video-frame-preview" disabled={!row.firstFrame} onClick={() => row.firstFrame && props.onPreview(row.firstFrame as Asset)}>{row.firstFrame ? <img src={row.firstFrame.url} alt={videoGenerationMode(props.document,row.shot) === "multimodal" ? "起始构图参考" : "首帧"}/> : <span><ImageIcon/>{needsComposition(props.document,row.shot) ? "请先生成构图图" : "直接使用绑定资产"}</span>}</button>{needsComposition(props.document,row.shot) && row.imageNode?.data?.stale && <em>构图图已过期</em>}{row.readinessReason && <p>{row.readinessReason}</p>}</div>
           {row.endFrameSupported && (["legacy","first_last_frame"].includes(videoGenerationMode(props.document,row.shot)) || data.end_asset_id) && <div className="video-frame-column"><small>{videoGenerationMode(props.document,row.shot) === "multimodal" ? "结束构图参考 · 非硬尾帧" : "END FRAME · 可选"}</small><button className="video-frame-preview" disabled={!row.endFrame} onClick={() => row.endFrame && props.onPreview(row.endFrame as Asset)}>{row.endFrame ? <img src={row.endFrame.url} alt="尾帧"/> : <span><ImageIcon/>未设置尾帧</span>}</button><select aria-label="尾帧素材" value={data.end_asset_id || ""} onChange={(event) => props.onPatchVideoNode(row.videoNode!.id,{end_asset_id:event.target.value})}><option value="">不使用尾帧</option>{props.assets.filter((asset) => asset.kind === "image").map((asset) => <option key={asset.id} value={asset.id}>{asset.name}</option>)}</select></div>}
           <div className="video-production-fields">
-            <label>Video Prompt<textarea value={row.shot.video_prompt || ""} onChange={(event) => props.onPatchShot(row.uid,{video_prompt:event.target.value})}/></label>
+            <div className="video-prompt-field"><b>Video Prompt</b>{row.videoNode&&<VideoPromptAdvice key={props.projectId+row.videoNode!.id} projectId={props.projectId} nodeId={row.videoNode!.id} prompt={row.shot.video_prompt||""} shot={row.shot} jobs={props.jobs} disabled={props.busy||row.status==="generating"} request={props.request} prepare={props.onPrepareAdvice} onApply={text=>props.onPatchShot(row.uid,{video_prompt:text})} onJob={props.onAdviceJob}/>}<textarea aria-label="Video Prompt" value={row.shot.video_prompt || ""} onChange={(event) => props.onPatchShot(row.uid,{video_prompt:event.target.value})}/></div>
           {videoGenerationMode(props.document,row.shot) === "legacy" && <div className="video-dialogue-projection" aria-label="实际发送给视频模型"><header><b>实际发送给视频模型</b><small>{row.shot.dialogues?.length ? `已自动加入 ${row.shot.dialogues.length} 条对白` : "本镜无结构化对白"}</small></header><pre>{compileVideoPrompt(row.shot.video_prompt,row.shot,row.submissionDuration)}</pre>{row.submissionDuration !== row.plannedDuration && <small>分镜计划 {row.plannedDuration} 秒；结合项目策略、对白长度和模型限制，实际提交 {row.submissionDuration} 秒。</small>}{row.shot.dialogues?.length > 0 && ["volcengine_ark", "runninghub"].includes(row.provider?.type) && <small>{row.dialogueAudioAssets.length === row.shot.dialogues.length ? `固定音色对白已就绪 ${row.dialogueAudioAssets.length}/${row.shot.dialogues.length}；将作为 Seedance 2.x 音频参考提交。` : "请先在塑角造景生成当前音色版本的本镜对白。"}</small>}</div>}
             <div className="domain-fields three"><label>时长（秒）<input type="number" min="0.1" step="0.1" value={row.shot.duration ?? 3} onChange={(event) => props.onPatchShot(row.uid,{duration:Number(event.target.value)})}/></label><label>Provider<select value={data.provider || ""} onChange={(event) => { const provider=props.providers.find((item)=>item.id===event.target.value); props.onPatchVideoNode(row.videoNode!.id,{provider:event.target.value,model:provider?.models?.video||provider?.model||"",model_capabilities:undefined}); }}><option value="" disabled>请选择</option>{providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.local ? "本地" : "云端"} · {provider.name}</option>)}</select></label><label>Model<select value={data.model || ""} onChange={(event) => props.onPatchVideoNode(row.videoNode!.id,{model:event.target.value,model_capabilities:undefined})}>{!modelOptions.length && <option value="">请先在设置中启用模型</option>}{modelOptions.map((modelId) => <option key={modelId} value={modelId}>{modelId}{!configuredModels.includes(modelId) ? "（已停用）" : ""}</option>)}</select></label></div>
             <div className="video-shot-context"><span>{row.shot.action || "未填写镜头动作"}</span><small>{row.shot.camera || "未设置机位"} · 分镜 {row.plannedDuration || 0} 秒 · 提交 {row.submissionDuration || 0} 秒</small></div>

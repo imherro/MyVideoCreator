@@ -102,6 +102,7 @@ export function filterTaskCenterRows(rows: TaskCenterRow[], filters: TaskCenterF
 }
 
 export function taskShotLabel(row: TaskCenterRow) {
+  if (row.job.input?.stage === "video_prompt_advice") return "镜头提示词 · AI 优化";
   if (row.job.input?.stage === "creative_constraints") return "全作品创作约束 · AI 起草";
   if (row.job.input?.stage === "script_import_analysis") return `文档智能导入 · ${row.job.input?.script_import_analysis?.filename || "结构识别"}`;
   if (row.job.input?.stage === "source_analysis") {

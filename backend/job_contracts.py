@@ -20,7 +20,10 @@ def freeze_prompt_contract(kind: str, value: dict, *, origin: str = 'submission'
     response_schema = None
     schema_version = None
 
-    if stage == 'creative_constraints':
+    if stage == 'video_prompt_advice':
+        from .video_prompt_advice import SYSTEM, SCHEMA
+        system_prompt, response_schema, schema_version = SYSTEM, SCHEMA, 'video-prompt-advice/v1'
+    elif stage == 'creative_constraints':
         from .creative_constraints import SYSTEM, SCHEMA
         system_prompt, response_schema, schema_version = SYSTEM, SCHEMA, 'creative-constraints/v1'
     elif stage == 'script_import_analysis':

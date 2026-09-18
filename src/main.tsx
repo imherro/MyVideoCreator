@@ -3168,6 +3168,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           />
         ) : workflowStage === "video" ? (
           <VideoProductionWorkspace
+            projectId={project.id}
+            onPrepareAdvice={async()=>{await save();if(dirty.current)throw new Error("请先保存当前项目后重试");}}
+            onAdviceJob={job=>{setJobs(known=>mergeTaskSnapshots(known,[job]) as Job[]);setProductionJobs(known=>mergeTaskSnapshots(known,[job]));}}
             document={doc}
             assets={assets}
             jobs={jobs}

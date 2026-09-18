@@ -287,6 +287,10 @@ class Worker:
 
     def text(self,job,p):
         inp=job['input']; kind=job['kind']
+        if kind=='text' and inp.get('stage')=='video_prompt_advice':
+            from .video_prompt_advice import validate_advice
+            raw=self._chat_text(job,p,inp['system_prompt'],inp['prompt'],inp['response_schema'],'优化镜头 Video Prompt')
+            return {'text':raw,'videoPromptAdvice':validate_advice(raw,inp['shot_snapshot'])}
         if kind=='text' and inp.get('stage')=='creative_constraints':
             from .creative_constraints import validate_draft
             raw=self._chat_text(job,p,inp['system_prompt'],inp['prompt'],inp['response_schema'],'起草创作约束')

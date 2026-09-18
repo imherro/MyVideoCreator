@@ -2037,6 +2037,25 @@ def revise_episode_script(production_id:str,episode_no:int,body:RevisionAction):
 class CreativeConstraintsCreate(BaseModel):
     submission_id:str=Field(min_length=8,max_length=100)
 
+@app.post('/api/projects/{pid}/video-prompt-advice/{node_id}')
+def create_video_prompt_advice(pid:str,node_id:str,body:CreativeConstraintsCreate):
+    from .video_prompt_advice import advice_context
+    with s.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        state=read_project_state(c,pid)
+        if not state:raise HTTPException(404,'项目不存在')
+        task_node='video-prompt-advice:'+node_id
+        if c.execute("SELECT id FROM jobs WHERE project_id=? AND node_id=? AND status IN ('queued','running')",(pid,task_node)).fetchone():raise HTTPException(409,'本镜提示词正在优化，请等待完成')
+        shot,context=advice_context(state['document'],node_id)
+        target=(state['document'].get('generationPolicy') or {}).get('text') or {}
+        if not target.get('providerId'):raise ValueError('请先配置项目默认文本模型')
+        result=create_job_record(c,pid,JobCreate(node_id=task_node,kind='text',submission_id=body.submission_id,input={
+            'stage':'video_prompt_advice','provider':target['providerId'],'model':target.get('modelId',''),'prompt':'请优化以下单镜头描述：\n'+context,
+            'max_tokens':8192,'shot_snapshot':shot,'original_prompt':shot.get('video_prompt',''),'target_node_id':node_id,
+        }))
+    s.event(pid,{'type':'job','id':result['id']})
+    return result
+
 @app.post('/api/projects/{pid}/creative-constraints/draft')
 def draft_creative_constraints(pid:str,body:CreativeConstraintsCreate):
     from .creative_constraints import context_for_draft

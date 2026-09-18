@@ -419,3 +419,5 @@
 .storyboard-images-workspace .storyboard-grid-toolbar select{width:130px;margin:0}
 .storyboard-images-workspace .storyboard-grid{margin-top:10px}
 @media(max-width:700px){.storyboard-images-workspace,.video-production-workspace{padding-left:12px;padding-right:12px}.storyboard-images-workspace .storyboard-workspace-header .settings-actions,.video-production-header-actions{justify-content:flex-start}}
+
+.video-prompt-field{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px;align-items:center;margin-bottom:9px}.video-prompt-field>b{font-size:14px;font-weight:400;color:#a9afb1}.video-prompt-field>textarea{grid-column:1/-1}.video-prompt-advice{display:contents}.video-prompt-advice-actions{display:flex;justify-content:flex-end;gap:6px}.video-prompt-advice>.error,.video-prompt-suggestion{grid-column:1/-1}.video-prompt-suggestion{padding:12px;border:1px solid #68593f;border-radius:8px;background:#242722}.video-prompt-suggestion textarea{margin:8px 0;min-height:130px}.video-prompt-suggestion ul{padding-left:20px;line-height:1.6;margin:5px 0 10px}
