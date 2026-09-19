@@ -68,7 +68,24 @@ def compile_shot_video_input(document, node_id, kind, input_value, production_co
         document = compose_project_document(document, production_context)
     shot = _shot_for_video_node(document, node_id)
     if not shot:
-        return result
+        # Independent canvas nodes have no canonical shot to supply timing.
+        # Preserve explicit node settings; inherit the project only when absent.
+        duration = (result.get('parameters') or {}).get('duration')
+        if duration is None:
+            duration = document.get('videoDuration', -1)
+            if duration in (None, -1):
+                # Keep provider-specific defaults (e.g. native MiniMax 6s).
+                # Multimodal adapters retain their existing 5s fallback.
+                if 'duration' in (result.get('parameters') or {}):
+                    result['parameters'] = {k: v for k, v in result['parameters'].items() if k != 'duration'}
+                return result
+        try:
+            numeric_duration = float(duration)
+        except (TypeError, ValueError):
+            raise ValueError('画布视频生成时长无效，请设置有效秒数') from None
+        if not math.isfinite(numeric_duration) or not 1 <= numeric_duration <= 30:
+            raise ValueError('画布视频生成时长需为 1–30 秒，具体范围以所选模型为准')
+        return _apply_duration(result, numeric_duration)
     try:
         shot_duration = float(shot.get('duration'))
     except (TypeError, ValueError):

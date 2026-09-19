@@ -3748,6 +3748,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             )}
             {data.kind === "image" ? <ImageGenerationSettings document={doc} data={data} providers={config.providers} projectId={project.id} request={api} onChange={changeModel}/> : <ModelSelector
               data={data}
+              canvasVideoDuration={data.kind === "video" && !selectedVideoShot ? (doc.videoDuration ?? -1) : undefined}
               providers={config.providers}
               localModels={system.models}
               allowedTargets={effectiveProjectTargets(doc.modelPool || undefined, config.providers, data.kind === "storyboard" ? "text" : data.kind, system.models)}

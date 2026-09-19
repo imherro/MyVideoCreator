@@ -66,7 +66,7 @@ def test_project_video_duration_can_explicitly_override_shot_duration():
     assert '成片总时长必须为 8 秒' in value['prompt']
 
 
-def test_non_video_and_unbound_nodes_are_unchanged():
+def test_non_video_and_unbound_nodes_without_duration_are_unchanged():
     original = {'prompt': '保持不变'}
     assert compile_shot_video_input({'shots': [shot()]}, 'video-node', 'image', original) == original
     assert compile_shot_video_input({'shots': [shot()]}, 'other-node', 'video', original) == original
@@ -127,3 +127,27 @@ def test_video_with_dialogue_requires_current_locked_voice_take():
     }
     with pytest.raises(ValueError, match='尚未使用当前固定音色生成'):
         bind_fixed_dialogue_audio(document, 'video-node', 'video', {'prompt': '动作'}, [])
+
+
+@pytest.mark.parametrize('project_duration,node_duration,expected', [(12,None,12),(12,8,8),(-1,15,15)])
+def test_standalone_canvas_video_duration(project_duration, node_duration, expected):
+    original = {'prompt': '缓慢推进', 'parameters': {'duration': node_duration, 'resolution': '480p'}}
+    result = compile_shot_video_input({'videoDuration': project_duration}, 'standalone', 'video', original)
+    assert result['parameters']['duration'] == expected
+    assert result['shot_duration'] == expected
+    assert f'{expected} 秒' in result['prompt']
+    assert result['parameters']['resolution'] == '480p'
+    assert original['parameters']['duration'] == node_duration
+    assert original['prompt'] == '缓慢推进'
+    assert compile_shot_video_input({'videoDuration': project_duration}, 'standalone', 'video', result) == result
+
+
+@pytest.mark.parametrize('duration', [0, -2, 31, 'invalid', float('nan'), float('inf')])
+def test_standalone_canvas_video_invalid_duration(duration):
+    with pytest.raises(ValueError, match='画布视频生成时长'):
+        compile_shot_video_input({}, 'standalone', 'video', {'parameters': {'duration': duration}})
+
+
+def test_standalone_inherit_clears_null_duration_before_provider_defaults():
+    result = compile_shot_video_input({'videoDuration': -1}, 'video', 'video', {'parameters': {'duration': None, 'resolution': '480p'}})
+    assert result['parameters'] == {'resolution': '480p'}

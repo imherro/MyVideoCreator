@@ -3,7 +3,7 @@ import {RefreshCw} from 'lucide-react';
 import {targetKey} from './modelAccess.ts';
 import type {GenerationTarget} from './generationPolicy.ts';
 type Value=Record<string,any>;
-export function ModelSelector({data,providers,localModels,allowedTargets,request,onChange}:{data:Value;providers:Value[];localModels:Value[];allowedTargets?:GenerationTarget[];request:(path:string)=>Promise<any>;onChange:(patch:Value)=>void}){
+export function ModelSelector({data,providers,localModels,allowedTargets,request,onChange,canvasVideoDuration}:{canvasVideoDuration?:number;data:Value;providers:Value[];localModels:Value[];allowedTargets?:GenerationTarget[];request:(path:string)=>Promise<any>;onChange:(patch:Value)=>void}){
  const [models,setModels]=useState<Value[]>([]),[loading,setLoading]=useState(false),[error,setError]=useState(''),[refresh,setRefresh]=useState(0);
  const kind=data.kind==='storyboard'?'text':data.kind,providerId=data.provider||'local';
  const provider=providers.find(p=>p.id===providerId),nativeMinimax=provider?.type==='minimax';
@@ -38,6 +38,7 @@ export function ModelSelector({data,providers,localModels,allowedTargets,request
  {caps&&<p className="muted">{caps.image_reference?'支持参考图':'不支持参考图'}{caps.max_references?` · 最多 ${caps.max_references} 张`:''}{caps.audio_output?' · 生成原声':''}{caps.end_frame?' · 支持尾帧':''}</p>}
  </>}
  {nativeMinimax&&<><label>生成时长<select value={data.parameters?.duration??provider?.parameters?.duration??6} onChange={e=>onChange({parameters:{...data.parameters,duration:Number(e.target.value)}})}><option value={6}>6 秒</option><option value={10}>10 秒（768P）</option></select></label><label>云端分辨率<select value={data.parameters?.resolution??provider?.parameters?.resolution??'768P'} onChange={e=>onChange({parameters:{...data.parameters,resolution:e.target.value}})}><option>768P</option><option>1080P</option></select></label><p className="muted">支持文生视频或单首帧图生视频。1080P 仅支持 6 秒，生成参数以上述云端设置为准。</p></>}
- {kind==='video'&&!nativeMinimax&&<p className="muted">视频时长与规格继承项目设置；实际提交时长按分镜和固定音色对白自动计算。</p>}
+ {kind==='video'&&!nativeMinimax&&canvasVideoDuration!==undefined&&<label>生成时长<select aria-label="画布视频生成时长" value={data.parameters?.duration??'inherit'} onChange={e=>onChange({parameters:{...data.parameters,duration:e.target.value==='inherit'?null:Number(e.target.value)}})}><option value="inherit">继承项目（{canvasVideoDuration>0?canvasVideoDuration:5} 秒）</option>{Array.from({length:30},(_,i)=>i+1).map(seconds=><option key={seconds} value={seconds}>{seconds} 秒</option>)}</select><small>本次计划生成 {data.parameters?.duration??(canvasVideoDuration>0?canvasVideoDuration:5)} 秒；超出模型支持范围时会提示。项目为自动时，独立节点默认 5 秒。</small></label>}
+ {kind==='video'&&!nativeMinimax&&canvasVideoDuration===undefined&&<p className="muted">视频时长与规格继承项目设置；实际提交时长按分镜和固定音色对白自动计算。</p>}
  </>;
 }
