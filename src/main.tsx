@@ -1,3 +1,4 @@
+import {VideoRatioSelector} from "./components/VideoRatioSelector";
 import {CanvasVideoReferences} from "./components/CanvasVideoReferences";
 import {CreativeConstraintsCard} from "./components/CreativeConstraintsCard";
 import { AssistantPanel } from "./components/AssistantPanel";
@@ -3762,6 +3763,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               request={api}
               onChange={changeModel}
             />}
+            {data.kind === "video" && <VideoRatioSelector document={doc} data={data} provider={config.providers.find((p:Any)=>p.id===data.provider)} mode={selectedVideoMode} onChange={changeModel}/>}
             {data.kind === "video" && !selectedVideoShot && <CanvasVideoReferences document={doc} nodeId={node.id} assets={assets} onCompile={()=>previewVideoSubmission(node.id)}/>}
             {data.kind === "video" && selectedVideoShot && <MotionReferenceEditor shot={selectedVideoShot} document={doc} assets={assets} provider={config.providers.find((p:Any)=>p.id===data.provider)} node={node} busy={busy} onPatch={patch=>update(document=>updateStoryboardShot(document,shotIdentity(selectedVideoShot),patch))} onUpload={uploadMotionReference} onCompile={()=>previewVideoSubmission(node.id)}/>}
             {data.kind === "video" && selectedVideoMode === "multimodal" && <p className="muted">多模态参考：关联分镜图作为起始构图参考，角色、场景、道具按绑定追加，不是严格首帧。</p>}

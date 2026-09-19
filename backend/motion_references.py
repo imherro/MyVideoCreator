@@ -159,6 +159,8 @@ def compile_motion_input(document, node_id, kind, input_value, project_id, provi
     if standalone and list(_binding_rows(shot)) and mode['actual'] != 'multimodal':
         raise ValueError('独立视频的角色资产连线需要多模态参考模式，请在项目设置中明确切换模式')
     result['generation_mode'] = mode
+    from .video_ratio import compile_video_ratio
+    result = compile_video_ratio(document, node_id, result, provider, mode)
     from .voice_samples import dialogue_mode, validate_samples
     samples_requested = dialogue_mode(document, shot or {}) == 'voice_sample' and any(str(x.get('text') or '').strip() for x in (shot or {}).get('dialogues', []))
     if samples_requested:
@@ -341,6 +343,8 @@ def compile_motion_input(document, node_id, kind, input_value, project_id, provi
     if not ids and not asset and audio_reference and not caps['audio_only']:
         raise ValueError('当前模型不支持仅音频参考，请同时提供图片或动作视频')
     lines = [START, '生成模式：多模态参考。所有图片均为参考语义，不是严格首帧或尾帧约束。', *image_lines]
+    if result['ratio'] != 'adaptive':
+        lines.append(f"输出视频画幅以本次参数 {result['ratio']} 为准；按此比例重新安排构图，参考图片比例不限制输出画幅。")
     for item in manifest:
         if item.get('purpose') == '构图参考（非硬首帧）':
             lines.append(f"@图片{item['index']}作为起始构图参考，外观以角色和场景参考为准。")
@@ -369,7 +373,7 @@ def compile_motion_input(document, node_id, kind, input_value, project_id, provi
                   asset_ids=ids, image_reference_sources=[{'type': 'asset', 'asset_id': aid} for aid in ids],
                   motion_reference=frozen, reference_manifest=manifest, motion_warnings=warnings,
                   motion_compiler={'version': VERSION, 'mode': 'multimodal',
-                                   'fingerprint': hashlib.sha256(s.dumps([mode, frozen, manifest, result.get('dialogue_mode'), result.get('voice_samples')] + ([shot['compositionMode']] if shot.get('compositionMode') else [])).encode()).hexdigest()},
+                                   'fingerprint': hashlib.sha256(s.dumps([mode, frozen, manifest, result.get('dialogue_mode'), result.get('voice_samples')] + ([result['video_ratio_selection']] if node.get('videoRatio') else []) + ([shot['compositionMode']] if shot.get('compositionMode') else [])).encode()).hexdigest()},
                   generation_revision=node.get('generation_revision', 0))
     # Explicit multimodal choice changes the protocol role, never drops the image.
     result.pop('end_asset_id', None)
@@ -464,6 +468,10 @@ def invalidate_motion_changes(previous, incoming):
         if node.get('data', {}).get('kind') == 'video' and node['id'] not in bound:
             if canvas_signature(previous, node['id']) != canvas_signature(incoming, node['id']):
                 affected.add(node['id'])
+    previous_nodes = {n['id']: n.get('data', {}) for n in previous.get('nodes', [])}
+    for node in incoming.get('nodes', []):
+        if node.get('data', {}).get('kind') == 'video' and node.get('data', {}).get('videoRatio') != previous_nodes.get(node['id'], {}).get('videoRatio'):
+            affected.add(node['id'])
     pending = list(affected)
     while pending:
         node_id = pending.pop()

@@ -21,7 +21,7 @@ export function MotionReferenceEditor(props: Props) {
   const [error, setError] = useState('');
   const [previewOpen, setPreviewOpen] = useState(false);
   const [preview, setPreview] = useState<Value | null>(null);
-  const signature = JSON.stringify([props.shot, props.node?.data, props.document.videoDuration, props.document.videoReferenceMode, props.document.dialogueMode, props.document.filmBible, props.assets.map(a => [a.id,a.category])]);
+  const signature = JSON.stringify([props.shot, props.node?.data, props.document.videoRatio, props.document.videoDuration, props.document.videoReferenceMode, props.document.dialogueMode, props.document.filmBible, props.assets.map(a => [a.id,a.category])]);
   const currentSignature = useRef(signature);
   currentSignature.current = signature;
   useEffect(() => { setPreview(null); setError(''); }, [signature]);
@@ -94,7 +94,7 @@ export function MotionReferenceEditor(props: Props) {
       {previewOpen && <>
       {!preview && !error && <p>{working ? "正在加载参考素材与提示词…" : "等待预览…"}</p>}
       {preview && <div className="motion-submission-preview">
-        <div className="motion-preview-facts">
+        <div className="motion-preview-facts"><span>视频画幅 <b>{preview.video_ratio_selection?.actual==='first_frame'?'跟随首帧':preview.ratio}</b></span>
           <span>镜头计划 <b>{preview.planned_shot_duration} 秒</b></span>
           <span>实际提交 <b>{preview.shot_duration} 秒</b></span>
           {preview.motion_reference && <span>动作参考 <b>{Number(preview.motion_reference.media?.duration).toFixed(2)} 秒</b></span>}
