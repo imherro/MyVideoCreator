@@ -1,3 +1,4 @@
+import {CanvasVideoReferences} from "./components/CanvasVideoReferences";
 import {CreativeConstraintsCard} from "./components/CreativeConstraintsCard";
 import { AssistantPanel } from "./components/AssistantPanel";
 import type { AssistantAction } from "./assistantChat";
@@ -3325,13 +3326,19 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 }
                 if (source && isManagedVisualNode(source as Any)) {
                   const versionId = visualVersionIdFromNode(source as Any);
+                  if (target?.data.kind === "video" && !doc.shots.some(item=>item.videoNode===target.id || item.pipeline?.videoNodeId===target.id)) {
+                    update(d=>invalidate({...d,edges:addEdge({...connection,id:id()},d.edges)},[target.id]));
+                    setNotice("已连接视频参考；生成时使用该版本已确认的主参考图");
+                    return;
+                  }
+
                   const shot = doc.shots.find(
                     (item) =>
                       item.imageNode === target?.id ||
                       item.pipeline?.imageNodeId === target?.id,
                   );
                   if (!shot || target?.data.kind !== "image") {
-                    report(new Error("视觉版本只能连接到分镜图节点"));
+                    report(new Error("视觉版本可连接到分镜图或独立视频节点"));
                     return;
                   }
                   try {
@@ -3755,6 +3762,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               request={api}
               onChange={changeModel}
             />}
+            {data.kind === "video" && !selectedVideoShot && <CanvasVideoReferences document={doc} nodeId={node.id} assets={assets} onCompile={()=>previewVideoSubmission(node.id)}/>}
             {data.kind === "video" && selectedVideoShot && <MotionReferenceEditor shot={selectedVideoShot} document={doc} assets={assets} provider={config.providers.find((p:Any)=>p.id===data.provider)} node={node} busy={busy} onPatch={patch=>update(document=>updateStoryboardShot(document,shotIdentity(selectedVideoShot),patch))} onUpload={uploadMotionReference} onCompile={()=>previewVideoSubmission(node.id)}/>}
             {data.kind === "video" && selectedVideoMode === "multimodal" && <p className="muted">多模态参考：关联分镜图作为起始构图参考，角色、场景、道具按绑定追加，不是严格首帧。</p>}
             {data.kind === "video" && selectedVideoMode !== "multimodal" &&

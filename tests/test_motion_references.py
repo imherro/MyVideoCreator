@@ -398,3 +398,58 @@ def test_composition_mode_change_invalidates_only_video_and_preserves_media():
     assert result['nodes'][1]['data']['stale']
     assert result['nodes'][1]['data']['assetId']=='vid'
     assert not result['nodes'][0]['data'].get('stale')
+
+
+def standalone_visual_fixture(sample_video):
+    doc, provider, job = fixture(sample_video, motion=False)
+    aid = doc['nodes'][0]['data']['assetId']
+    doc['shots'] = []
+    doc['filmBible']['visual'] = {
+        'cards': {'robot': {'id':'robot','name':'无臂机器人','kind':'character'}},
+        'versions': {'rv': {'id':'rv','cardId':'robot','status':'locked','invariants':['没有手臂'],
+                            'references':[{'role':'primary','assetId':aid}]}}}
+    doc['nodes'].append({'id':'role','type':'visualAsset','data':{'kind':'visual_asset','managed':True,'visualVersionId':'rv'}})
+    doc['edges'] = [{'source':'role','target':'v'}]
+    return doc, provider, job, aid
+
+
+def test_standalone_visual_edge_compiles_locked_reference_and_constraints(sample_video):
+    doc, provider, job, aid = standalone_visual_fixture(sample_video)
+    before = copy.deepcopy(doc)
+    result = compile_fixture(doc, provider, job)
+    assert result['asset_ids'] == [aid]
+    assert result['reference_manifest'][0]['versionId'] == 'rv'
+    assert '无臂机器人' in result['prompt'] and '没有手臂' in result['prompt']
+    assert result['generation_mode']['actual'] == 'multimodal'
+    assert doc == before
+    assert compile_motion_input(doc, 'v', 'video', result, job['project_id'], provider) == result
+    from backend.workflows import execution_plan
+    assert [n['id'] for n, _ in execution_plan(doc, ['v'])] == ['v']
+    doc['edges'] = []
+    with pytest.raises(ValueError, match='至少需要'):
+        compile_fixture(doc, provider, job)
+
+
+@pytest.mark.parametrize('status', ['draft','deprecated'])
+def test_standalone_visual_requires_confirmed_version(sample_video, status):
+    doc, provider, job, aid = standalone_visual_fixture(sample_video)
+    doc['filmBible']['visual']['versions']['rv']['status'] = status
+    with pytest.raises(ValueError, match='无臂机器人'):
+        compile_fixture(doc, provider, job)
+
+
+def test_standalone_visual_does_not_silently_switch_strict_mode(sample_video):
+    doc, provider, job, aid = standalone_visual_fixture(sample_video)
+    doc['videoReferenceMode'] = 'first_frame'
+    with pytest.raises(ValueError, match='多模态参考模式'):
+        compile_fixture(doc, provider, job)
+
+
+def test_standalone_visual_changes_invalidate_existing_video(sample_video):
+    doc, provider, job, aid = standalone_visual_fixture(sample_video)
+    doc['nodes'][1]['data']['assetId'] = 'existing-video'
+    changed = copy.deepcopy(doc)
+    changed['edges'] = []
+    result = invalidate_motion_changes(doc, changed)
+    assert result['nodes'][1]['data']['stale']
+    assert result['nodes'][1]['data']['generation_revision'] == 1

@@ -102,11 +102,53 @@ def resolve_generation_mode(document, shot, input_value):
     return {'requested': requested, 'actual': requested, 'source': 'shot' if (shot or {}).get('videoReferenceMode') else 'project'}
 
 
+def canvas_reference_shot(document, node_id, input_value):
+    """Resolve manual canvas edges against persisted visual versions, not client snapshots."""
+    nodes = {n['id']: n.get('data', {}) for n in document.get('nodes', [])}
+    visual = (document.get('filmBible') or {}).get('visual') or {}
+    bindings = {'characters': [], 'props': []}
+    seen = set()
+    for edge in document.get('edges', []):
+        if edge.get('target') != node_id:
+            continue
+        source = nodes.get(edge.get('source'), {})
+        if source.get('kind') != 'visual_asset':
+            continue
+        vid = source.get('visualVersionId')
+        if vid in seen:
+            continue
+        seen.add(vid)
+        version = (visual.get('versions') or {}).get(vid) or {}
+        card = (visual.get('cards') or {}).get(version.get('cardId')) or {}
+        name = card.get('name') or vid or '未知资产'
+        if not card or card.get('deletedAt') or version.get('status') != 'locked':
+            raise ValueError(f'画布参考「{name}」尚未确认主参考图，或该版本已弃用，请先确认可用版本')
+        if not (_primary_reference(version) or {}).get('assetId'):
+            raise ValueError(f'画布参考「{name}」缺少主参考图，请先生成并确认')
+        binding = {'versionId': vid}
+        kind = card.get('kind')
+        if kind in ('character', 'character_state'):
+            bindings['characters'].append(binding)
+        elif kind in ('scene', 'scene_state'):
+            if bindings.get('scene'):
+                raise ValueError('独立视频请只连接一个场景或场景状态，避免空间参考冲突')
+            bindings['scene'] = binding
+        elif kind == 'prop':
+            bindings['props'].append(binding)
+        else:
+            raise ValueError(f'画布参考「{name}」的资产类型暂不支持视频参考')
+    return {'duration': input_value.get('shot_duration') or (input_value.get('parameters') or {}).get('duration') or 5,
+            'compositionMode': 'direct', 'assetBindings': bindings}
+
+
 def compile_motion_input(document, node_id, kind, input_value, project_id, provider):
     if kind != 'video':
         return dict(input_value)
     shot = next((x for x in document.get('shots', [])
                  if (x.get('videoNode') or (x.get('pipeline') or {}).get('videoNodeId')) == node_id), None)
+    standalone = shot is None
+    if standalone:
+        shot = canvas_reference_shot(document, node_id, input_value)
     result = dict(input_value)
     result['prompt'] = strip_motion_prompt(result.get('prompt'))
     # Browser/node snapshots cannot authorize a reference: the shot is canonical.
@@ -114,6 +156,8 @@ def compile_motion_input(document, node_id, kind, input_value, project_id, provi
         result.pop(key, None)
     reference = (shot or {}).get('motionReference')
     mode = resolve_generation_mode(document, shot, result)
+    if standalone and list(_binding_rows(shot)) and mode['actual'] != 'multimodal':
+        raise ValueError('独立视频的角色资产连线需要多模态参考模式，请在项目设置中明确切换模式')
     result['generation_mode'] = mode
     from .voice_samples import dialogue_mode, validate_samples
     samples_requested = dialogue_mode(document, shot or {}) == 'voice_sample' and any(str(x.get('text') or '').strip() for x in (shot or {}).get('dialogues', []))
@@ -210,6 +254,9 @@ def compile_motion_input(document, node_id, kind, input_value, project_id, provi
                 raise ValueError('视觉参考必须是图像素材')
             ids.append(aid)
             manifest.append({'kind': 'image', 'index': len(ids), 'assetId': aid, 'name': row['name'], **labels})
+        else:
+            for key, value in labels.items():
+                manifest[ids.index(aid)].setdefault(key, value)
         return ids.index(aid) + 1
 
     frame = nodes.get(shot.get('imageNode') or (shot.get('pipeline') or {}).get('imageNodeId'), {}).get('data', {})
@@ -227,11 +274,11 @@ def compile_motion_input(document, node_id, kind, input_value, project_id, provi
     for edge in execution_edges(document):
         if edge.get('target') == node_id:
             parent = nodes.get(edge.get('source'), {}).get('data', {})
-            if parent.get('kind') == 'image':
+            if parent.get('kind') in ('image', 'reference'):
                 image(parent.get('assetId'))
     visual = (document.get('filmBible') or {}).get('visual') or {}
     cards, versions = visual.get('cards') or {}, visual.get('versions') or {}
-    if any(not c.get('deletedAt') and c.get('status') != 'deprecated' for c in cards.values()) and not list(_binding_rows(shot)):
+    if not standalone and any(not c.get('deletedAt') and c.get('status') != 'deprecated' for c in cards.values()) and not list(_binding_rows(shot)):
         raise ValueError('本镜尚未绑定视觉资产，请先绑定角色、场景或道具并确认主参考图')
     from .reference_roles import version_constraints, actor_reference_indices, shared_identity_lines
     actor_entries = []
@@ -402,6 +449,21 @@ def invalidate_motion_changes(previous, incoming):
                 or (not shot.get('videoReferenceMode') and previous.get('videoReferenceMode') != incoming.get('videoReferenceMode'))
                 or (not shot.get('dialogueMode') and previous.get('dialogueMode', 'full_dialogue') != incoming.get('dialogueMode', 'full_dialogue'))):
             affected.add(shot.get('videoNode') or (shot.get('pipeline') or {}).get('videoNodeId'))
+    def canvas_signature(doc, nid):
+        nodes = {n['id']: n.get('data', {}) for n in doc.get('nodes', [])}
+        visual = (doc.get('filmBible') or {}).get('visual') or {}
+        rows = []
+        for edge in doc.get('edges', []):
+            source = nodes.get(edge.get('source'), {})
+            if edge.get('target') == nid and source.get('kind') == 'visual_asset':
+                version = (visual.get('versions') or {}).get(source.get('visualVersionId')) or {}
+                rows.append([source.get('visualVersionId'), version, (visual.get('cards') or {}).get(version.get('cardId'))])
+        return rows
+    bound = {shot.get('videoNode') or (shot.get('pipeline') or {}).get('videoNodeId') for shot in incoming.get('shots', [])}
+    for node in incoming.get('nodes', []):
+        if node.get('data', {}).get('kind') == 'video' and node['id'] not in bound:
+            if canvas_signature(previous, node['id']) != canvas_signature(incoming, node['id']):
+                affected.add(node['id'])
     pending = list(affected)
     while pending:
         node_id = pending.pop()
