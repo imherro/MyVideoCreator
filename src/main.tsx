@@ -2915,9 +2915,6 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             <button className="quiet" onClick={() => setPanel(panel === "add" ? null : "add")}>
               <Plus size={15} />添加节点
             </button>
-            <button className="quiet" onClick={() => setPanel("prompts")}>
-              <Sparkles size={15} />提示词
-            </button>
             <button className="quiet" onClick={() => history().catch(report)}>
               <History size={15} />历史
             </button>
@@ -4186,6 +4183,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                     </button>
                   );
                 })}
+                <button className="quiet" onClick={() => setPanel("prompts")}><Sparkles size={15}/><div><b>提示词模板（可选）</b><span>从模板创建节点，或应用到当前同类节点</span></div></button>
                 <h3>构图辅助</h3>
                 <button onClick={()=>newComposition("panorama")}><ImageIcon/><div><b>全景场景</b><span>选择或生成全景图，保存不同方向的构图</span></div><Plus size={17}/></button>
                 <button onClick={()=>newComposition("director")}><Monitor/><div><b>3D 构图</b><span>摆放人物与物体，设计机位并保存参考图</span></div><Plus size={17}/></button>

@@ -421,3 +421,12 @@
 @media(max-width:700px){.storyboard-images-workspace,.video-production-workspace{padding-left:12px;padding-right:12px}.storyboard-images-workspace .storyboard-workspace-header .settings-actions,.video-production-header-actions{justify-content:flex-start}}
 
 .video-prompt-field{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px;align-items:center;margin-bottom:9px}.video-prompt-field>b{font-size:14px;font-weight:400;color:#a9afb1}.video-prompt-field>textarea{grid-column:1/-1}.video-prompt-advice{display:contents}.video-prompt-advice-actions{display:flex;justify-content:flex-end;gap:6px}.video-prompt-advice>.error,.video-prompt-suggestion{grid-column:1/-1}.video-prompt-suggestion{padding:12px;border:1px solid #68593f;border-radius:8px;background:#242722}.video-prompt-suggestion textarea{margin:8px 0;min-height:130px}.video-prompt-suggestion ul{padding-left:20px;line-height:1.6;margin:5px 0 10px}
+
+/* Keep related video controls paired instead of wrapping independently. */
+.video-timing-fields,.motion-source-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}
+.video-timing-fields>label,.motion-source-row>label{min-width:0;margin:0}
+.video-timing-fields select,.video-timing-fields input,.motion-source-row select,.motion-source-row input{width:100%;min-width:0;box-sizing:border-box}
+.motion-reference-actions{grid-template-columns:repeat(3,minmax(0,1fr))}
+.motion-source-row{margin-top:10px}
+.motion-source-row>button{grid-column:1/-1;justify-self:end}
+@media(max-width:600px){.motion-reference-actions{grid-template-columns:1fr}.video-timing-fields,.motion-source-row{grid-template-columns:1fr}}
