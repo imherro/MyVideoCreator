@@ -251,6 +251,8 @@ def compile_motion_input(document, node_id, kind, input_value, project_id, provi
         for constraint in version_constraints(chain):
             image_lines.append(f"@图片{index}：{constraint}")
         if group == 'character':
+            from .character_sheet import REFERENCE_RULE
+            if REFERENCE_RULE not in image_lines:image_lines.append(REFERENCE_RULE)
             actor_entries.append((index, chain))
     actor_indices, ambiguous_actors = actor_reference_indices(actor_entries)
     image_lines.extend(shared_identity_lines(actor_entries))

@@ -548,6 +548,7 @@ export function FilmBiblePanel({
         ) : (
           <p className="muted">尚未设置主参考图。提取剧本和分镜不会自动调用图片模型。</p>
         )}
+        {(card.kind === "character" || card.kind === "character_state") && <small>新生成使用 1:1 角色设定板：上排 3 个面部特写，下排 4 个全身视角。已有图片保持不变。</small>}
         {editable && (
           <div className="reference-actions">
             <label className="upload-reference-button">

@@ -81,6 +81,9 @@ def freeze_prompt_contract(kind: str, value: dict, *, origin: str = 'submission'
             response_schema, schema_version = SHOT_SCHEMA, 'storyboard/v1'
     elif kind == 'image':
         system_prompt, schema_version = IMAGE_SYSTEM_PROMPT, 'image-generation/v1'
+        if result.get('imagePurpose')=='character_sheet':
+            system_prompt='你是影视角色设定设计师。严格按照角色设定板版式、项目美术风格、人物描述及结构约束生成同一身份的多视角定妆图。允许指定的上下两排视图布局，不添加文字、水印或额外角色。'
+            schema_version='character-sheet/v1'
     elif kind == 'video':
         system_prompt, schema_version = VIDEO_SYSTEM_PROMPT, 'video-generation/v2'
     elif kind == 'audio':

@@ -89,6 +89,9 @@ def _constraint_lines(index, group, chain):
         f"图{index}｜{labels[group]}｜{bound_card.get('name', bound_card['id'])}",
         '  版本链（根版本→当前绑定版本）：',
     ]
+    if group == 'character':
+        from .character_sheet import REFERENCE_RULE
+        lines.append('  '+REFERENCE_RULE)
     for layer, (card, version) in enumerate(chain, 1):
         attributes = '；'.join(
             f"{str(item.get('name') or '').strip()}：{str(item.get('value') or '').strip()}"

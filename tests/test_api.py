@@ -492,8 +492,13 @@ def test_visual_reference_queue_validates_server_capability_and_persists_ownersh
         )
         assert job['project_revision']==saved.json()['revision']
         assert job['production_revision']==saved.json()['production_revision']+1
-        assert job['input']['ratio']=='16:9'
-        assert job['input']['size']=='2048x1152'
+        assert job['input']['ratio']=='1:1'
+        assert job['input']['size']=='2048x2048'
+        assert job['input']['character_sheet_version']=='character-sheet/v1'
+        assert '上排三个面部特写' in job['input']['prompt']
+        replay=c.post(f'/api/projects/{p["id"]}/jobs',json=payload)
+        assert replay.status_code==200,replay.text
+        assert replay.json()['id']==job['id']
         assert generation['submissionId']==payload['submission_id']
         assert generation['jobId']==job['id']
         assert job['project_document']['filmBible']['visual']['versions'][state_version]['status']=='pending_reference'

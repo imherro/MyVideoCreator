@@ -1019,7 +1019,11 @@ def _image_spec(c, pid, value, project_fields=None):
 def preview_image_spec(pid: str, body: dict):
     # Pure, local preview. No model discovery, provider request or paid job.
     with s.db() as c:
-        return _image_spec(c, pid, body.get('input') or {}, body.get('project'))
+        from .character_sheet import prepare_character_sheet
+        state=read_project_state(c,pid)
+        if not state:raise HTTPException(404,'项目不存在')
+        value=prepare_character_sheet(state['document'],body.get('input') or {})
+        return _image_spec(c, pid, value, body.get('project'))
 
 
 def create_job_record(c,pid,body):
@@ -1040,6 +1044,10 @@ def create_job_record(c,pid,body):
                 'imported_story':((state['document'].get('filmBible') or {}).get('story') or {}).get('summary',''),
             }}
     if body.kind == 'image':
+        from .character_sheet import prepare_character_sheet
+        previous_sheet=c.execute('SELECT input FROM jobs WHERE submission_id=?',(body.submission_id,)).fetchone()
+        if not previous_sheet or json.loads(previous_sheet['input']).get('character_sheet_version'):
+            body.input=prepare_character_sheet(read_project_state(c,pid)['document'],body.input)
         spec = _image_spec(c, pid, body.input)
         body.input = {**body.input, 'ratio': spec['ratio'], 'size': spec['size'],
                       'resolution': spec['size'], 'image_spec': spec}

@@ -13,7 +13,8 @@ IMAGE_SIZES = {
 
 def resolve_image_settings(document, value, provider):
     panorama = value.get('imagePurpose') == 'panorama'
-    ratio = '2:1' if panorama else str(document.get('ratio') or '16:9')
+    character_sheet = value.get('imagePurpose') == 'character_sheet'
+    ratio = '1:1' if character_sheet else '2:1' if panorama else str(document.get('ratio') or '16:9')
     if not panorama and ratio not in IMAGE_SIZES:
         raise ValueError('请先设置项目图像画幅比例')
     if panorama and provider.get('type') == 'runninghub':
@@ -29,8 +30,8 @@ def resolve_image_settings(document, value, provider):
     seed_supported = provider.get('type') == 'maestro' or (
         provider.get('type') == 'comfy' and '{{seed}}' in str(provider.get('workflow') or '')
     )
-    choices = [{'value': 'project', 'label': '跟随项目画幅 · 推荐尺寸'}]
-    if local_size:
+    choices = [{'value': 'project', 'label': '角色设定板 · 固定 1:1' if character_sheet else '跟随项目画幅 · 推荐尺寸'}]
+    if local_size and not character_sheet:
         choices += [{'value': 'video', 'label': '与项目视频像素一致'},
                     {'value': 'custom', 'label': '自定义像素尺寸'}]
     if mode not in {item['value'] for item in choices}:
@@ -61,7 +62,7 @@ def resolve_image_settings(document, value, provider):
         'version': 'image-settings/v1', 'sizeMode': mode, 'ratio': ratio, 'size': size,
         'seedSupported': seed_supported, 'seed': seed if seed_supported else None,
         'sizeOptions': choices,
-        'sizeNote': ('全景原图固定使用 2:1；取景输出另行跟随项目画幅。' if panorama else
+        'sizeNote': ('角色设定板固定 1:1，上排三个面部特写、下排四个全身视角；不改变项目视频比例。' if character_sheet else '全景原图固定使用 2:1；取景输出另行跟随项目画幅。' if panorama else
                     'RunningHub 按 2K 档位出图，实际像素以生成结果为准。'
                      if provider.get('type') == 'runninghub' else
                      '图像尺寸独立于视频输出分辨率；画幅跟随项目。'),
