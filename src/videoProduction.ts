@@ -74,7 +74,7 @@ export function deriveVideoProductionRows(
     const dialogues = Array.isArray(shot.dialogues) ? shot.dialogues.filter((item: Value) => String(item.text || "").trim()) : [];
     const dialogueAudioAssets: Value[] = [];
     const plannedDuration = Math.max(0, Number(shot.duration || 0));
-    const configuredDuration = Number(document.videoDuration ?? -1);
+    const configuredDuration = Number(shot.videoDurationOverride ?? document.videoDuration ?? -1);
     let effectiveDuration = configuredDuration >= 4 ? configuredDuration : plannedDuration;
     let dialogueReadinessReason = "";
     if (dialogueMode(document,shot) === 'voice_sample' && dialogues.length) {

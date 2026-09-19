@@ -122,7 +122,7 @@ export function deriveManagedGraph<T extends FilmBibleDocument>(document: T): T 
   );
   const managedEdges = document.shots.flatMap((shot) => {
     const shotUid = String(shot.uid || shot.id || "");
-    const target = shot.imageNode || shot.pipeline?.imageNodeId;
+    const target = shot.imageNode || shot.pipeline?.imageNodeId || shot.videoNode || shot.pipeline?.videoNodeId;
     if (!shotUid || !target) return [];
     return bindingRows(shot).flatMap((binding) => {
       const version = visual.versions[binding.versionId];

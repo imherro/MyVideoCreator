@@ -1,3 +1,6 @@
+import {adoptCanvasVideo} from '../src/storyboard.ts';
+import {deriveManagedGraph} from '../src/filmBible/managedGraph.ts';
+import {updateLinkedNodePrompt} from '../src/shotSync.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -75,4 +78,28 @@ test('selected generation targets only explicit shots and manual creation perfor
   assert.equal(created.shots[2].uid,'shot-new-uid');
   assert.equal(created.nodes.length,document.nodes.length);
   assert.deepEqual(created.shots[2].assetBindings,{characters:[],scene:null,props:[]});
+});
+
+
+test('canvas video adoption reuses media and bindings, supports ordering and bidirectional prompt edits',()=>{
+ const doc=fixture();doc.videoReferenceMode='multimodal';doc.videoDuration=12;
+ doc.nodes.push({id:'free',data:{kind:'video',prompt:'独立动作',assetId:'finished',resultJob:'job-existing',parameters:{duration:8},videoRatio:'9:16'}});
+ doc.nodes.push({id:'visual-hero',type:'visualAsset',data:{kind:'visual_asset',managed:true,visualVersionId:'hero-v1'}});
+ doc.edges.push({id:'manual',source:'visual-hero',target:'free'});
+ const before=structuredClone(doc);
+ const next=adoptCanvasVideo(doc,'free',()=> 'adopted',1);
+ assert.equal(next.shots[1].videoNode,'free');
+ assert.equal(next.shots[1].video_prompt,'独立动作');
+ assert.equal(next.shots[1].duration,8);assert.equal(next.shots[1].videoDurationOverride,8);
+ assert.equal(next.shots[1].assetBindings.characters[0].versionId,'hero-v1');
+ assert.deepEqual(next.nodes,doc.nodes);assert.deepEqual(doc,before);
+ assert.equal(next.nodes.find(n=>n.id==='free').data.assetId,'finished');
+ assert.equal(adoptCanvasVideo(next,'free',()=> 'duplicate'),next);
+ const projected=deriveManagedGraph(next);
+ assert.ok(projected.edges.some(e=>e.source==='visual-hero'&&e.target==='free'&&e.data?.origin==='visual_binding'));
+ const edited=updateStoryboardShot(projected,'shot-adopted',{video_prompt:'分镜编辑',duration:6});
+ assert.equal(edited.nodes.find(n=>n.id==='free').data.prompt,'分镜编辑');
+ assert.equal(edited.shots[1].videoDurationOverride,6);
+ const canvas=updateLinkedNodePrompt(edited,'free','画布编辑');
+ assert.equal(canvas.shots[1].video_prompt,'画布编辑');
 });

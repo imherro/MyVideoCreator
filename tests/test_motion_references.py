@@ -453,3 +453,22 @@ def test_standalone_visual_changes_invalidate_existing_video(sample_video):
     result = invalidate_motion_changes(doc, changed)
     assert result['nodes'][1]['data']['stale']
     assert result['nodes'][1]['data']['generation_revision'] == 1
+
+
+def test_adopting_unchanged_canvas_video_does_not_mark_result_stale(sample_video):
+    from backend.motion_references import canvas_reference_shot
+    doc, provider, job, aid = standalone_visual_fixture(sample_video)
+    doc['nodes'][1]['data']['assetId']='finished-video'
+    incoming=copy.deepcopy(doc)
+    linked=canvas_reference_shot(doc,'v',job['input'])
+    incoming['shots']=[{**linked,'id':'adopted','uid':'adopted','videoNode':'v','canvasSourceNodeId':'v',
+                       'video_prompt':job['input']['prompt']}]
+    result=invalidate_motion_changes(doc,incoming)
+    assert not result['nodes'][1]['data'].get('stale')
+    before=compile_fixture(doc,provider,job)
+    from backend.video_dialogue import bind_fixed_dialogue_audio
+    prepared=compile_shot_video_input(result,'v','video',job['input'])
+    prepared=bind_fixed_dialogue_audio(result,'v','video',prepared,[])
+    after=compile_motion_input(result,'v','video',prepared,job['project_id'],provider)
+    assert before['asset_ids']==after['asset_ids']
+    assert before['motion_compiler']['fingerprint']==after['motion_compiler']['fingerprint']

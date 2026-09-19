@@ -92,12 +92,16 @@ def compile_shot_video_input(document, node_id, kind, input_value, production_co
         shot_duration = 0
     if shot_duration <= 0:
         raise ValueError('分镜时长无效，请先在分镜卡片中设置大于 0 秒的时长')
-    configured_duration = document.get('videoDuration', -1)
+    configured_duration = shot.get('videoDurationOverride', document.get('videoDuration', -1))
     try:
         configured_duration = int(configured_duration)
     except (TypeError, ValueError):
         configured_duration = -1
     provider_duration = configured_duration if 4 <= configured_duration <= 30 else max(1, int(math.ceil(shot_duration)))
+    if shot.get('videoDurationOverride') is not None:
+        override=float(shot['videoDurationOverride'])
+        if not math.isfinite(override) or not 0 < override <= 30: raise ValueError('本镜视频时长无效')
+        provider_duration=max(1,math.ceil(override))
     base_prompt = str(result.get('prompt') or shot.get('video_prompt') or '')
     # Job prompts are immutable snapshots, but this also keeps retries and old
     # already-compiled node data idempotent.
@@ -154,6 +158,7 @@ def bind_fixed_dialogue_audio(document, node_id, kind, input_value, assets, prod
         if isinstance(item, dict) and str(item.get('text') or '').strip()
     ]
     if not dialogues:
+        if shot.get('canvasSourceNodeId'): result.pop('dialogue_mode', None)
         result.pop('dialogue_audio_asset_ids', None)
         result.pop('dialogue_audio', None)
         result.pop('dialogue_audio_mode', None)

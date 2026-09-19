@@ -10,6 +10,7 @@ export function framesForDuration(model:string,duration:number,caps:Value={}){
 }
 export function updateShot<T extends {shots:Value[];nodes:Node[];edges:Edge[]}>(document:T,id:string,patch:Value):T{
  const shot=document.shots.find(s=>s.id===id);if(!shot)return document;
+ if('duration' in patch&&shot.videoDurationOverride!=null)patch={...patch,videoDurationOverride:patch.duration};
  const imageNodeId=shot.imageNode||shot.pipeline?.imageNodeId;
  const videoNodeId=shot.videoNode||shot.pipeline?.videoNodeId;
  let next={...document,shots:document.shots.map(s=>s.id===id?{...s,...patch}:s)};

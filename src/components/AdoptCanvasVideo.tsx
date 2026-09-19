@@ -1,0 +1,5 @@
+import {useState} from 'react';
+export function AdoptCanvasVideo({count,disabled,onAdopt}:{count:number;disabled:boolean;onAdopt:(position:number)=>Promise<void>}) {
+ const [open,setOpen]=useState(false),[position,setPosition]=useState(count),[working,setWorking]=useState(false),[error,setError]=useState('');
+ return <section><button className="secondary full" disabled={disabled||working} onClick={()=>{setPosition(count);setOpen(!open)}}>加入本集分镜</button>{open&&<><label>插入位置<select value={Math.min(position,count)} onChange={e=>setPosition(Number(e.target.value))}>{Array.from({length:count+1},(_,i)=><option key={i} value={i}>{i===count?'追加到最后':`插入到第 ${i+1} 镜之前`}</option>)}</select></label><small>保留当前节点、提示词、参考资产及视频结果，不会重新生成。</small>{error&&<p className="error">{error}</p>}<button disabled={disabled||working} onClick={async()=>{setWorking(true);setError('');try{await onAdopt(Math.min(position,count))}catch(e:any){setError(e.message)}finally{setWorking(false)}}}>{working?'正在加入…':'确认加入'}</button></>}</section>;
+}

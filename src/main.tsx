@@ -1,3 +1,5 @@
+import {AdoptCanvasVideo} from "./components/AdoptCanvasVideo";
+import {adoptCanvasVideo} from "./storyboard";
 import {VideoRatioSelector} from "./components/VideoRatioSelector";
 import {CanvasVideoReferences} from "./components/CanvasVideoReferences";
 import {CreativeConstraintsCard} from "./components/CreativeConstraintsCard";
@@ -3334,9 +3336,9 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   const shot = doc.shots.find(
                     (item) =>
                       item.imageNode === target?.id ||
-                      item.pipeline?.imageNodeId === target?.id,
+                      item.pipeline?.imageNodeId === target?.id || item.videoNode === target?.id || item.pipeline?.videoNodeId === target?.id,
                   );
-                  if (!shot || target?.data.kind !== "image") {
+                  if (!shot || !["image","video"].includes(String(target?.data.kind || ""))) {
                     report(new Error("视觉版本可连接到分镜图或独立视频节点"));
                     return;
                   }
@@ -3762,6 +3764,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
               onChange={changeModel}
             />}
             {data.kind === "video" && <VideoRatioSelector document={doc} data={data} provider={config.providers.find((p:Any)=>p.id===data.provider)} mode={selectedVideoMode} onChange={changeModel}/>}
+            {data.kind === "video" && !selectedVideoShot && <AdoptCanvasVideo key={node.id} count={doc.shots.length} disabled={busy||['queued','running'].includes(activeJob?.status||'')} onAdopt={async position=>{update(d=>adoptCanvasVideo(d,node.id,id,position));await save();if(dirty.current)throw new Error('保存尚未完成，请重试保存');setNotice('已加入本集分镜，保留原视频节点与结果；可在分镜规划和视频工作区继续编辑');}}/>}
             {data.kind === "video" && !selectedVideoShot && <CanvasVideoReferences document={doc} nodeId={node.id} assets={assets} onCompile={()=>previewVideoSubmission(node.id)}/>}
             {data.kind === "video" && selectedVideoShot && <MotionReferenceEditor shot={selectedVideoShot} document={doc} assets={assets} provider={config.providers.find((p:Any)=>p.id===data.provider)} node={node} busy={busy} onPatch={patch=>update(document=>updateStoryboardShot(document,shotIdentity(selectedVideoShot),patch))} onUpload={uploadMotionReference} onCompile={()=>previewVideoSubmission(node.id)}/>}
             {data.kind === "video" && selectedVideoMode === "multimodal" && <p className="muted">多模态参考：关联分镜图作为起始构图参考，角色、场景、道具按绑定追加，不是严格首帧。</p>}

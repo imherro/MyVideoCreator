@@ -151,3 +151,9 @@ def test_standalone_canvas_video_invalid_duration(duration):
 def test_standalone_inherit_clears_null_duration_before_provider_defaults():
     result = compile_shot_video_input({'videoDuration': -1}, 'video', 'video', {'parameters': {'duration': None, 'resolution': '480p'}})
     assert result['parameters'] == {'resolution': '480p'}
+
+
+def test_adopted_video_keeps_explicit_duration_instead_of_project_default():
+    adopted={**shot(),'duration':6.2,'videoDurationOverride':6.2}
+    result=compile_shot_video_input({'shots':[adopted],'videoDuration':12},'video-node','video',{'prompt':'动作'})
+    assert result['parameters']['duration']==7

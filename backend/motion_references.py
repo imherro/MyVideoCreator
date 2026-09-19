@@ -448,6 +448,18 @@ def invalidate_motion_changes(previous, incoming):
         if shot.get('compositionMode') not in (None, 'direct', 'preview'):
             raise ValueError('镜头制作方式无效')
         old = old_shots.get(shot.get('uid') or shot.get('id'), {})
+        if not old and shot.get('canvasSourceNodeId') and shot.get('canvasSourceNodeId') == (shot.get('videoNode') or (shot.get('pipeline') or {}).get('videoNodeId')):
+            nid=shot['canvasSourceNodeId']
+            original=next((n.get('data',{}) for n in previous.get('nodes',[]) if n['id']==nid),{})
+            try:
+                baseline=canvas_reference_shot(previous,nid,original)
+                same_bindings=[(g,b.get('versionId')) for g,b in _binding_rows(baseline)]==[(g,b.get('versionId')) for g,b in _binding_rows(shot)]
+                expected_duration=(original.get('parameters') or {}).get('duration') or (previous.get('videoDuration') if (previous.get('videoDuration') or -1)>0 else 5)
+                if original.get('kind')=='video' and same_bindings and shot.get('video_prompt')==original.get('prompt','') and float(shot.get('duration',0))==float(expected_duration) and previous.get('videoReferenceMode')=='multimodal':
+                    old=baseline
+            except (ValueError,TypeError):
+                pass
+
         from .voice_resolution import resolved_voice
         def signatures(doc, item):
             keys = ('status', 'version', 'voiceType', 'providerId', 'referenceAssetId', 'referenceVersion')
