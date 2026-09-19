@@ -85,33 +85,26 @@ def _version_chain(visual, bound_version):
 def _constraint_lines(index, group, chain):
     labels = {'character': '角色', 'scene': '场景', 'prop': '道具'}
     bound_card, _ = chain[-1]
-    lines = [
-        f"图{index}｜{labels[group]}｜{bound_card.get('name', bound_card['id'])}",
-        '  版本链（根版本→当前绑定版本）：',
-    ]
-    if group == 'character':
-        from .character_sheet import REFERENCE_RULE
-        lines.append('  '+REFERENCE_RULE)
-    for layer, (card, version) in enumerate(chain, 1):
-        attributes = '；'.join(
-            f"{str(item.get('name') or '').strip()}：{str(item.get('value') or '').strip()}"
-            for item in version.get('spec', {}).get('attributes', [])
-            if isinstance(item, dict) and item.get('name') and item.get('value')
-        )
-        invariants = '；'.join(
-            str(item).strip() for item in version.get('invariants', []) if str(item).strip()
-        )
-        lines.append(
-            f"    层{layer}｜{card.get('name', card['id'])}｜可见规格："
-            f"{str(version.get('spec', {}).get('description') or '').strip() or '按参考图'}"
-        )
-        if attributes:
-            lines.append(f"      固定属性：{attributes}")
-        if invariants:
-            lines.append(f"      不可改变：{invariants}")
-    from .reference_roles import version_constraints
-    if len(chain) > 1:
-        lines.append('  ' + version_constraints(chain)[0])
+    lines = [f"图{index}｜{labels[group]}｜{bound_card.get('name', bound_card['id'])}"]
+    # Same-card revisions replace earlier snapshots; state cards inherit their base.
+    effective = {}
+    for card, version in chain:
+        effective[card['id']] = (card, version)
+    attributes, descriptions, invariants = {}, [], []
+    for card, version in effective.values():
+        spec = version.get('spec') or {}
+        description = str(spec.get('description') or '').strip()
+        if description and description not in descriptions: descriptions.append(description)
+        for item in spec.get('attributes') or []:
+            if isinstance(item, dict) and item.get('name') and item.get('value'):
+                attributes[str(item['name']).strip()] = str(item['value']).strip()
+        for rule in version.get('invariants') or []:
+            rule = str(rule).strip()
+            if rule and rule not in invariants: invariants.append(rule)
+    if descriptions: lines.append('外观：'+'；'.join(descriptions))
+    if attributes: lines.append('属性：'+'；'.join(f'{k}：{v}' for k,v in attributes.items()))
+    if invariants: lines.append('不可改变：'+'；'.join(invariants))
+
     return lines
 
 
@@ -125,6 +118,7 @@ def _style_text(value):
 
 def compile_shot_prompt(document, shot, constraints):
     """Compile the final provider prompt only from canonical project state."""
+    from .character_sheet import REFERENCE_RULE
     lines = [
         '[本镜头变量]',
         f"首帧描述：{str(shot.get('image_prompt') or '').strip() or '按分镜结构生成首帧'}",
@@ -133,7 +127,8 @@ def compile_shot_prompt(document, shot, constraints):
         f"摄影机：{str(shot.get('camera') or '').strip() or '无额外摄影机说明'}",
         '',
         '[视觉圣经一致性约束]',
-        '以下图号对应按角色、场景、道具顺序提交的独立参考图；不要把它们理解为拼贴画。',
+        '以下图号对应独立参考图，锁定身份和外观，不复制拼贴、多视角板、白底或额外人物。状态明确变化优先，未变化部分继承基础资产。',
+        REFERENCE_RULE,
         *constraints,
         '必须保持上述身份、服装、场景结构和道具外观；只改变本镜头明确要求的动作、表情、构图和光线。',
     ]

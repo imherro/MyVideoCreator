@@ -83,7 +83,11 @@ def test_style_contract_expands_presets_is_idempotent_and_preserves_references()
     for kind in ('image','video','storyboard'):
         result=compile_visual_style(doc,kind,original)
         assert '非卡通、非传统 3D 动画' in result['prompt']
-        assert '塑料质感' in result['prompt'] and '保持衣服' in result['prompt']
+        if kind=='storyboard':
+            assert '塑料质感' in result['prompt'] and '保持衣服' in result['prompt']
+        else:
+            assert '保持衣服' not in result['prompt']
+            assert result['visual_style']['continuity']['characterSceneConsistency']=='保持衣服'
         assert result['asset_ids']==['a','b'] and result['seed']==7
         assert compile_visual_style(doc,kind,result)==result
         changed=compile_visual_style({**doc,'style':'自定义黑金剪影'},kind,result)

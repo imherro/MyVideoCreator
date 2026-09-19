@@ -2,7 +2,7 @@ import copy
 from backend.character_sheet import prepare_character_sheet,PROMPT,REFERENCE_RULE
 from backend.image_settings import resolve_image_settings
 from backend.job_contracts import freeze_prompt_contract
-from backend.reference_compiler import _constraint_lines
+from backend.reference_compiler import _constraint_lines, compile_shot_prompt
 import pytest
 
 @pytest.mark.parametrize('kind',['character','character_state'])
@@ -33,4 +33,4 @@ def test_regular_shot_image_and_historical_contract_unchanged():
     old={'prompt':'旧任务','system_prompt':'历史规则','schema_version':'old'}
     assert freeze_prompt_contract('image',old)['system_prompt']=='历史规则'
     lines=_constraint_lines(1,'character',[({'id':'c','name':'人物'},{'id':'v','spec':{},'invariants':[]})])
-    assert REFERENCE_RULE in '\n'.join(lines)
+    assert compile_shot_prompt({}, {}, lines).count(REFERENCE_RULE)==1

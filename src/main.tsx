@@ -4302,7 +4302,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   <label>作品名称<div className="inline-save-field"><input maxLength={100} value={productionNameDraft} onChange={(event)=>setProductionNameDraft(event.target.value)}/><button disabled={!productionNameDraft.trim() || productionNameDraft.trim() === currentProduction?.name} onClick={()=>renameProduction(productionNameDraft).catch(report)}>保存名称</button></div><small>修改作品名称不会改变任何 Episode 标题，也不会触发生成。</small></label>
                   <div className="visual-style-setting">
                     <VisualStylePicker value={visualStyleDraft} onChange={setVisualStyleDraft} label="高层视觉风格" hint="选择预设或直接输入自定义风格。应用后会统一进入资产、分镜图和视频的生成上下文。"/>
-                    <button disabled={!visualStyleDraft.trim() || visualStyleDraft.trim() === doc.style} onClick={()=>{update((document)=>setProjectVisualStyle(document,visualStyleDraft.trim()));setNotice("视觉风格已应用；旧媒体保留，相关生成结果已标记为待更新");}}>应用风格</button>
+                    <button disabled={!visualStyleDraft.trim() || visualStyleDraft.trim() === doc.style} onClick={()=>{update((document)=>setProjectVisualStyle(document,visualStyleDraft.trim()));setNotice("视觉风格已应用；请在剧本室检查创作约束并用 AI 起草更新建议。旧参考图保留，需自行确认是否重做");}}>应用风格</button>
                     <small>修改后会把已生成的分镜图和视频标记为待更新；旧媒体和剪辑内容会保留，不会自动生成。</small>
                   </div>
                   <GenerationPolicyPanel value={doc.generationPolicy} modelPool={doc.modelPool || undefined} providers={config.providers} localModels={system.models} onChange={(generationPolicy)=>update((document)=>({...document,generationPolicy}))} onModelPoolChange={(modelPool)=>update((document)=>({...document,modelPool}))}/>
@@ -4311,7 +4311,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                   <label>世界 / 时代<input value={projectBibleFields.worldEra} onChange={(event)=>update((document)=>mergeBibleFields(document,{...bibleFields(document),worldEra:event.target.value}))}/></label>
                   {projectBibleFields.summary && <label>导入的故事与人物共享设定<textarea rows={8} value={projectBibleFields.summary} onChange={event=>update(document=>mergeBibleFields(document,{...bibleFields(document),summary:event.target.value}))}/></label>}
                   <div className="two-fields">
-                    <label>视觉基调<input value={projectBibleFields.visualTone} onChange={(event)=>update((document)=>mergeBibleFields(document,{...bibleFields(document),visualTone:event.target.value}))}/></label>
+                    <p className="muted">更换风格后，请检查下方旧视觉约束；可在剧本室用 AI 起草更新建议，预览后应用。已锁定参考图保留，不会自动重生成。</p><label>视觉基调<input value={projectBibleFields.visualTone} onChange={(event)=>update((document)=>mergeBibleFields(document,{...bibleFields(document),visualTone:event.target.value}))}/></label>
                     <label>色彩 / 光线<input value={projectBibleFields.colorLighting} onChange={(event)=>update((document)=>mergeBibleFields(document,{...bibleFields(document),colorLighting:event.target.value}))}/></label>
                   </div>
                   <label>镜头语言<input value={projectBibleFields.cameraLanguage} onChange={(event)=>update((document)=>mergeBibleFields(document,{...bibleFields(document),cameraLanguage:event.target.value}))}/></label>
