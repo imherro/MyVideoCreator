@@ -1071,7 +1071,12 @@ def create_job_record(c,pid,body):
     old=c.execute('SELECT * FROM jobs WHERE submission_id=?',(body.submission_id,)).fetchone()
     if old:
         if old['project_id']!=pid: raise HTTPException(409,'提交标识冲突')
-        if old['node_id']!=body.node_id or old['kind']!=body.kind or json.loads(old['input'])!=body.input:
+        original=json.loads(old['input'])
+        matches=original==body.input
+        if original.get('workflow_submission_hash'):
+            import hashlib
+            matches=original['workflow_submission_hash']==hashlib.sha256(json.dumps(body.input,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+        if old['node_id']!=body.node_id or old['kind']!=body.kind or not matches:
             raise HTTPException(409,'同一提交标识不能对应不同输入')
         return s.unpack(old)
     if body.input.get('visual_reference') is not None:
@@ -1154,7 +1159,7 @@ def create_job_record(c,pid,body):
             if 'image_reference_sources' in body.input
             else len(body.input.get('asset_ids',[]))
         )
-        if body.kind=='video' and ark_video_reference_count>1 and not body.input.get('motion_compiler'):
+        if body.kind=='video' and ark_video_reference_count>1 and not body.input.get('motion_compiler') and not body.input.get('deferred_video'):
             raise ValueError('当前火山方舟视频最多接受一张首帧，请移除多余引用')
         if body.kind=='video' and body.input.get('end_asset_id') and ark_video_reference_count!=1:
             raise ValueError('使用火山方舟尾帧时必须同时指定一张首帧')
@@ -2147,12 +2152,25 @@ def generate_episode_scripts(production_id:str,body:ScriptGenerationCreate):
     for item in created:s.event(item['project_id'],{'type':'job','id':item['id']})
     return {'jobs':created,'count':len(created)}
 
+@app.post('/api/projects/{pid}/run-preview')
+async def preview_workflow(pid:str, request:Request):
+    from .workflows import execution_plan
+    body=await request.json();p=project(pid)
+    plan=execution_plan(p['document'],body.get('node_ids'),body.get('include_descendants') is True)
+    return {'tasks':[{'id':n['id'],'label':n.get('data',{}).get('label') or n['id'],
+                     'kind':n['data']['kind'],'provider':n['data'].get('provider','local'),
+                     'parents':parents} for n,parents in plan if n.get('data',{}).get('kind') in ('text','storyboard','image','video')],
+            'revision':p['revision']}
+
+
 @app.post('/api/projects/{pid}/run')
 async def run_workflow(pid:str,request:Request):
     from .workflows import execution_plan
     body=await request.json();p=project(pid)
     with s.db() as c:
         project_state=read_project_state(c,pid)
+    if body.get('expected_revision') is not None and body['expected_revision'] != p['revision']:
+        raise HTTPException(409,'画布已更新，请重新核对执行范围后提交')
     group=body.get('submission_id')
     if not isinstance(group,str) or len(group)<8 or len(group)>80: raise ValueError('批次提交标识无效')
     exact=body.get('exact') is True
@@ -2322,16 +2340,24 @@ async def run_workflow(pid:str,request:Request):
         if kind=='storyboard':
             data['film_bible']=data.get('film_bible') is not False
         from .motion_references import compile_motion_input
-        data=compile_motion_input(project_state['document'],node['id'],kind,data,pid,provider)
-        if data.get('motion_compiler'):
-            if generated_image_parents:
-                raise ValueError('动作参考任务需要已完成的视觉参考；请先生成上游图片，再提交视频')
-            reference_sources=data['image_reference_sources']
+        pending_images=[item['node_id'] for item in reference_sources if item['type']=='upstream_node']
+        shot=next((x for x in project_state['document'].get('shots',[]) if (x.get('videoNode') or (x.get('pipeline') or {}).get('videoNodeId'))==node['id']),{})
+        defer_video=kind=='video' and pending_images and resolve_generation_mode(project_state['document'],shot,data)['actual']=='multimodal'
+        if defer_video:
+            # Validate now using placeholders, but freeze the document and compile
+            # actual media only after the exact upstream jobs have succeeded.
+            check=compile_motion_input(project_state['document'],node['id'],kind,data,pid,provider,pending_image_nodes=pending_images)
+            data['generation_mode']=check['generation_mode']
+            data['deferred_video']={'document':project_state['document'],'sources':[item for item in reference_sources if item['type']=='upstream_node'],'resolved':False}
+        else:
+            data=compile_motion_input(project_state['document'],node['id'],kind,data,pid,provider)
+            if data.get('motion_compiler'):
+                reference_sources=data['image_reference_sources']
         prepared.append((node,parents,data,reference_sources))
     jobs_by_node={};created=[]
     with s.db() as c:
         c.execute('BEGIN IMMEDIATE')
-        if any(data.get('reference_compiler') or data.get('motion_compiler') for _,_,data,_ in prepared):
+        if any(data.get('reference_compiler') or data.get('motion_compiler') or data.get('deferred_video') for _,_,data,_ in prepared):
             current_revision=c.execute('''SELECT e.revision,p.revision production_revision
                 FROM projects e JOIN productions p ON p.id=e.production_id
                 WHERE e.id=?''',(pid,)).fetchone()
@@ -2352,8 +2378,12 @@ async def run_workflow(pid:str,request:Request):
                  if item['type']=='upstream_node' else item)
                 for item in reference_sources
             ]
+            if data.get('deferred_video'):
+                data['deferred_video']['sources']=[{'node_id':item['node_id'],'job_id':jobs_by_node[item['node_id']]} for item in data['deferred_video']['sources']]
             result=create_job_record(c,pid,JobCreate(node_id=node['id'],kind=kind,submission_id=f'{group}:{node["id"]}',input=data))
             jobs_by_node[node['id']]=result['id'];created.append(result['id'])
+            if data.get('deferred_video') and result['status']=='queued':
+                c.execute('UPDATE jobs SET phase=? WHERE id=?',('等待上游图片完成，随后编译视频参考',result['id']))
     for jid in created:s.event(pid,{'type':'job','id':jid})
     return {'job_ids':created,'count':len(created)}
 

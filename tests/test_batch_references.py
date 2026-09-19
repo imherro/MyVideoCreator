@@ -193,3 +193,56 @@ def test_batch_seedance_rejects_end_frame_when_selected_model_lacks_capability(b
     assert '不支持尾帧' in result.text
     assert catalog_calls==['ark']
     assert client.get('/api/projects/'+item['id']+'/jobs').json()==[]
+
+
+@pytest.mark.parametrize('scope,expected', [('all',{'a','b','c','other'}),('branch',{'a','b','c'}),('ancestors',{'a','b'})])
+def test_workflow_preview_matches_submitted_scope(batch_authenticated,scope,expected):
+    client=batch_authenticated;item=project(client);doc=item['document']
+    doc['nodes']=[{'id':nid,'data':{'kind':'text','provider':'local','prompt':'test'}} for nid in ('a','b','c','other')]
+    doc['edges']=[{'id':a+b,'source':a,'target':b} for a,b in [('a','b'),('b','c')]]
+    assert client.put('/api/projects/'+item['id'],json={'name':item['name'],'revision':item['revision'],'document':doc}).status_code==200
+    options={} if scope=='all' else {'node_ids':['b'],'include_descendants':scope=='branch'}
+    preview=client.post('/api/projects/'+item['id']+'/run-preview',json=options)
+    assert preview.status_code==200,preview.text
+    assert {n['id'] for n in preview.json()['tasks']}==expected
+    assert client.get('/api/projects/'+item['id']+'/jobs').json()==[]
+    result=client.post('/api/projects/'+item['id']+'/run',json={**options,'expected_revision':preview.json()['revision'],'submission_id':'scope-'+scope+'-'+item['id']})
+    assert result.status_code==200,result.text
+    assert {j['node_id'] for j in client.get('/api/projects/'+item['id']+'/jobs').json()}==expected
+
+
+def test_workflow_multimodal_waits_for_fresh_image_and_freezes_submission(batch_authenticated,monkeypatch):
+    client=batch_authenticated;item=project(client);_ark_settings(client)
+    old=_image(client,item['id'],'old.png');fresh=_image(client,item['id'],'fresh.png')
+    doc=item['document'];doc['videoReferenceMode']='multimodal'
+    doc['nodes']=[{'id':'image','data':{'kind':'image','provider':'ark','model':'seedream','prompt':'机器人','assetId':old['id']}},
+                  {'id':'video','data':{'kind':'video','provider':'ark','model':'doubao-seedance-2-5-260628','prompt':'机器人转身','videoRatio':'9:16'}}]
+    doc['edges']=[{'id':'iv','source':'image','target':'video'}]
+    assert client.put('/api/projects/'+item['id'],json={'name':item['name'],'revision':item['revision'],'document':doc}).status_code==200
+    result=client.post('/api/projects/'+item['id']+'/run',json={'submission_id':'deferred-'+item['id']})
+    assert result.status_code==200,result.text
+    jobs={j['node_id']:j for j in client.get('/api/projects/'+item['id']+'/jobs').json()}
+    video=jobs['video'];upstream=jobs['image']
+    assert video['input']['deferred_video']['resolved'] is False
+    assert video['input']['upstream_job_ids']==[upstream['id']]
+    w=Worker()
+    with pytest.raises(ValueError,match='尚未完成'):
+        w.execute(video)
+    s.job_update(upstream['id'],status='succeeded',result={'assets':[fresh]})
+    captured=[]
+    monkeypatch.setattr('backend.runtime.unload',lambda:None)
+    monkeypatch.setattr(ark,'execute',lambda worker,job,provider:captured.append(job['input']) or {'assets':[]})
+    from backend.workflow_video import resolve_deferred_video
+    with pytest.raises(ValueError,match='没有返回图片'):
+        resolve_deferred_video(video,{'type':'volcengine_ark'},{upstream['id']:{'assets':[]}})
+    w.execute(video)
+    assert captured[0]['asset_ids']==[fresh['id']]
+    assert captured[0]['ratio']=='9:16'
+    assert captured[0]['reference_manifest'][0]['assetId']==fresh['id']
+    saved=next(j for j in client.get('/api/projects/'+item['id']+'/jobs').json() if j['id']==video['id'])
+    assert saved['input']['deferred_video']['resolved'] is True
+    assert saved['input']['asset_ids']==[fresh['id']]
+    assert resolve_deferred_video(saved,{}, {}) == saved['input']
+    repeated=client.post('/api/projects/'+item['id']+'/run',json={'submission_id':'deferred-'+item['id']})
+    assert repeated.status_code==200,repeated.text
+    assert repeated.json()['job_ids']==result.json()['job_ids']

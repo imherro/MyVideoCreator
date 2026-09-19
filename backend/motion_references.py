@@ -141,9 +141,18 @@ def canvas_reference_shot(document, node_id, input_value):
             'compositionMode': 'direct', 'assetBindings': bindings}
 
 
-def compile_motion_input(document, node_id, kind, input_value, project_id, provider):
+def compile_motion_input(document, node_id, kind, input_value, project_id, provider, pending_image_nodes=()):
     if kind != 'video':
         return dict(input_value)
+    pending_assets = {}
+    if pending_image_nodes:
+        import copy
+        document = copy.deepcopy(document)
+        for n in document.get('nodes', []):
+            if n['id'] in pending_image_nodes:
+                aid = 'pending-workflow-image:' + n['id']
+                pending_assets[aid] = {'id': aid, 'kind': 'image', 'name': n.get('data', {}).get('label') or n['id']}
+                n['data'].update(assetId=aid, stale=False)
     shot = next((x for x in document.get('shots', [])
                  if (x.get('videoNode') or (x.get('pipeline') or {}).get('videoNodeId')) == node_id), None)
     standalone = shot is None
@@ -251,7 +260,7 @@ def compile_motion_input(document, node_id, kind, input_value, project_id, provi
         if not aid:
             return
         if aid not in ids:
-            row = common.assets_by_ids(job, [aid])[0]
+            row = pending_assets.get(aid) or common.assets_by_ids(job, [aid])[0]
             if row['kind'] != 'image':
                 raise ValueError('视觉参考必须是图像素材')
             ids.append(aid)

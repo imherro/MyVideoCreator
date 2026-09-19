@@ -1832,6 +1832,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       setNotice(`${result.count} 个任务已按连线依赖加入队列`);
     } catch (e) {
       report(e);
+      throw e;
     } finally {
       setBusy(false);
     }
@@ -4158,6 +4159,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
                 providers={config.providers}
                 selected={selected}
                 onRun={runGraph}
+                onPreview={async options=>{await save();if(dirty.current)throw new Error('请先保存画布再核对执行范围');return api(`/projects/${project.id}/run-preview`,send('POST',options));}}
               />
             )}
             {panel === "add" && (

@@ -129,6 +129,8 @@ class Worker:
         if self.cancelled(job): raise InterruptedError()
         s.job_update(job['id'],phase=phase,progress=percent)
     def execute(self,job):
+        import hashlib
+        submission_hash=hashlib.sha256(json.dumps(job['input'],sort_keys=True,ensure_ascii=False).encode()).hexdigest()
         inp=dict(job['input']); kind=job['kind']
         if kind=='video' and not inp.get('motion_compiler') and not job.get('provider_job_id'):
             from .state_review import require_video_source_reviews
@@ -138,7 +140,7 @@ class Worker:
                 # A queued batch may have produced its still before the browser
                 # can persist a review acknowledgement. Do not let that race
                 # send an unchecked opening frame to a video model.
-                require_video_source_reviews(json.loads(saved['document']),job['node_id'],include_pending=True)
+                require_video_source_reviews((inp.get('deferred_video') or {}).get('document') or json.loads(saved['document']),job['node_id'],include_pending=True)
         upstream_text=[];asset_ids=list(inp.get('asset_ids',[]));upstream_results={}
         for dependency in inp.get('upstream_job_ids',[]):
             with s.db() as c: previous=c.execute('SELECT * FROM jobs WHERE id=? AND project_id=?',(dependency,job['project_id'])).fetchone()
@@ -185,6 +187,19 @@ class Worker:
             provider=json.loads(snapshot['provider']) if snapshot else None
             if not provider: raise ValueError('模型服务配置不存在')
         provider={**provider,'api_key':clean_api_key(provider.get('api_key'))}
+        if kind=='video' and inp.get('deferred_video') and not inp['deferred_video'].get('resolved') and not job.get('provider_job_id'):
+            self.progress(job,'上游图片已完成，正在编译视频参考清单')
+            from .workflow_video import resolve_deferred_video
+            inp=resolve_deferred_video(job,provider,upstream_results)
+            inp['workflow_submission_hash']=submission_hash
+            with s.db() as c:
+                current=c.execute('SELECT status,provider_job_id FROM jobs WHERE id=?',(job['id'],)).fetchone()
+                if not current or current['status']=='cancelled': raise InterruptedError()
+                if current['provider_job_id']: raise ValueError('任务已提交上游，不可重新编译')
+                c.execute('UPDATE jobs SET input=?,updated=? WHERE id=?',(s.dumps(inp),time.time(),job['id']))
+            job={**job,'input':inp}
+            s.event(job['project_id'],{'type':'job','id':job['id']})
+
         if provider['type']=='replicate':
             from .replicate_api import execute
             return execute(self,job,provider)
